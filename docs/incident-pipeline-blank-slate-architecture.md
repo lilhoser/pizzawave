@@ -2497,6 +2497,38 @@ production cutover remains blocked until that shadow confirms that invalid
 citations stay at zero on new traffic and that verified decisions remain
 semantically sound.
 
+#### First application-owned-evidence shadow attempt
+
+Commit `928c744` was deployed to OT only. Run
+`ot-batch-verifier-evidence-shadow-20260723-l` started at approximately
+2026-07-23 17:01:24 UTC above no-backfill fence `1452198`. OT legacy incident
+execution was paused, canary persistence was off, and RPI remained on the
+legacy pipeline.
+
+The run ended before it exercised verifier v4. Two constructor batches
+processed 23 observations, retained four singleton Review events, produced no
+relationships or verification requests, and recorded one invalid constructor
+proposal with no proposer execution error. Production state remained exactly
+at 5,697 incidents, maximum incident ID 7,111, and 53,546 incident-operation
+audits.
+
+At 17:07:12 UTC, the independent `trunk-recorder` process exited with status 1
+after reporting `Source 3 has stopped receiving samples - Terminating trunk
+recorder`. Systemd restarted it automatically ten seconds later, changing its
+PID from `3068317` to `3411589`. PizzaWave did not request or perform that
+restart. The incident shadow was stopped immediately because the capture
+restart invalidated the controlled input window. OT legacy incident execution
+was restored, all replacement stages and canary persistence were disabled, and
+only `pizzad` was restarted. OT and RPI health were `ok`; RPI
+`trunk-recorder` retained PID `884754`.
+
+This attempt neither supports nor contradicts verifier v4. A fresh no-backfill
+run is required after the restarted recorder demonstrates a stable interval.
+The pre-run and stopped-run configurations are preserved at
+`/etc/pizzawave/pizzad.json.pre-ot-batch-verifier-evidence-shadow-20260723-l-20260723T170054Z.bak`
+and
+`/etc/pizzawave/pizzad.json.stop-ot-batch-verifier-evidence-shadow-20260723-l-20260723T170806Z.bak`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
