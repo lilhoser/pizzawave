@@ -62,6 +62,7 @@ public sealed class EngineConfigAiInsightsTests
         Assert.False(config.AiInsights.IncidentBatchVerificationShadowEnabled);
         Assert.Equal(5, config.AiInsights.IncidentBatchVerificationShadowIntervalSeconds);
         Assert.False(config.AiInsights.IncidentBatchCanaryPersistenceEnabled);
+        Assert.False(config.AiInsights.IncidentBatchProductionOwnershipEnabled);
     }
 
     [Fact]
@@ -132,6 +133,14 @@ public sealed class EngineConfigAiInsightsTests
     }
 
     [Fact]
+    public void BatchIntakeWaitsUntilVerificationHasFinishedWritingItsProjection()
+    {
+        Assert.True(IncidentBatchProjectionWriteGate.CanStartIntake(0));
+        Assert.False(IncidentBatchProjectionWriteGate.CanStartIntake(1));
+        Assert.False(IncidentBatchProjectionWriteGate.CanStartIntake(20));
+    }
+
+    [Fact]
     public void CanaryPersistenceRequiresTheCompleteExclusiveStagedBoundary()
     {
         var config = new AiInsightsConfig
@@ -152,6 +161,30 @@ public sealed class EngineConfigAiInsightsTests
         config.IncidentAnalysisExecutionEnabled = true;
         Assert.False(IncidentBatchCanaryGate.AllowsPersistence(config));
         Assert.Contains("legacy incident execution", IncidentBatchCanaryGate.BlockReason(config), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PermanentReplacementOwnershipRequiresTheVerifiedPersistenceBoundary()
+    {
+        var config = new AiInsightsConfig
+        {
+            IncidentBatchProductionOwnershipEnabled = true,
+            IncidentBatchCanaryPersistenceEnabled = true,
+            IncidentAnalysisExecutionEnabled = false,
+            IncidentBatchConstructorShadowExclusiveInferenceWindow = true,
+            IncidentBatchConstructorShadowEnabled = true,
+            IncidentBatchRelationshipShadowEnabled = true,
+            IncidentBatchVerificationShadowEnabled = true,
+            IncidentBatchConstructorShadowObservationIsolated = true,
+            IncidentBatchConstructorShadowSourceIsolated = true,
+            IncidentBatchConstructorShadowRunId = "production:1"
+        };
+
+        Assert.True(IncidentBatchProductionGate.OwnsProduction(config));
+
+        config.IncidentBatchCanaryPersistenceEnabled = false;
+        Assert.False(IncidentBatchProductionGate.OwnsProduction(config));
+        Assert.Contains("verified replacement persistence", IncidentBatchProductionGate.BlockReason(config), StringComparison.Ordinal);
     }
 
     [Fact]

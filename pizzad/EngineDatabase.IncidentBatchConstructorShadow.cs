@@ -31,6 +31,23 @@ public sealed partial class EngineDatabase : IIncidentBatchStore
 
         await using var connection = OpenConnection();
         await using var transaction = connection.BeginTransaction();
+        if (entry.Execution.BaseProjectionSequence is long expectedBaseProjectionSequence)
+        {
+            await using var baseCommand = connection.CreateCommand();
+            baseCommand.Transaction = transaction;
+            baseCommand.CommandText = """
+                SELECT COALESCE(MAX(sequence), 0)
+                FROM incident_batch_constructor_shadow_projections
+                WHERE run_id=$run_id;
+                """;
+            baseCommand.Parameters.AddWithValue("$run_id", entry.RunId);
+            var actualBaseProjectionSequence = Convert.ToInt64(await baseCommand.ExecuteScalarAsync(ct));
+            if (actualBaseProjectionSequence != expectedBaseProjectionSequence)
+            {
+                throw new InvalidOperationException(
+                    $"incident batch projection advanced while intake was running: expected {expectedBaseProjectionSequence}, actual {actualBaseProjectionSequence}");
+            }
+        }
         var entryPayload = JsonSerializer.Serialize(entry, EngineConfig.JsonOptions());
         var entryHash = ContentHash(entryPayload);
         await using var entryCommand = connection.CreateCommand();

@@ -80,6 +80,8 @@ public sealed class AutomaticInsightsService : BackgroundService
     {
         if (!_config.Setup.Completed || !IsConfigured() || !DownstreamProfilePolicy.Allows(_config, _catalog, call))
             return;
+        if (IncidentBatchProductionGate.OwnsProduction(_config.AiInsights))
+            return;
         await _database.QueueIncidentAnalysisAsync(call.Id, ct);
         _queue.Enqueue(call);
     }

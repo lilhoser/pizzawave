@@ -460,6 +460,7 @@ public sealed class AiInsightsConfig
     public bool IncidentBatchVerificationShadowEnabled { get; set; }
     public int IncidentBatchVerificationShadowIntervalSeconds { get; set; } = 30;
     public bool IncidentBatchCanaryPersistenceEnabled { get; set; }
+    public bool IncidentBatchProductionOwnershipEnabled { get; set; }
     public int IncidentNewVectorQueryLimit { get; set; } = 8;
     public int IncidentActiveVectorQueryLimit { get; set; } = 6;
     public int EvidenceVerifierRagCandidateLimit { get; set; } = 5;

@@ -77,8 +77,7 @@ public sealed class HealthStatusService
             ? aiCompletionHealth.Message
             : null;
         var replacementOwnsProduction =
-            _config.AiInsights.IncidentBatchCanaryPersistenceEnabled &&
-            IncidentBatchCanaryGate.AllowsPersistence(_config.AiInsights);
+            IncidentBatchProductionGate.OwnsProduction(_config.AiInsights);
         var incidentAnalysisQueueHealth = replacementOwnsProduction
             ? await _database.GetIncidentBatchPipelineHealthAsync(
                 _config.AiInsights.IncidentBatchConstructorShadowRunId,

@@ -2967,6 +2967,63 @@ Production health was `ok`, and `trunk-recorder` retained PID `2409838` with
 restart count 2. A fresh non-mutating OT run is still required before
 production persistence can be reconsidered.
 
+#### Unresolved-source run S and projection-writer race
+
+Commit `96fad52` was deployed to OT only for non-mutating run
+`ot-batch-unresolved-reconsideration-20260723-s` above no-backfill fence
+`1456692`. The correct production baseline was 5,715 incidents, maximum
+incident ID 7,129, and 53,691 incident-operation audits. OT legacy execution
+was paused; constructor, relationship, verifier, source and observation
+isolation, continuous intake, and the exclusive inference window were enabled.
+Canary persistence remained off.
+
+Six batches processed 69 observations. The constructor produced 23 grounded
+Review events and left 46 observations unresolved. The relationship proposer
+made six structurally valid proposals. Independent verification retained one
+as Verified and rejected five. One additional relationship response failed
+closed because the model cited an evidence-span index that did not exist.
+
+The Verified case demonstrated the intended unresolved-source path. Call
+`1456824` described an eight-year-old patient at 3189 Highline Drive Southwest
+who was dizzy, vomiting, and not breathing normally. The constructor admitted
+that call. Call `1456828` repeated the unit and location but was left
+unresolved by intake. The relationship stage considered the application-owned
+singleton for `1456828`, proposed the continuation, and the verifier retained
+it with exact evidence in 28.024 seconds. The projection merged the two calls
+and made the event operator-visible. In the same batch, the verifier rejected
+an unrelated pairing between a plate lookup and a chest-pain call. This
+demonstrates that reconsidering an unresolved source improves recall without
+making constructor omission or retrieval similarity proof of membership.
+
+The run also exposed a projection ownership race. A later intake batch could
+read projection sequence N, spend time in model inference, and append its
+result after the verifier had already written sequence N+1. The stale intake
+projection then resurrected a provisional association that the verifier had
+rejected. Persistence was disabled, so the defect did not alter production
+incidents, but the stale association could have reached Review UX.
+
+Run S was stopped immediately. OT legacy execution was restored from the
+timestamped configuration backup. Production counts remained at the baseline,
+health returned `ok`, and `trunk-recorder` remained PID `2409838` with restart
+count 2.
+
+The durable correction serializes projection writers at two boundaries.
+Intake waits while a verification request is pending, and every live intake
+append carries the exact projection sequence on which inference began. The
+database transaction compares that base sequence with the current latest
+sequence before inserting any ledger, projection, or processed-call row. A
+mismatch fails closed, leaving the durable processed-call cursor unchanged for
+safe retry. Verification retains its existing optimistic projection check.
+This is an application-owned concurrency invariant; it is not a semantic
+membership rule.
+
+Permanent replacement ownership is also now an explicit configuration
+boundary distinct from temporary canary persistence. Only the complete
+verified persistence gate plus the permanent-ownership switch can make the
+replacement authoritative for health and stop creation of new legacy incident
+jobs. Temporary shadows and canaries continue to preserve the legacy queue for
+rollback. The permanent switch defaults off.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

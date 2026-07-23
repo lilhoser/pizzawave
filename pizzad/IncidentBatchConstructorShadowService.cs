@@ -14,6 +14,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
     private HashSet<long>? _processedCallIds;
     private long _effectiveStartAfterCallId;
     private DateTimeOffset? _pendingSinceUtc;
+    private DateTimeOffset _nextPendingVerificationLogAt = DateTimeOffset.MinValue;
 
     public IncidentBatchConstructorShadowService(
         EngineConfig config,
@@ -83,6 +84,26 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
                 _processedCallIds.Count,
                 _config.AiInsights.IncidentBatchConstructorShadowContinuous);
             return;
+        }
+
+        if (_config.AiInsights.IncidentBatchVerificationShadowEnabled)
+        {
+            var pendingVerification = (await _database.ListPendingIncidentBatchVerificationRequestsAsync(
+                runId,
+                1,
+                ct)).SingleOrDefault();
+            if (pendingVerification is not null &&
+                !IncidentBatchProjectionWriteGate.CanStartIntake(1))
+            {
+                if (now >= _nextPendingVerificationLogAt)
+                {
+                    _logger.LogInformation(
+                        "Incident batch constructor is waiting for verification request {RequestId} so intake cannot overwrite a newer verified projection",
+                        pendingVerification.Request.RequestId);
+                    _nextPendingVerificationLogAt = now.AddMinutes(1);
+                }
+                return;
+            }
         }
 
         if (!_config.AiInsights.IncidentBatchConstructorShadowExclusiveInferenceWindow)
@@ -171,7 +192,8 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
                 singletons,
                 Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown",
                 ConfigurationIdentity(),
-                retrievalTimer.ElapsedMilliseconds),
+                retrievalTimer.ElapsedMilliseconds,
+                priorStored?.Sequence ?? 0),
             selection.Bundle,
             prior,
             selection.NewObservationIds,
@@ -214,7 +236,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
                 _config.AiInsights.IncidentAnalysisExecutionEnabled));
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.Identity(true, _config.AiInsights.IncidentBatchConstructorShadowObservationIsolated)};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};cursor=durable-processed-observations-v2;{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};{(_config.AiInsights.IncidentBatchRelationshipShadowEnabled ? IncidentBatchExecutionArchitecture.StagedRelationshipAsynchronousConfirmationToken : IncidentBatchExecutionArchitecture.AsynchronousProvisionalToken)};{IncidentBatchAdmissionPolicy.ConfigurationToken};{(_config.AiInsights.IncidentBatchConstructorShadowObservationIsolated ? IncidentBatchContract.ObservationIsolatedOwnershipConfigurationToken : "source-ownership=grouped-v1")};{(_config.AiInsights.IncidentBatchRelationshipShadowEnabled ? IncidentBatchRelationshipContract.ConfigurationToken : "relationship-stage=disabled")};{(_config.AiInsights.IncidentBatchConstructorShadowExclusiveInferenceWindow ? IncidentBatchExperimentWindow.ConfigurationToken : "inference-window=shared-production-v1")};{(_config.AiInsights.IncidentBatchCanaryPersistenceEnabled ? IncidentBatchCanaryGate.ConfigurationToken : "persistence=shadow-only-v1")};sourceContext={(_config.AiInsights.IncidentBatchConstructorShadowSourceIsolated ? "isolated-v1" : "candidate-aware-v1")};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};minimumBatch={_config.AiInsights.IncidentBatchConstructorShadowMinimumBatchSize};maximumWait={_config.AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
+        $"{IncidentBatchPrompt.Identity(true, _config.AiInsights.IncidentBatchConstructorShadowObservationIsolated)};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};cursor=durable-processed-observations-v2;{IncidentBatchProjectionWriteGate.ConfigurationToken};{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};{(_config.AiInsights.IncidentBatchRelationshipShadowEnabled ? IncidentBatchExecutionArchitecture.StagedRelationshipAsynchronousConfirmationToken : IncidentBatchExecutionArchitecture.AsynchronousProvisionalToken)};{IncidentBatchAdmissionPolicy.ConfigurationToken};{(_config.AiInsights.IncidentBatchConstructorShadowObservationIsolated ? IncidentBatchContract.ObservationIsolatedOwnershipConfigurationToken : "source-ownership=grouped-v1")};{(_config.AiInsights.IncidentBatchRelationshipShadowEnabled ? IncidentBatchRelationshipContract.ConfigurationToken : "relationship-stage=disabled")};{(_config.AiInsights.IncidentBatchConstructorShadowExclusiveInferenceWindow ? IncidentBatchExperimentWindow.ConfigurationToken : "inference-window=shared-production-v1")};{(_config.AiInsights.IncidentBatchCanaryPersistenceEnabled ? IncidentBatchCanaryGate.ConfigurationToken : "persistence=shadow-only-v1")};{(_config.AiInsights.IncidentBatchProductionOwnershipEnabled ? IncidentBatchProductionGate.ConfigurationToken : "ownership=temporary-shadow-v1")};sourceContext={(_config.AiInsights.IncidentBatchConstructorShadowSourceIsolated ? "isolated-v1" : "candidate-aware-v1")};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};minimumBatch={_config.AiInsights.IncidentBatchConstructorShadowMinimumBatchSize};maximumWait={_config.AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
 
     private bool RelationshipEnabled() =>
         _config.AiInsights.IncidentBatchRelationshipShadowEnabled;
@@ -234,6 +256,14 @@ public static class IncidentBatchExperimentWindow
         bool exclusiveInferenceWindow,
         bool productionIncidentExecutionEnabled) =>
         exclusiveInferenceWindow && !productionIncidentExecutionEnabled;
+}
+
+public static class IncidentBatchProjectionWriteGate
+{
+    public const string ConfigurationToken = "projection-writer=verification-serialized-optimistic-v1";
+
+    public static bool CanStartIntake(int pendingVerificationCount) =>
+        pendingVerificationCount <= 0;
 }
 
 public static class IncidentBatchAdmissionPolicy

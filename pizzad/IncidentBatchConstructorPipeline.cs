@@ -73,7 +73,8 @@ public sealed record IncidentBatchExecutionContext(
     string ConfigurationIdentity,
     long ProposerDurationMilliseconds,
     string ProposerError,
-    long RetrievalDurationMilliseconds = 0);
+    long RetrievalDurationMilliseconds = 0,
+    long? BaseProjectionSequence = null);
 
 public sealed record IncidentBatchLedgerEntry(
     string RunId,
@@ -104,7 +105,8 @@ public sealed record IncidentBatchRunRequest(
     IReadOnlyList<IncidentBatchSingletonIdentity> SingletonEvents,
     string SoftwareVersion,
     string ConfigurationIdentity,
-    long RetrievalDurationMilliseconds = 0);
+    long RetrievalDurationMilliseconds = 0,
+    long? BaseProjectionSequence = null);
 
 public interface IIncidentBatchProposer
 {
@@ -307,6 +309,8 @@ public static class IncidentBatchContract
         RequireValue(entry.Execution.ConfigurationIdentity, "batch execution configuration identity", errors);
         if (entry.Execution.ProposerDurationMilliseconds < 0)
             errors.Add("batch proposer duration cannot be negative");
+        if (entry.Execution.BaseProjectionSequence is < 0)
+            errors.Add("batch base projection sequence cannot be negative");
         if (IncidentBatchExecutionArchitecture.UsesSourceOnlyAsynchronousIntake(entry.Execution.ConfigurationIdentity) &&
             (entry.RelationshipProposal is not null || entry.ConfirmationProposal is not null))
         {
@@ -1018,7 +1022,8 @@ public sealed class IncidentBatchCoordinator
                 request.ConfigurationIdentity,
                 timer.ElapsedMilliseconds,
                 proposerError,
-                request.RetrievalDurationMilliseconds),
+                request.RetrievalDurationMilliseconds,
+                request.BaseProjectionSequence),
             relationshipProposal,
             relationshipValidationErrors,
             relationshipExecution,

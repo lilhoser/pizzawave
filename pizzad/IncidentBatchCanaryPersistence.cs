@@ -72,6 +72,24 @@ public static class IncidentBatchCanaryGate
     }
 }
 
+public static class IncidentBatchProductionGate
+{
+    public const string ConfigurationToken = "ownership=permanent-replacement-v1";
+
+    public static bool OwnsProduction(AiInsightsConfig config) =>
+        string.IsNullOrEmpty(BlockReason(config));
+
+    public static string BlockReason(AiInsightsConfig config)
+    {
+        if (!config.IncidentBatchProductionOwnershipEnabled)
+            return "permanent replacement ownership is disabled";
+        var canaryBlock = IncidentBatchCanaryGate.BlockReason(config);
+        return string.IsNullOrEmpty(canaryBlock)
+            ? string.Empty
+            : $"verified replacement persistence is blocked: {canaryBlock}";
+    }
+}
+
 public static class IncidentBatchCanaryContract
 {
     public static IncidentBatchCanaryPersistenceIntent? BuildIntent(

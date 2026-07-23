@@ -233,7 +233,8 @@ public sealed class IncidentBatchConstructorPersistenceTests
                 "health:projection:1",
                 firstCallId,
                 now.AddMinutes(-1),
-                null);
+                null,
+                0);
 
             var stale = await database.GetIncidentBatchPipelineHealthAsync(
                 "run:health",
@@ -245,6 +246,21 @@ public sealed class IncidentBatchConstructorPersistenceTests
             Assert.Equal(1, stale.StalePendingCalls);
             Assert.Contains("Replacement incident intake is stale", stale.Message, StringComparison.Ordinal);
 
+            var staleWrite = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                AppendSingletonAsync(
+                    database,
+                    "run:health",
+                    "health:ledger:stale",
+                    "health:projection:stale",
+                    secondCallId,
+                    now.AddMinutes(-120),
+                    first.Projection.Projection,
+                    0));
+            Assert.Contains("projection advanced", staleWrite.Message, StringComparison.Ordinal);
+            Assert.Equal([firstCallId], await database.ListIncidentBatchProcessedCallIdsAsync(
+                "run:health",
+                CancellationToken.None));
+
             await AppendSingletonAsync(
                 database,
                 "run:health",
@@ -252,7 +268,8 @@ public sealed class IncidentBatchConstructorPersistenceTests
                 "health:projection:2",
                 secondCallId,
                 now.AddMinutes(-120),
-                first.Projection.Projection);
+                first.Projection.Projection,
+                first.Projection.Sequence);
             var current = await database.GetIncidentBatchPipelineHealthAsync(
                 "run:health",
                 0,
@@ -293,7 +310,8 @@ public sealed class IncidentBatchConstructorPersistenceTests
         string projectionId,
         long callId,
         DateTimeOffset observedAt,
-        IncidentBatchProjection? prior)
+        IncidentBatchProjection? prior,
+        long? baseProjectionSequence = null)
     {
         var observationId = $"call:{callId}";
         var transcriptId = $"transcript:{callId}";
@@ -338,7 +356,8 @@ public sealed class IncidentBatchConstructorPersistenceTests
                 projectionId,
                 [new IncidentBatchSingletonIdentity(observationId, $"singleton:{callId}")],
                 "test",
-                "test-config"),
+                "test-config",
+                BaseProjectionSequence: baseProjectionSequence),
             new IncidentEventStateObservationBundle($"bundle:{callId}", observedAt, [observation], []),
             prior,
             [observationId],
