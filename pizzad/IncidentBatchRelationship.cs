@@ -94,35 +94,63 @@ public interface IIncidentBatchRelationshipProposer
 
 public static class IncidentBatchRelationshipContract
 {
-    public const int MaximumSourceCount = IncidentBatchPrompt.MaximumReturnedEvents;
+    public const int MaximumSourceCount = IncidentBatchContract.MaximumNewObservationCount;
     public const int MaximumCandidateCount =
-        IncidentBatchContract.MaximumCandidateCount + IncidentBatchPrompt.MaximumReturnedEvents - 1;
+        IncidentBatchContract.MaximumCandidateCount + IncidentBatchPrompt.MaximumReturnedEvents;
     public const int MaximumReturnedRelationships = 6;
     public const int MaximumRelationshipsPerSource = 3;
     public const int MaximumEvidenceSpansPerSide = 4;
     public const int MaximumAlternatives = 2;
     public const int MaximumUnresolvedQuestions = 2;
     public const int MaximumTextLength = 320;
-    public const string ConfigurationToken = "relationship-stage=source-isolated-v7;same-batch-peers=ordered-v1;pair-identity=opaque-eligible-v1;evidence-identity=pair-relative-application-spans-v1;admission=concrete-cross-reference-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1;output=bounded-selective-v2";
+    public const string AllObservationSourcesConfigurationToken = "source-admission=all-observations-v1";
+    public const string ConfigurationToken = $"relationship-stage=source-isolated-v8;{AllObservationSourcesConfigurationToken};same-batch-peers=accepted-ordered-v2;pair-identity=opaque-eligible-v1;evidence-identity=pair-relative-application-spans-v1;admission=concrete-cross-reference-v2;confirmation=conflict-free-v1;acceptance=per-relationship-v1;output=bounded-selective-v2";
 
     public static IReadOnlyList<IncidentBatchRelationshipSource> BuildSources(
         IReadOnlyList<string> newObservationIds,
-        IReadOnlyList<IncidentBatchEventProposal> acceptedEvents)
+        IReadOnlyList<IncidentBatchEventProposal> acceptedEvents,
+        bool includeUnresolvedObservations = false)
     {
         var order = newObservationIds
             .Select((observationId, index) => new { observationId, index })
             .ToDictionary(item => item.observationId, item => item.index, StringComparer.Ordinal);
-        return acceptedEvents
+        var sources = acceptedEvents
             .OrderBy(item => item.NewObservationIds.Min(observationId => order[observationId]))
             .ThenBy(item => item.ProposalToken, StringComparer.Ordinal)
             .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
             .ToList();
+        if (includeUnresolvedObservations)
+        {
+            var owned = sources
+                .SelectMany(item => item.NewObservationIds)
+                .ToHashSet(StringComparer.Ordinal);
+            sources.AddRange(newObservationIds
+                .Where(observationId => !owned.Contains(observationId))
+                .Select(observationId => new IncidentBatchRelationshipSource(
+                    SingletonSourceToken(observationId),
+                    [observationId])));
+        }
+        return sources
+            .OrderBy(item => item.NewObservationIds.Min(observationId => order[observationId]))
+            .ThenBy(item => item.SourceProposalToken, StringComparer.Ordinal)
+            .ToList();
     }
+
+    public static IReadOnlyList<IncidentBatchRelationshipSource> BuildSources(IncidentBatchLedgerEntry entry) =>
+        BuildSources(
+            entry.NewObservationIds,
+            IncidentBatchContract.AcceptedEvents(entry),
+            UsesAllObservationSources(entry.Execution.ConfigurationIdentity));
+
+    public static bool UsesAllObservationSources(string configurationIdentity) =>
+        configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Contains(AllObservationSourcesConfigurationToken, StringComparer.Ordinal);
 
     public static IReadOnlyList<IncidentBatchCandidate> AddOrderedSameBatchCandidates(
         IReadOnlyList<IncidentBatchRelationshipSource> sources,
         IReadOnlyList<IncidentBatchSingletonIdentity> singletons,
-        IReadOnlyList<IncidentBatchCandidate> priorCandidates)
+        IReadOnlyList<IncidentBatchCandidate> priorCandidates,
+        IReadOnlySet<string>? eligiblePeerSourceTokens = null)
     {
         if (sources.Count < 2)
             return priorCandidates.ToList();
@@ -133,7 +161,10 @@ public static class IncidentBatchRelationshipContract
         var candidates = priorCandidates.ToList();
         var tokens = candidates.Select(item => item.CandidateToken).ToHashSet(StringComparer.Ordinal);
         var projectionIds = candidates.Select(item => item.ProjectionEventId).ToHashSet(StringComparer.Ordinal);
-        foreach (var source in sources.Take(sources.Count - 1))
+        foreach (var source in sources.Where((item, index) =>
+                     index < sources.Count - 1 &&
+                     (eligiblePeerSourceTokens is null ||
+                      eligiblePeerSourceTokens.Contains(item.SourceProposalToken))))
         {
             var projectionEventId = singletonByObservation[source.NewObservationIds[0]].ProjectionEventId;
             var candidateToken = SameBatchCandidateToken(source.SourceProposalToken);
@@ -209,6 +240,13 @@ public static class IncidentBatchRelationshipContract
         var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceProposalToken)))
             .ToLowerInvariant();
         return $"candidate-peer-{digest[..16]}";
+    }
+
+    public static string SingletonSourceToken(string observationId)
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(observationId)))
+            .ToLowerInvariant();
+        return $"source-singleton-{digest[..16]}";
     }
 
     private static string RelationshipPairToken(string sourceProposalToken, string candidateToken)
@@ -407,9 +445,7 @@ public static class IncidentBatchRelationshipContract
     {
         if (entry.RelationshipProposal is null)
             return [];
-        var sources = BuildSources(
-            entry.NewObservationIds,
-            IncidentBatchContract.AcceptedEvents(entry));
+        var sources = BuildSources(entry);
         var accepted = AcceptedRelationships(entry.Bundle, sources, entry.Candidates, entry.RelationshipProposal);
         if (!IncidentBatchConfirmationContract.UsesIndependentVerifier(entry.Execution.ConfigurationIdentity))
             return accepted;
@@ -500,7 +536,7 @@ public sealed record IncidentBatchRelationshipPromptPayload(string SystemPrompt,
 
 public static class IncidentBatchRelationshipPrompt
 {
-    public const string PromptIdentity = "incident-batch-relationship-v8-pair-relative-application-evidence";
+    public const string PromptIdentity = "incident-batch-relationship-v9-all-observation-pair-relative-evidence";
 
     public static IncidentBatchRelationshipPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -515,8 +551,6 @@ public static class IncidentBatchRelationshipPrompt
 
         var eligiblePairs = IncidentBatchRelationshipContract.EligiblePairs(sources, candidates);
         var evidenceCatalog = IncidentBatchConfirmationEvidenceCatalog.Build(bundle);
-        var sourceMap = sources.ToDictionary(item => item.SourceProposalToken, StringComparer.Ordinal);
-        var candidateMap = candidates.ToDictionary(item => item.CandidateToken, StringComparer.Ordinal);
         object PairSide(
             IEnumerable<string> observationIds,
             IReadOnlyList<IncidentBatchConfirmationEvidenceSpan> spans) => new
@@ -532,42 +566,39 @@ public static class IncidentBatchRelationshipPrompt
         };
         var source = new
         {
-            eligible_relationship_pairs = eligiblePairs.Select(pair =>
+            relationship_sources = sources.Select(item => new
             {
-                var relationshipSource = sourceMap[pair.SourceProposalToken];
-                var candidate = candidateMap[pair.CandidateToken];
-                return new
-                {
-                    relationship_pair_token = pair.PairToken,
-                    source = new
-                    {
-                        source_proposal_token = pair.SourceProposalToken,
-                        evidence = PairSide(
-                            relationshipSource.NewObservationIds,
-                            IncidentBatchRelationshipEvidenceCatalog.ForObservationIds(
-                                bundle,
-                                evidenceCatalog,
-                                relationshipSource.NewObservationIds))
-                    },
-                    candidate = new
-                    {
-                        candidate_token = pair.CandidateToken,
-                        evidence = PairSide(
-                            candidate.ObservationIds,
-                            IncidentBatchRelationshipEvidenceCatalog.ForObservationIds(
-                                bundle,
-                                evidenceCatalog,
-                                candidate.ObservationIds))
-                    }
-                };
+                source_proposal_token = item.SourceProposalToken,
+                evidence = PairSide(
+                    item.NewObservationIds,
+                    IncidentBatchRelationshipEvidenceCatalog.ForObservationIds(
+                        bundle,
+                        evidenceCatalog,
+                        item.NewObservationIds))
+            }).ToList(),
+            candidate_events = candidates.Select(item => new
+            {
+                candidate_token = item.CandidateToken,
+                evidence = PairSide(
+                    item.ObservationIds,
+                    IncidentBatchRelationshipEvidenceCatalog.ForObservationIds(
+                        bundle,
+                        evidenceCatalog,
+                        item.ObservationIds))
+            }).ToList(),
+            eligible_relationship_pairs = eligiblePairs.Select(pair => new
+            {
+                relationship_pair_token = pair.PairToken,
+                source_proposal_token = pair.SourceProposalToken,
+                candidate_token = pair.CandidateToken
             }).ToList()
         };
         var user = new StringBuilder();
         user.AppendLine("/no_think");
         user.AppendLine("Return only JSON matching the supplied schema.");
-        user.AppendLine("Search for a small number of evidence-established relationships between constructed groups and supplied candidates using only their transcripts. Most pairs are unrelated; returning an empty relationships array is a correct and expected result.");
-        user.AppendLine("The constructed groups are immutable. Do not rewrite, split, combine, discard, or add facts to them.");
-        user.AppendLine("Some candidates are earlier constructed groups from this same batch. Evaluate only the application-issued eligible_relationship_pairs. Return only the opaque relationship_pair_token for an eligible pair and return each pair at most once. The application resolves that token back to its source and candidate. This ordered boundary permits later observations to connect to earlier observations without cycles; self, reverse, and other unlisted pairings cannot be expressed.");
+        user.AppendLine("Search for a small number of evidence-established relationships between application-owned relationship sources and supplied candidates using only their transcripts. Most pairs are unrelated; returning an empty relationships array is a correct and expected result.");
+        user.AppendLine("Relationship sources include both accepted constructed groups and unresolved singleton observations that the constructor did not promote. They are immutable evidence boundaries. Do not rewrite, split, combine, discard, or add facts to them. A relationship may attach an unresolved singleton without asserting that it was independently a complete event.");
+        user.AppendLine("Some candidates are earlier accepted groups from this same batch. Evaluate only the application-issued eligible_relationship_pairs. Return only the opaque relationship_pair_token for an eligible pair and return each pair at most once. The application resolves that token back to its source and candidate. This ordered boundary permits later observations to connect to earlier accepted groups without cycles; self, reverse, and other unlisted pairings cannot be expressed.");
         user.AppendLine("Return confirmed_membership only when exact evidence from both sides directly establishes one unfolding real-world event. Return at most one confirmed membership for each constructed group.");
         user.AppendLine("A confirmed_membership must use uncertainty 0 and empty alternative_interpretations and unresolved_questions. If either side contains a material discrepancy, counterinterpretation, or unresolved question, return provisional_association or omit the pair; never confirm it.");
         user.AppendLine("Return provisional_association only when exact evidence from both sides already establishes a specific operational connection: one side continues, answers, updates, acts on, or explicitly refers to a concrete subject, location, vehicle, identifier, circumstance, or request from the other side, but meaningful uncertainty remains about the nature or extent of that connection. Several provisional associations may connect one group to several candidates. A provisional association never merges membership.");
@@ -583,7 +614,7 @@ public static class IncidentBatchRelationshipPrompt
         user.AppendLine("Source bundle:");
         user.AppendLine(JsonSerializer.Serialize(source, EngineConfig.JsonOptions()));
         return new IncidentBatchRelationshipPromptPayload(
-            "You evaluate typed relationships between immutable source-grounded event groups. You may attach evidence-cited relationships but cannot construct or rewrite events. Application code resolves pair-relative evidence, validates citation boundaries, and owns all state transitions.",
+            "You evaluate typed relationships between immutable source-grounded groups and unresolved singleton observations. You may attach evidence-cited relationships but cannot construct or rewrite events. Application code resolves pair-relative evidence, validates citation boundaries, and owns all state transitions.",
             user.ToString(),
             ResponseFormat(bundle, sources, candidates, eligiblePairs, evidenceCatalog));
     }
@@ -625,7 +656,7 @@ public static class IncidentBatchRelationshipPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_relationship_v8_pair_relative_evidence",
+                name = "pizzawave_incident_batch_relationship_v9_all_observation_pair_relative_evidence",
                 strict = true,
                 schema = new
                 {

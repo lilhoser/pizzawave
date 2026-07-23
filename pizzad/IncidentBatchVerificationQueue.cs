@@ -67,9 +67,7 @@ public static class IncidentBatchVerificationQueueContract
 
         if (entry.RelationshipProposal is not null)
         {
-            var sources = IncidentBatchRelationshipContract.BuildSources(
-                entry.NewObservationIds,
-                IncidentBatchContract.AcceptedEvents(entry));
+            var sources = IncidentBatchRelationshipContract.BuildSources(entry);
             return IncidentBatchRelationshipContract.AcceptedRelationships(
                     entry.Bundle,
                     sources,
@@ -133,24 +131,24 @@ public static class IncidentBatchVerificationQueueContract
                        ?? throw new ArgumentException("verification request does not belong to its source ledger entry", nameof(request));
         if (expected != request)
             throw new ArgumentException("verification request does not match its source proposal", nameof(request));
-        var proposal = IncidentBatchContract.AcceptedEvents(entry)
-            .Single(item => item.ProposalToken == request.SourceProposalToken);
         var candidate = entry.Candidates.Single(item => item.CandidateToken == request.CandidateToken);
-        var source = new IncidentBatchRelationshipSource(proposal.ProposalToken, proposal.NewObservationIds);
         if (entry.RelationshipProposal is not null)
         {
+            var sources = IncidentBatchRelationshipContract.BuildSources(entry);
+            var stagedSource = sources.Single(item => item.SourceProposalToken == request.SourceProposalToken);
             var stagedRelationship = IncidentBatchRelationshipContract.AcceptedRelationships(
                     entry.Bundle,
-                    IncidentBatchRelationshipContract.BuildSources(
-                        entry.NewObservationIds,
-                        IncidentBatchContract.AcceptedEvents(entry)),
+                    sources,
                     entry.Candidates,
                     entry.RelationshipProposal)
                 .Single(item =>
                     item.SourceProposalToken == request.SourceProposalToken &&
                     item.CandidateToken == request.CandidateToken);
-            return new IncidentBatchVerificationContext(source, candidate, stagedRelationship);
+            return new IncidentBatchVerificationContext(stagedSource, candidate, stagedRelationship);
         }
+        var proposal = IncidentBatchContract.AcceptedEvents(entry)
+            .Single(item => item.ProposalToken == request.SourceProposalToken);
+        var legacySource = new IncidentBatchRelationshipSource(proposal.ProposalToken, proposal.NewObservationIds);
         var disposition = request.ProposedDisposition == IncidentBatchEventDisposition.ConfirmedMembership
             ? IncidentBatchRelationshipDisposition.ConfirmedMembership
             : IncidentBatchRelationshipDisposition.ProvisionalAssociation;
@@ -164,7 +162,7 @@ public static class IncidentBatchVerificationQueueContract
             proposal.CandidateEvidence,
             proposal.AlternativeInterpretations,
             proposal.UnresolvedQuestions);
-        return new IncidentBatchVerificationContext(source, candidate, relationship);
+        return new IncidentBatchVerificationContext(legacySource, candidate, relationship);
     }
 
     public static IncidentBatchVerificationResult BuildResult(
@@ -281,6 +279,29 @@ public static class IncidentBatchVerificationProjector
             (result.Outcome == IncidentBatchVerificationOutcome.Verified &&
              request.ProposedDisposition == IncidentBatchEventDisposition.ConfirmedMembership))
             links.RemoveAll(item => item.AssociationId == associationId);
+
+        var constructorAcceptedSource = IncidentBatchContract.AcceptedEvents(sourceEntry)
+            .Any(item => item.ProposalToken == request.SourceProposalToken);
+        if (result.Outcome == IncidentBatchVerificationOutcome.Rejected &&
+            !constructorAcceptedSource &&
+            sourceIndex >= 0)
+        {
+            var sourceEventId = events[sourceIndex].ProjectionEventId;
+            var sourceRetainsAnotherRelationship = links.Any(item =>
+                item.SourceProjectionEventId == sourceEventId ||
+                item.CandidateProjectionEventId == sourceEventId);
+            if (!sourceRetainsAnotherRelationship)
+            {
+                var source = events[sourceIndex];
+                events[sourceIndex] = source with
+                {
+                    Title = string.Empty,
+                    Summary = string.Empty,
+                    OperatorVisible = false,
+                    OperatorReview = false
+                };
+            }
+        }
 
         if (result.Outcome == IncidentBatchVerificationOutcome.Review && pendingLink is not null)
         {

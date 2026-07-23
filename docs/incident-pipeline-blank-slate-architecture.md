@@ -2888,6 +2888,85 @@ production state. OT legacy execution was restored immediately; health was
 non-mutating OT shadow run remains required before permanent persistence can
 be reconsidered.
 
+#### Pair-relative run R and unresolved-source reconsideration
+
+Commit `1061d09` was deployed to OT only. The first attempt to install run R's
+configuration stripped the quoted run ID from the `jq` expression. The invalid
+temporary output was installed before validation and briefly prevented
+`pizzad` from starting. The timestamped pre-run configuration at
+`/etc/pizzawave/pizzad.json.pre-ot-batch-pair-relative-shadow-20260723-r-20260723T221414Z.bak`
+was restored. `pizzad` returned healthy, OT legacy execution resumed, and
+`trunk-recorder` remained PID `2409838` with restart count 2. The retry added
+explicit JSON validation before installation.
+
+Run `ot-batch-pair-relative-shadow-20260723-r` then began successfully at
+approximately 2026-07-23 22:17:38 UTC above no-backfill fence `1456514`.
+The production baseline was 5,714 incidents, maximum incident ID 7,128, and
+53,685 incident-operation audits. OT legacy execution was paused; constructor,
+relationship, verifier, source and observation isolation, continuous intake,
+and the exclusive inference window were enabled; canary persistence remained
+off.
+
+Two batches processed 26 observations. The constructor accepted seven
+grounded Review events, left 19 observations unresolved, and produced no
+invalid proposal or model error. The pair-relative relationship contract
+remained structurally valid, but the exact source evidence exposed a more
+fundamental recall omission. Call `1456532` said `This patient could be alert
+in the store.` The constructor accepted it as a source event. Call `1456536`
+then clarified `this patient is going to be alert and shopping in the store`
+and repeated `alert and shopping inside the store.` The constructor left the
+second call unresolved. Because the relationship stage received only accepted
+constructor events as sources, it never evaluated call `1456536` against the
+accepted call `1456532` group. No prompt or verifier could recover a
+relationship that the application did not express.
+
+This is the same class of bounded reconsideration gap first identified in run
+E, now isolated from the retired one-pass constructor. It is not evidence for
+lowering constructor admission or adding a phrase matcher. An unresolved
+observation may be an incomplete continuation that is meaningful only in
+relation to an accepted event. Treating constructor omission as permanent
+relationship exclusion incorrectly turns abstention into a semantic
+not-related decision.
+
+Run R was stopped after the second batch. It produced no relationship or
+verification decision, canary write, production incident change, or audit
+change. OT legacy execution was restored from
+`/etc/pizzawave/pizzad.json.pre-ot-batch-pair-relative-shadow-20260723-r-retry-20260723T221707Z.bak`;
+the stopped configuration is preserved at
+`/etc/pizzawave/pizzad.json.post-ot-batch-pair-relative-shadow-20260723-r-20260723T222631Z.bak`.
+
+The correction gives every new observation exactly one immutable relationship
+source boundary. Accepted constructor groups keep their model-issued proposal
+tokens. Observations omitted by the constructor receive deterministic opaque
+application-owned singleton source tokens. Only accepted earlier groups become
+same-batch candidates; unresolved observations do not become candidate events
+merely because they are reconsidered. Retrieval still bounds prior candidates
+without proving membership. The relationship model can attach an unresolved
+source only through an application-issued eligible pair with pair-relative
+exact evidence. Independent verification still decides Verify, Review, or
+Reject. Verify may merge a confirmed continuation; Review retains a
+non-merging association; Reject removes the pending association and returns an
+otherwise unaccepted source to an empty unresolved singleton.
+
+The relationship prompt now lists source evidence and candidate evidence once,
+then lists opaque eligible-pair mappings separately. This prevents the
+all-observation source set from duplicating transcript evidence for every
+pair. Response size remains capped at six strongest relationships and three
+per source. These are bounded identity and resource constraints, not address,
+phrase, event-type, category, talkgroup, system, label, regex, or confidence
+rules.
+
+The exact `1456532`/`1456536` evidence plus unrelated injury and alarm
+distractors was replayed once against the live Paxan endpoint while only OT
+legacy incident analysis was briefly paused. The model returned the omitted
+continuation in 12 seconds, the pair-relative response validated, and all
+citations remained inside the selected source and candidate. OT legacy
+execution was restored immediately from
+`/etc/pizzawave/pizzad.json.pre-unresolved-continuation-live-20260723T223415Z.bak`.
+Production health was `ok`, and `trunk-recorder` retained PID `2409838` with
+restart count 2. A fresh non-mutating OT run is still required before
+production persistence can be reconsidered.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

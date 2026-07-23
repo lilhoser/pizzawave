@@ -65,7 +65,7 @@ public sealed class IncidentBatchRelationshipTests
 
         var prompt = IncidentBatchRelationshipPrompt.Build(bundle, sources, candidates);
 
-        Assert.Contains("constructed groups are immutable", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("immutable evidence boundaries", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("an index cannot cite another pair", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("event:new-fall", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("candidate:prior-fall", prompt.UserPrompt, StringComparison.Ordinal);
@@ -664,6 +664,137 @@ public sealed class IncidentBatchRelationshipTests
     }
 
     [Fact]
+    public async Task UnresolvedObservationIsReconsideredAgainstEarlierAcceptedGroup()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "This patient could be alert in the store."),
+            Observation("call:2", "transcript:2", "The patient is alert and shopping inside the store."));
+        var constructor = new CapturingConstructorProposer(new IncidentBatchProposal(
+            "proposal:construction",
+            Now,
+            "test-model",
+            IncidentBatchPrompt.ObservationIsolatedProvisionalPromptIdentity,
+            [new IncidentBatchEventProposal(
+                "event:patient",
+                IncidentBatchEventDisposition.ProvisionalEvent,
+                string.Empty,
+                ["call:1"],
+                string.Empty,
+                string.Empty,
+                "A patient is reported in the store.",
+                0.2,
+                [new IncidentEventStateTranscriptCitation("transcript:1", "patient could be alert in the store")],
+                [],
+                [],
+                [])]));
+        var relationships = new UnresolvedContinuationRelationshipProposer();
+        var coordinator = new IncidentBatchCoordinator(
+            constructor,
+            relationships,
+            new MemoryStore(),
+            new FixedTimeProvider(Now));
+
+        var result = await coordinator.RunAsync(
+            new IncidentBatchRunRequest(
+                "run:unresolved-continuation",
+                "ledger:unresolved-continuation",
+                "projection:unresolved-continuation",
+                [
+                    new IncidentBatchSingletonIdentity("call:1", "projection:patient"),
+                    new IncidentBatchSingletonIdentity("call:2", "projection:follow-up")
+                ],
+                "test",
+                $"test;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.ObservationIsolatedOwnershipConfigurationToken};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchExecutionArchitecture.StagedRelationshipAsynchronousConfirmationToken}"),
+            bundle,
+            null,
+            ["call:1", "call:2"],
+            [],
+            CancellationToken.None);
+
+        Assert.Equal(
+            ["event:patient", IncidentBatchRelationshipContract.SingletonSourceToken("call:2")],
+            relationships.ReceivedSources.Select(item => item.SourceProposalToken));
+        var peer = Assert.Single(relationships.ReceivedCandidates);
+        Assert.Equal("projection:patient", peer.ProjectionEventId);
+        Assert.Equal(["call:1"], peer.ObservationIds);
+        Assert.True(IncidentBatchContract.ValidateLedgerEntry(result.LedgerEntry.Entry).IsValid);
+        Assert.Equal(2, result.Projection.Projection.Events.Count);
+        Assert.Single(result.Projection.Projection.ProvisionalAssociations);
+        var request = Assert.Single(
+            IncidentBatchVerificationQueueContract.BuildRequests(result.LedgerEntry.Entry));
+        var confirmation = new IncidentBatchConfirmationProposal(
+            "confirmation:unresolved-continuation",
+            Now.AddSeconds(1),
+            "test-model",
+            IncidentBatchConfirmationPrompt.PromptIdentity,
+            [new IncidentBatchConfirmationDecision(
+                request.SourceProposalToken,
+                request.CandidateToken,
+                IncidentBatchConfirmationDecisionKind.Verify,
+                "Both calls report the same patient remaining alert inside the store.",
+                [new IncidentEventStateTranscriptCitation(
+                    "transcript:2",
+                    "patient is alert and shopping inside the store")],
+                [new IncidentEventStateTranscriptCitation(
+                    "transcript:1",
+                    "patient could be alert in the store")],
+                [],
+                [])]);
+        var verificationResult = IncidentBatchVerificationQueueContract.BuildResult(
+            result.LedgerEntry.Entry,
+            request,
+            confirmation,
+            new IncidentBatchConfirmationExecutionContext(100, string.Empty),
+            Now.AddSeconds(2));
+        Assert.Equal(IncidentBatchVerificationOutcome.Verified, verificationResult.Outcome);
+        var verifiedProjection = IncidentBatchVerificationProjector.Apply(
+            result.Projection.Projection,
+            result.LedgerEntry.Entry,
+            request,
+            verificationResult,
+            "projection:unresolved-verified",
+            Now.AddSeconds(2));
+        var merged = Assert.Single(verifiedProjection.Events);
+        Assert.Equal(["call:1", "call:2"], merged.ObservationIds);
+        Assert.True(merged.OperatorVisible);
+        Assert.Empty(verifiedProjection.ProvisionalAssociations);
+
+        var rejection = confirmation with
+        {
+            ProposalId = "confirmation:unresolved-rejected",
+            Decisions =
+            [
+                confirmation.Decisions[0] with
+                {
+                    Decision = IncidentBatchConfirmationDecisionKind.Reject,
+                    VerificationStatement = "The shared wording does not establish one event."
+                }
+            ]
+        };
+        var rejectionResult = IncidentBatchVerificationQueueContract.BuildResult(
+            result.LedgerEntry.Entry,
+            request,
+            rejection,
+            new IncidentBatchConfirmationExecutionContext(100, string.Empty),
+            Now.AddSeconds(3));
+        Assert.Equal(IncidentBatchVerificationOutcome.Rejected, rejectionResult.Outcome);
+        var rejectedProjection = IncidentBatchVerificationProjector.Apply(
+            result.Projection.Projection,
+            result.LedgerEntry.Entry,
+            request,
+            rejectionResult,
+            "projection:unresolved-rejected",
+            Now.AddSeconds(3));
+        var unresolved = rejectedProjection.Events.Single(item =>
+            item.ProjectionEventId == "projection:follow-up");
+        Assert.Empty(unresolved.Title);
+        Assert.Empty(unresolved.Summary);
+        Assert.False(unresolved.OperatorReview);
+        Assert.False(unresolved.OperatorVisible);
+        Assert.Empty(rejectedProjection.ProvisionalAssociations);
+    }
+
+    [Fact]
     public async Task IndependentVerifierAllowsGroundedConfirmationToMergeEvents()
     {
         var bundle = Bundle(
@@ -1070,6 +1201,39 @@ public sealed class IncidentBatchRelationshipTests
                     Uncertainty = 0
                 });
             return Task.FromResult(ReceivedProposal);
+        }
+    }
+
+    private sealed class UnresolvedContinuationRelationshipProposer : IIncidentBatchRelationshipProposer
+    {
+        public IReadOnlyList<IncidentBatchRelationshipSource> ReceivedSources { get; private set; } = [];
+        public IReadOnlyList<IncidentBatchCandidate> ReceivedCandidates { get; private set; } = [];
+
+        public Task<IncidentBatchRelationshipProposal> ProposeAsync(
+            IncidentEventStateObservationBundle bundle,
+            IReadOnlyList<IncidentBatchRelationshipSource> sources,
+            IReadOnlyList<IncidentBatchCandidate> candidates,
+            CancellationToken ct)
+        {
+            ReceivedSources = sources;
+            ReceivedCandidates = candidates;
+            var unresolved = sources.Single(item =>
+                item.SourceProposalToken ==
+                IncidentBatchRelationshipContract.SingletonSourceToken("call:2"));
+            var acceptedPeer = candidates.Single(item =>
+                item.ProjectionEventId == "projection:patient");
+            return Task.FromResult(Proposal(
+                Relationship(
+                    unresolved.SourceProposalToken,
+                    acceptedPeer.CandidateToken,
+                    "transcript:2",
+                    "patient is alert and shopping inside the store",
+                    "transcript:1",
+                    "patient could be alert in the store") with
+                {
+                    Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership,
+                    Uncertainty = 0
+                }));
         }
     }
 

@@ -323,9 +323,7 @@ public static class IncidentBatchContract
             errors.Add("batch ledger proposal validation errors do not match deterministic validation");
         if (entry.RelationshipProposal is not null)
         {
-            var sources = IncidentBatchRelationshipContract.BuildSources(
-                entry.NewObservationIds,
-                AcceptedEvents(entry));
+            var sources = IncidentBatchRelationshipContract.BuildSources(entry);
             var relationshipValidation = IncidentBatchRelationshipContract.ValidateProposal(
                 entry.Bundle,
                 sources,
@@ -674,14 +672,42 @@ public static class IncidentBatchProjector
 
         if (entry.RelationshipProposal is not null)
         {
-            var acceptedSourceEvents = IncidentBatchContract.AcceptedEvents(entry);
+            var relationshipSources = IncidentBatchRelationshipContract.BuildSources(entry);
             var acceptedRelationships = IncidentBatchRelationshipContract.AcceptedRelationships(entry);
-            var sourceEventsByToken = acceptedSourceEvents
-                .ToDictionary(item => item.ProposalToken, StringComparer.Ordinal);
-            var sourceEventIds = sourceEventsByToken.ToDictionary(
-                item => item.Key,
-                item => entry.SingletonEvents.First(singleton => singleton.ObservationId == item.Value.NewObservationIds[0]).ProjectionEventId,
+            var sourceEventIds = relationshipSources.ToDictionary(
+                item => item.SourceProposalToken,
+                item => entry.SingletonEvents.First(singleton =>
+                    singleton.ObservationId == item.NewObservationIds[0]).ProjectionEventId,
                 StringComparer.Ordinal);
+            foreach (var sourceRelationships in acceptedRelationships
+                         .GroupBy(item => item.SourceProposalToken, StringComparer.Ordinal))
+            {
+                var sourceEventId = sourceEventIds[sourceRelationships.Key];
+                var sourceIndex = events.FindIndex(item => item.ProjectionEventId == sourceEventId);
+                if (sourceIndex < 0)
+                    throw new InvalidOperationException("relationship source event is absent from the projection");
+                var source = events[sourceIndex];
+                var evidenceSummary = BuildEvidenceSummary(sourceRelationships
+                    .SelectMany(item => item.SourceEvidence)
+                    .Distinct()
+                    .ToList());
+                events[sourceIndex] = source with
+                {
+                    Title = string.IsNullOrWhiteSpace(source.Title)
+                        ? BuildEvidenceTitle(evidenceSummary)
+                        : source.Title,
+                    Summary = AppendEvidenceSummary(source.Summary, evidenceSummary),
+                    OperatorReview = source.OperatorReview ||
+                                     asynchronousProvisional ||
+                                     sourceRelationships.Any(item =>
+                                         item.Disposition ==
+                                         IncidentBatchRelationshipDisposition.ProvisionalAssociation),
+                    SourceLedgerEntryIds = source.SourceLedgerEntryIds
+                        .Append(entry.LedgerEntryId)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList()
+                };
+            }
 
             foreach (var relationship in acceptedRelationships
                          .Where(item => item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership))
@@ -880,15 +906,20 @@ public sealed class IncidentBatchCoordinator
                     proposalValidation.Errors,
                     request.ConfigurationIdentity)
                 .ToList();
+            var relationshipSourceEvents = acceptedEvents
+                .Where(item => item.Disposition is IncidentBatchEventDisposition.NewEvent or IncidentBatchEventDisposition.ProvisionalEvent)
+                .ToList();
             var sources = IncidentBatchRelationshipContract.BuildSources(
                 newObservationIds,
-                acceptedEvents
-                    .Where(item => item.Disposition is IncidentBatchEventDisposition.NewEvent or IncidentBatchEventDisposition.ProvisionalEvent)
-                    .ToList());
+                relationshipSourceEvents,
+                IncidentBatchRelationshipContract.UsesAllObservationSources(request.ConfigurationIdentity));
             relationshipCandidates = IncidentBatchRelationshipContract.AddOrderedSameBatchCandidates(
                 sources,
                 request.SingletonEvents,
-                candidates);
+                candidates,
+                relationshipSourceEvents
+                    .Select(item => item.ProposalToken)
+                    .ToHashSet(StringComparer.Ordinal));
             var relationshipTimer = Stopwatch.StartNew();
             var relationshipError = string.Empty;
             try
