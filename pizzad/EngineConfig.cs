@@ -444,6 +444,7 @@ public sealed class AiInsightsConfig
     public int IncidentBatchConstructorShadowMinimumBatchSize { get; set; } = 12;
     public int IncidentBatchConstructorShadowMaximumWaitSeconds { get; set; } = 120;
     public int IncidentBatchConstructorShadowCandidateLimit { get; set; } = 4;
+    public bool IncidentBatchConstructorShadowSourceIsolated { get; set; }
     public bool IncidentBatchConstructorShadowContinuous { get; set; }
     public long IncidentBatchConstructorShadowStartAfterCallId { get; set; }
     public bool IncidentBatchVerificationShadowEnabled { get; set; }

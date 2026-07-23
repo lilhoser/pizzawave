@@ -53,6 +53,7 @@ public sealed class EngineConfigAiInsightsTests
         Assert.Equal(IncidentBatchContract.MaximumNewObservationCount, config.AiInsights.IncidentBatchConstructorShadowMinimumBatchSize);
         Assert.Equal(5, config.AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds);
         Assert.Equal(IncidentBatchContract.MaximumCandidateCount, config.AiInsights.IncidentBatchConstructorShadowCandidateLimit);
+        Assert.False(config.AiInsights.IncidentBatchConstructorShadowSourceIsolated);
         Assert.False(config.AiInsights.IncidentBatchConstructorShadowContinuous);
         Assert.Equal(0, config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId);
         Assert.False(config.AiInsights.IncidentBatchVerificationShadowEnabled);

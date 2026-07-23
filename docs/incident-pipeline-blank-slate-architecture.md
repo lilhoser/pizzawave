@@ -2128,6 +2128,37 @@ uncertainty, disposition, and membership validation are unchanged. These local,
 default-disabled changes must be measured with another aligned combined trace
 before enabling verification or changing production persistence.
 
+Run `ot-batch-provisional-intake-20260723-g` then measured that correction for
+180.7 minutes with the legacy production pipeline still enabled on both OT and
+RPI. The no-backfill fence was call `1444079`. The append-only ledger completed
+68 successful constructor requests, including 67 candidate-backed batches, and
+processed 884 of 892 eligible observations through call `1445905`. Average
+batch size was 13.0 observations; the bounded dwell produced 15 smaller batches
+during lower overnight traffic. There were no proposer failures. Per-event and
+per-citation validation accepted 226 Review events and rejected 42 of 268
+proposals across 13 invalid batches without discarding valid siblings. Nothing
+became operator-visible and no production incident state changed.
+
+The compact schema and admission dwell reduced replacement cost from Run F's
+approximately 476 to 390 tokens per processed observation, an 18 percent
+improvement, but did not close the architecture gate. The transcript-free
+combined replay projects two replacement constructors at 5,363 tokens per
+minute at the proven clean-control demand, still 1.99 times the clean legacy
+control's 2,695 tokens per minute. The 1.5-times demand projection is 8,044
+constructor tokens per minute and still excludes verification.
+
+Candidate context is now the next isolated variable. It appeared in 67 of 68
+requests while only 23 accepted relationship proposals survived validation.
+Exact-transcript inspection found candidate anchoring that related unrelated
+alarms at different addresses, generic hospital traffic, unrelated identifier
+checks, and distinct disputes. Deterministic validation contained malformed and
+duplicate proposals, and every surviving relationship remained provisional,
+but the candidate transcripts still consumed prompt capacity and influenced
+source-event construction. The next non-mutating shadow therefore removes all
+retrieved candidate state from the constructor request. Relationship discovery
+and verification remain separate future work; neither is silently replaced by
+retrieval similarity or a static rule.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

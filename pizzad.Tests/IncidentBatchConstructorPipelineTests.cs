@@ -424,6 +424,34 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public void SourceIsolatedConstructorContextExcludesRetrievedCandidateState()
+    {
+        var priorCall = Call(10, "White truck crashed on County Road 725.", 1000);
+        var newCall = Call(11, "Critical injuries in that white truck crash.", 1010);
+        var prior = PriorProjection(new IncidentBatchProjectionEvent(
+            "projection:event:existing", ["call:10"], "Crash", "Crash", true, false, ["ledger:prior"]));
+
+        var selection = IncidentBatchLiveSelection.BuildConstructorContext(
+            [newCall],
+            [priorCall, newCall],
+            [new VectorSearchMatchDto(10, 0.8, "similar")],
+            prior,
+            4,
+            Now,
+            sourceIsolated: true);
+
+        Assert.Empty(selection.Candidates);
+        var observation = Assert.Single(selection.Bundle.Observations);
+        Assert.Equal("call:11", observation.ObservationId);
+        Assert.DoesNotContain("White truck crashed", IncidentBatchPrompt.Build(
+            selection.Bundle,
+            selection.NewObservationIds,
+            selection.Candidates,
+            asynchronousProvisional: true).UserPrompt,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AsynchronousProvisionalPromptOmitsDisplayTextThatProjectionDerivesFromEvidence()
     {
         var bundle = Bundle(Observation("call:1", "transcript:1", "Tree down across the southbound lane."));

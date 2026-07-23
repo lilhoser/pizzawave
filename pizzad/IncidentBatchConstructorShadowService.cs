@@ -116,7 +116,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         var priorStored = await _database.GetLatestIncidentBatchProjectionAsync(runId, ct);
         var prior = priorStored?.Projection;
         var matches = new List<VectorSearchMatchDto>();
-        if (prior is not null)
+        if (prior is not null && !_config.AiInsights.IncidentBatchConstructorShadowSourceIsolated)
         {
             var matchSets = await _embeddings.SearchSimilarStoredCallsAcrossSystemsBatchAsync(
                 newCalls.Select(call => new StoredVectorSearchSource(call.Id, call.Transcription)).ToList(),
@@ -126,13 +126,14 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
                 ct);
             matches.AddRange(matchSets.SelectMany(items => items));
         }
-        var selection = IncidentBatchLiveSelection.Build(
+        var selection = IncidentBatchLiveSelection.BuildConstructorContext(
             newCalls,
             calls,
             matches,
             prior,
             _config.AiInsights.IncidentBatchConstructorShadowCandidateLimit,
-            now);
+            now,
+            _config.AiInsights.IncidentBatchConstructorShadowSourceIsolated);
         retrievalTimer.Stop();
         var batchIdentity = $"{newCalls.First().Id.ToString(CultureInfo.InvariantCulture)}-{newCalls.Last().Id.ToString(CultureInfo.InvariantCulture)}";
         var singletons = newCalls.Select(call => new IncidentBatchSingletonIdentity(
@@ -185,7 +186,7 @@ public sealed class IncidentBatchConstructorShadowService : BackgroundService
         && !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);
 
     private string ConfigurationIdentity() =>
-        $"{IncidentBatchPrompt.AsynchronousProvisionalPromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};cursor=durable-processed-observations-v2;{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};{IncidentBatchExecutionArchitecture.AsynchronousProvisionalToken};{IncidentBatchAdmissionPolicy.ConfigurationToken};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};minimumBatch={_config.AiInsights.IncidentBatchConstructorShadowMinimumBatchSize};maximumWait={_config.AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
+        $"{IncidentBatchPrompt.AsynchronousProvisionalPromptIdentity};{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.PerCitationAcceptanceConfigurationToken};{IncidentBatchContract.EvidenceSummaryProjectionConfigurationToken};cursor=durable-processed-observations-v2;{IncidentBatchContract.CorroboratedVisibilityConfigurationToken};{IncidentTranscriptCitationResolver.ConfigurationToken};{IncidentBatchLiveSelection.ConfigurationToken};{IncidentBatchExecutionArchitecture.AsynchronousProvisionalToken};{IncidentBatchAdmissionPolicy.ConfigurationToken};sourceContext={(_config.AiInsights.IncidentBatchConstructorShadowSourceIsolated ? "isolated-v1" : "candidate-aware-v1")};run={_config.AiInsights.IncidentBatchConstructorShadowRunId.Trim()};interval={_config.AiInsights.IncidentBatchConstructorShadowIntervalSeconds};lookback={_config.AiInsights.IncidentBatchConstructorShadowLookbackMinutes};batch={_config.AiInsights.IncidentBatchConstructorShadowBatchSize};minimumBatch={_config.AiInsights.IncidentBatchConstructorShadowMinimumBatchSize};maximumWait={_config.AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds};candidates={_config.AiInsights.IncidentBatchConstructorShadowCandidateLimit};continuous={_config.AiInsights.IncidentBatchConstructorShadowContinuous};startAfter={_config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId}";
 
     private static async Task DelayAsync(TimeSpan delay, CancellationToken ct)
     {
@@ -264,6 +265,22 @@ public sealed record IncidentBatchLiveSelection(
 
     public static bool IsEligibleSourceObservation(EngineCall call) =>
         TranscriptRetrievalEvidence.IsUsable(call);
+
+    public static IncidentBatchLiveSelection BuildConstructorContext(
+        IReadOnlyList<EngineCall> newCalls,
+        IReadOnlyList<EngineCall> recentCalls,
+        IReadOnlyList<VectorSearchMatchDto> matches,
+        IncidentBatchProjection? priorProjection,
+        int candidateLimit,
+        DateTimeOffset createdAtUtc,
+        bool sourceIsolated) =>
+        Build(
+            newCalls,
+            recentCalls,
+            sourceIsolated ? [] : matches,
+            sourceIsolated ? null : priorProjection,
+            candidateLimit,
+            createdAtUtc);
 
     public static IncidentBatchLiveSelection Build(
         IReadOnlyList<EngineCall> newCalls,
