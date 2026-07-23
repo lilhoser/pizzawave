@@ -2154,10 +2154,67 @@ alarms at different addresses, generic hospital traffic, unrelated identifier
 checks, and distinct disputes. Deterministic validation contained malformed and
 duplicate proposals, and every surviving relationship remained provisional,
 but the candidate transcripts still consumed prompt capacity and influenced
-source-event construction. The next non-mutating shadow therefore removes all
-retrieved candidate state from the constructor request. Relationship discovery
-and verification remain separate future work; neither is silently replaced by
-retrieval similarity or a static rule.
+source-event construction. Run H therefore removed all retrieved candidate
+state from the constructor request. Relationship discovery and verification
+remain separate future work; neither is silently replaced by retrieval
+similarity or a static rule.
+
+Run `ot-batch-source-isolated-20260723-h` measured that boundary for 186.8
+minutes with the legacy production pipeline still enabled on OT and RPI. Its
+no-backfill fence was call `1445975`. The append-only ledger completed 64
+successful constructor requests and processed 391 of 392 usable observations,
+or 99.7 percent. Every request had zero candidates and the
+`sourceContext=isolated-v1` configuration identity. There were no proposer
+failures or configuration leaks. The bounded dwell produced an average batch
+of 6.1 observations, with 60 of 64 batches below the configured 12-observation
+minimum during low traffic; the minimum remained a readiness threshold rather
+than permission to exceed the 120-second dwell.
+
+The run consumed 114,542 prompt and 29,006 completion tokens, or 367 tokens per
+processed observation. This is only a 5.8 percent improvement over Run G's 390
+tokens per observation. The aligned transcript-free combined replay projects
+two source-isolated constructors at 5,050 tokens per minute at the proven
+clean-control demand, 1.87 times the legacy control's 2,695 tokens per minute.
+It also projects 2.25 constructor requests per minute because Run H averaged
+only 6.1 observations per request, compared with 1.11 successful legacy
+requests per minute in the control. The 1.5-times demand projection is 7,575
+constructor tokens and 3.38 requests per minute before any relationship
+verification. The replay artifact is
+`artifacts/incident-event-microbatch-replay/ot-rpi-capacity-v5/report.json`;
+its content hash is
+`A7C222345E9813E988A401B9E8ECB2491041F1C85FC6A5884C53CF5CAE36E051`.
+
+Source isolation removed Run G's candidate anchoring, but did not make the
+constructor semantically safe. The model proposed 84 Review-only events, 15 of
+which joined more than one new observation. Exact-transcript audit found a
+five-observation batch that invented a traffic-collision interpretation to join
+two independent calls, assigned zero uncertainty to that relationship, and
+also promoted a CAD/eAgent outage, an address correction, and an administrative
+record lookup into separate Review events. A different batch invented the
+exact quote `common traffic stop`; exact-citation validation removed that quote
+while retaining its valid sibling citation under the configured per-citation
+policy. No output became operator-visible, no membership was confirmed, and no
+production incident state changed.
+
+Run H therefore closes this constructor shape rather than starting another
+prompt or dwell-tuning loop. Candidate context must not return to source
+construction. The retained architectural boundary is batched but
+observation-isolated intake: each source proposal may own evidence from exactly
+one new observation, while any cross-observation relationship must be proposed
+and verified in the separate relationship path. That is a structural evidence
+contract, not a semantic keyword rule. The relationship path remains disabled
+until it has a shared-Paxan scheduler and a non-mutating capacity proof. The
+source constructor also still needs a measured way to reduce Review volume
+without address, phrase, category, talkgroup, quality-label, regex, or other
+static semantic admission rules.
+
+At the stop boundary the constructor shadow was disabled and only `pizzad` was
+restarted. OT health, production incidents, transcription, embeddings, and AI
+completions were healthy; `trunk-recorder` retained PID `3068317`. Configuration
+snapshots are preserved at
+`/etc/pizzawave/pizzad.json.pre-ot-batch-source-isolated-20260723-h-20260723T055242Z.bak`
+and
+`/etc/pizzawave/pizzad.json.post-ot-batch-source-isolated-20260723-h-20260723T090040Z.bak`.
 
 ### Initial OT shadow checkpoint
 
