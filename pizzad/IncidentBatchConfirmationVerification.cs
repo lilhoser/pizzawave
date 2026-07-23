@@ -39,6 +39,29 @@ public sealed record IncidentBatchConfirmationEvidenceSpan(
     string TranscriptId,
     string ExactQuote);
 
+public static class IncidentBatchConfirmationAdmission
+{
+    public const string ConfigurationToken = "admission=specific-connection-review-conflict-v3";
+
+    public static IncidentBatchConfirmationDecisionKind ResolveDecision(
+        IncidentBatchConfirmationDecisionKind proposed,
+        bool specificConnectionSupported,
+        bool unresolvedMaterialConflict) =>
+        !specificConnectionSupported
+            ? IncidentBatchConfirmationDecisionKind.Reject
+            : unresolvedMaterialConflict
+                ? IncidentBatchConfirmationDecisionKind.Review
+                : proposed;
+
+    public static IReadOnlyList<string> ResolveCounterEvidence(
+        bool unresolvedMaterialConflict,
+        IReadOnlyList<string> materialConflicts,
+        IReadOnlyList<string> counterEvidence) =>
+        (unresolvedMaterialConflict && materialConflicts.Count > 0 ? materialConflicts : counterEvidence)
+        .Take(IncidentBatchRelationshipContract.MaximumAlternatives)
+        .ToList();
+}
+
 public static class IncidentBatchConfirmationEvidenceCatalog
 {
     public const int MaximumSpanLength = 240;
@@ -151,11 +174,12 @@ public static class IncidentBatchConfirmationContract
 {
     public const string LegacyConfigurationToken = "confirmation=independent-verifier-v1";
     public const string PreviousIndependentConfigurationToken = "relationship-verification=independent-v2";
-    public const string ReviewDecisionConfigurationToken = "relationship-verification=independent-v3";
+    public const string PreviousReviewConfigurationToken = "relationship-verification=independent-v3";
+    public const string ReviewDecisionConfigurationToken = "relationship-verification=independent-v4";
     public const string PerCitationEvidenceToken = "evidence=per-citation-v1";
     public const string ApplicationOwnedEvidenceToken = "evidence=application-spans-v1";
-    public const string ReviewDowngradeToken = "confirmation=review-downgrade-v1";
-    public const string ConfigurationToken = $"{ReviewDecisionConfigurationToken};{ApplicationOwnedEvidenceToken};{ReviewDowngradeToken}";
+    public const string ReviewDowngradeToken = "confirmation=review-downgrade-v2";
+    public const string ConfigurationToken = $"{ReviewDecisionConfigurationToken};{ApplicationOwnedEvidenceToken};{ReviewDowngradeToken};{IncidentBatchConfirmationAdmission.ConfigurationToken}";
     public const double ReviewUncertaintyFloor = 0.5;
 
     public static IncidentEventStateContractValidationResult ValidateProposal(
@@ -259,11 +283,13 @@ public static class IncidentBatchConfirmationContract
         configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Any(token => string.Equals(token, LegacyConfigurationToken, StringComparison.Ordinal) ||
                           string.Equals(token, PreviousIndependentConfigurationToken, StringComparison.Ordinal) ||
+                          string.Equals(token, PreviousReviewConfigurationToken, StringComparison.Ordinal) ||
                           string.Equals(token, ReviewDecisionConfigurationToken, StringComparison.Ordinal));
 
     public static bool VerifiesAllRelationships(string configurationIdentity) =>
         configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Any(token => string.Equals(token, PreviousIndependentConfigurationToken, StringComparison.Ordinal) ||
+                          string.Equals(token, PreviousReviewConfigurationToken, StringComparison.Ordinal) ||
                           string.Equals(token, ReviewDecisionConfigurationToken, StringComparison.Ordinal));
 
     public static bool UsesPerCitationEvidence(string configurationIdentity) =>
@@ -310,6 +336,9 @@ public static class IncidentBatchConfirmationContract
         RequireValue(proposal.ProposalId, "confirmation proposal id", errors);
         RequireValue(proposal.ModelIdentity, "confirmation model identity", errors);
         if (!string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PromptIdentity, StringComparison.Ordinal) &&
+            !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PriorStructuredAdmissionPromptIdentity, StringComparison.Ordinal) &&
+            !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PriorEvidenceThresholdPromptIdentity, StringComparison.Ordinal) &&
+            !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PreviousReviewPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.ApplicationOwnedPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PriorPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PreviousPromptIdentity, StringComparison.Ordinal) &&
@@ -423,7 +452,10 @@ public static class IncidentBatchConfirmationPrompt
     public const string PreviousPromptIdentity = "incident-batch-relationship-verifier-v2";
     public const string PriorPromptIdentity = "incident-batch-relationship-verifier-v3";
     public const string ApplicationOwnedPromptIdentity = "incident-batch-relationship-verifier-v4-application-evidence";
-    public const string PromptIdentity = "incident-batch-relationship-verifier-v5-review-downgrade";
+    public const string PreviousReviewPromptIdentity = "incident-batch-relationship-verifier-v5-review-downgrade";
+    public const string PriorEvidenceThresholdPromptIdentity = "incident-batch-relationship-verifier-v6-evidence-threshold";
+    public const string PriorStructuredAdmissionPromptIdentity = "incident-batch-relationship-verifier-v7-structured-admission";
+    public const string PromptIdentity = "incident-batch-relationship-verifier-v8-resolved-conflicts";
 
     public static IncidentBatchConfirmationPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -467,13 +499,19 @@ public static class IncidentBatchConfirmationPrompt
         user.AppendLine("/no_think");
         user.AppendLine("Return only JSON matching the supplied schema.");
         user.AppendLine("Independently test every proposed relationship. The earlier proposer is untrusted and may have invented a match, promoted generic similarity, or ignored contradictions.");
-        user.AppendLine("Choose verify, review, or reject. Review is a non-merging operator-visible association; it never grants event membership.");
+        user.AppendLine("Choose verify, review, or reject. Review is a non-merging operator-visible association; it never grants event membership. Review is not a softer reject.");
         user.AppendLine("For confirmed_membership, use verify when exact transcript evidence from both sides supports one unfolding real-world event and no material contradiction remains. Use review when specific continuity is plausible but a material identity question prevents safe membership.");
         user.AppendLine("Radio follow-ups are often elliptical: a later transmission need not repeat every address component, clinical detail, vehicle detail, or circumstance from an earlier transmission. Information present on only one side is omission, not contradiction.");
         user.AppendLine("ASR text is noisy evidence, not authoritative spelling. Plausible near-homophones, partial identifiers, and differently transcribed fragments are not matches or contradictions by themselves. Evaluate whether multiple independent details converge, and put any remaining ambiguity in review.");
         user.AppendLine("A sufficiently specific shared identity or a coherent sequence of dispatch and follow-up facts can establish continuity even when one side adds detail. Judge the combined evidence and chronology rather than requiring each side to restate the other verbatim. Timing alone remains insufficient.");
-        user.AppendLine("For provisional_association, use verify when exact evidence establishes a specific operational connection or cross-reference even though it does not establish shared event membership. Use review when exact evidence supports a concrete plausible connection but a material question remains. Both outcomes remain non-merging Review links.");
-        user.AppendLine("Reject topical resemblance, isolated shared words, concurrent but independent responses, explicit conflicts, and proposals with no specific operational connection. Shared generic event type, response language, color, age range, radio timing, retrieval rank, or broad location type is insufficient.");
+        user.AppendLine("For provisional_association, use verify when exact evidence establishes a specific operational connection or cross-reference even though it does not establish shared event membership. Use review only when exact evidence already establishes that concrete connection but a material question remains about its nature or extent. Both outcomes remain non-merging Review links.");
+        user.AppendLine("Uncertainty about an already evidenced connection belongs in review. Uncertainty about whether any connection exists belongs in reject. Do not use review merely because two transmissions might be related.");
+        user.AppendLine("Reject topical resemblance, isolated shared words, concurrent but independent responses, explicit conflicts, and proposals with no specific operational connection. Shared generic event type, response language, responder, color, age range, radio timing, retrieval rank, or broad location is insufficient.");
+        user.AppendLine("A common responder or nearby wording can occur in separate calls. When both sides describe materially incompatible subjects, patients, vehicles, addresses, or circumstances, reject unless the transcripts themselves provide a concrete explanation such as multiple subjects, an operational update, or plausible ASR variation.");
+        user.AppendLine("Do not invent local geography. Unless the evidence says so, do not assume streets intersect, addresses are nearby, or named places share an operational area.");
+        user.AppendLine("Before choosing a decision, identify shared_connection_facts that are evidenced across both boundaries, set specific_connection_supported, list potential material_conflicts, and then set unresolved_material_conflict only after testing whether chronology, multiple responders or subjects, or plausible ASR variation resolves them. A union of unrelated facts from the two sides is not a shared fact.");
+        user.AppendLine("Set specific_connection_supported true only when there is either an explicit operational cross-reference or multiple independent compatible facts that make a specific connection more likely than coincidental proximity. If the best unresolved question is simply whether nearby or concurrent incidents are related, set it false and reject.");
+        user.AppendLine("A material conflict is an explicit incompatible fact that makes separate incidents the better explanation. Set unresolved_material_conflict true only when that conflict remains after considering the supplied chronology and evidence. Different units at one scene and changing status in a later update are not conflicts. Do not use ASR uncertainty to erase clear incompatible patient, subject, vehicle, location, or circumstance evidence, but do not let one implausible ASR word override several converging specific facts.");
         user.AppendLine("Explicitly compare concrete subjects, locations, vehicles, identifiers, circumstances, operational progression, and chronology. Do not manufacture a mismatch from a detail that is merely absent or plausibly mistranscribed.");
         user.AppendLine("For verify, counter_evidence and unresolved_questions must both be empty. For review, include at least one concrete unresolved question or counterevidence item explaining why membership is not safe. Reject only when the specific relationship itself is unsupported or contradicted.");
         user.AppendLine("Every decision must select evidence_id values from both source boundaries. Evidence spans and their exact quote text are owned by the application; return only their IDs and never generate, copy, edit, or paraphrase quote text.");
@@ -482,7 +520,7 @@ public static class IncidentBatchConfirmationPrompt
         user.AppendLine("Proposed relationships:");
         user.AppendLine(JsonSerializer.Serialize(pairs, EngineConfig.JsonOptions()));
         return new IncidentBatchConfirmationPromptPayload(
-            "You are an independent evidence-bounded verifier for proposed incident relationships. You cannot construct events, write quote text, or alter evidence. Application code owns evidence spans and state transitions. Preserve plausible but uncertain specific continuity as review instead of forcing either membership or rejection.",
+            "You are an independent evidence-bounded verifier for proposed incident relationships. You cannot construct events, write quote text, or alter evidence. Application code owns evidence spans and state transitions. Assess shared facts and material conflicts before deciding. Preserve uncertainty only after the evidence establishes a concrete connection; reject speculative resemblance.",
             user.ToString(),
             ResponseFormat(bundle, sources, candidates, relationships, evidenceCatalog));
     }
@@ -512,7 +550,7 @@ public static class IncidentBatchConfirmationPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_relationship_verifier_v5",
+                name = "pizzawave_incident_batch_relationship_verifier_v8_resolved_conflicts",
                 strict = true,
                 schema = new
                 {
@@ -533,6 +571,10 @@ public static class IncidentBatchConfirmationPrompt
                                 {
                                     source_proposal_token = new { type = "string", @enum = relationships.Select(item => item.SourceProposalToken).Distinct(StringComparer.Ordinal).ToArray() },
                                     candidate_token = new { type = "string", @enum = relationships.Select(item => item.CandidateToken).Distinct(StringComparer.Ordinal).ToArray() },
+                                    shared_connection_facts = Strings(),
+                                    specific_connection_supported = new { type = "boolean" },
+                                    material_conflicts = Strings(),
+                                    unresolved_material_conflict = new { type = "boolean" },
                                     decision = new { type = "string", @enum = new[] { "verify", "review", "reject" } },
                                     verification_statement = new { type = "string", maxLength = IncidentBatchRelationshipContract.MaximumTextLength },
                                     source_evidence_ids = EvidenceIds(sourceEvidenceIds),
@@ -540,7 +582,7 @@ public static class IncidentBatchConfirmationPrompt
                                     counter_evidence = Strings(),
                                     unresolved_questions = Strings()
                                 },
-                                required = new[] { "source_proposal_token", "candidate_token", "decision", "verification_statement", "source_evidence_ids", "candidate_evidence_ids", "counter_evidence", "unresolved_questions" }
+                                required = new[] { "source_proposal_token", "candidate_token", "shared_connection_facts", "specific_connection_supported", "material_conflicts", "unresolved_material_conflict", "decision", "verification_statement", "source_evidence_ids", "candidate_evidence_ids", "counter_evidence", "unresolved_questions" }
                             }
                         }
                     },
@@ -609,21 +651,31 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
             var parsed = JsonSerializer.Deserialize<ConfirmationResponse>(json, EngineConfig.JsonOptions())
                          ?? throw new InvalidDataException("Batch confirmation JSON was empty.");
             var evidenceCatalog = IncidentBatchConfirmationEvidenceCatalog.Build(bundle);
-            var decisions = parsed.Decisions.Select(item => new IncidentBatchConfirmationDecision(
-                item.SourceProposalToken,
-                item.CandidateToken,
-                item.Decision switch
+            var decisions = parsed.Decisions.Select(item =>
+            {
+                var proposedDecision = item.Decision switch
                 {
                     "verify" => IncidentBatchConfirmationDecisionKind.Verify,
                     "review" => IncidentBatchConfirmationDecisionKind.Review,
                     "reject" => IncidentBatchConfirmationDecisionKind.Reject,
                     _ => throw new InvalidDataException($"Unsupported confirmation decision '{item.Decision}'.")
-                },
-                item.VerificationStatement,
-                IncidentBatchConfirmationEvidenceCatalog.Resolve(item.SourceEvidenceIds, evidenceCatalog),
-                IncidentBatchConfirmationEvidenceCatalog.Resolve(item.CandidateEvidenceIds, evidenceCatalog),
-                item.CounterEvidence,
-                item.UnresolvedQuestions)).ToList();
+                };
+                return new IncidentBatchConfirmationDecision(
+                    item.SourceProposalToken,
+                    item.CandidateToken,
+                    IncidentBatchConfirmationAdmission.ResolveDecision(
+                        proposedDecision,
+                        item.SpecificConnectionSupported,
+                        item.UnresolvedMaterialConflict),
+                    item.VerificationStatement,
+                    IncidentBatchConfirmationEvidenceCatalog.Resolve(item.SourceEvidenceIds, evidenceCatalog),
+                    IncidentBatchConfirmationEvidenceCatalog.Resolve(item.CandidateEvidenceIds, evidenceCatalog),
+                    IncidentBatchConfirmationAdmission.ResolveCounterEvidence(
+                        item.UnresolvedMaterialConflict,
+                        item.MaterialConflicts,
+                        item.CounterEvidence),
+                    item.UnresolvedQuestions);
+            }).ToList();
             await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
             return new IncidentBatchConfirmationProposal($"model:incident-batch-confirmation:{Guid.NewGuid():N}", DateTimeOffset.UtcNow, responseModel, IncidentBatchConfirmationPrompt.PromptIdentity, decisions);
         }
@@ -673,6 +725,10 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
     private sealed record ConfirmationItemResponse(
         [property: JsonPropertyName("source_proposal_token")] string SourceProposalToken,
         [property: JsonPropertyName("candidate_token")] string CandidateToken,
+        [property: JsonPropertyName("shared_connection_facts")] IReadOnlyList<string> SharedConnectionFacts,
+        [property: JsonPropertyName("specific_connection_supported")] bool SpecificConnectionSupported,
+        [property: JsonPropertyName("material_conflicts")] IReadOnlyList<string> MaterialConflicts,
+        [property: JsonPropertyName("unresolved_material_conflict")] bool UnresolvedMaterialConflict,
         [property: JsonPropertyName("decision")] string Decision,
         [property: JsonPropertyName("verification_statement")] string VerificationStatement,
         [property: JsonPropertyName("source_evidence_ids")] IReadOnlyList<string> SourceEvidenceIds,

@@ -588,6 +588,15 @@ public sealed class IncidentBatchRelationshipTests
         Assert.Contains("For confirmed_membership", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("For provisional_association", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Choose verify, review, or reject", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Review is not a softer reject", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Uncertainty about whether any connection exists belongs in reject", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Do not invent local geography", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("materially incompatible subjects", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("multiple independent compatible facts", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("shared_connection_facts", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("specific_connection_supported", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("material_conflict", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("unresolved_material_conflict", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("ASR text is noisy evidence, not authoritative spelling", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("Timing alone remains insufficient", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("non-merging operator-visible association", prompt.UserPrompt, StringComparison.Ordinal);
@@ -596,6 +605,10 @@ public sealed class IncidentBatchRelationshipTests
         Assert.Contains("Evidence spans and their exact quote text are owned by the application", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("evidence_id", prompt.UserPrompt, StringComparison.Ordinal);
         Assert.Contains("\"review\"", schema, StringComparison.Ordinal);
+        Assert.Contains("shared_connection_facts", schema, StringComparison.Ordinal);
+        Assert.Contains("specific_connection_supported", schema, StringComparison.Ordinal);
+        Assert.Contains("material_conflicts", schema, StringComparison.Ordinal);
+        Assert.Contains("unresolved_material_conflict", schema, StringComparison.Ordinal);
         Assert.Contains("source_evidence_ids", schema, StringComparison.Ordinal);
         Assert.Contains("candidate_evidence_ids", schema, StringComparison.Ordinal);
         Assert.DoesNotContain("\"source_evidence\"", schema, StringComparison.Ordinal);
@@ -604,6 +617,29 @@ public sealed class IncidentBatchRelationshipTests
         Assert.Contains($"\"maxLength\": {IncidentBatchRelationshipContract.MaximumTextLength}", schema, StringComparison.Ordinal);
         Assert.Contains(IncidentBatchConfirmationContract.ApplicationOwnedEvidenceToken, IncidentBatchConfirmationContract.ConfigurationToken, StringComparison.Ordinal);
         Assert.Contains(IncidentBatchConfirmationContract.ReviewDowngradeToken, IncidentBatchConfirmationContract.ConfigurationToken, StringComparison.Ordinal);
+        Assert.Contains(IncidentBatchConfirmationAdmission.ConfigurationToken, IncidentBatchConfirmationContract.ConfigurationToken, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(IncidentBatchConfirmationDecisionKind.Verify, false, false, IncidentBatchConfirmationDecisionKind.Reject)]
+    [InlineData(IncidentBatchConfirmationDecisionKind.Review, false, false, IncidentBatchConfirmationDecisionKind.Reject)]
+    [InlineData(IncidentBatchConfirmationDecisionKind.Verify, true, true, IncidentBatchConfirmationDecisionKind.Review)]
+    [InlineData(IncidentBatchConfirmationDecisionKind.Review, true, true, IncidentBatchConfirmationDecisionKind.Review)]
+    [InlineData(IncidentBatchConfirmationDecisionKind.Reject, true, true, IncidentBatchConfirmationDecisionKind.Review)]
+    [InlineData(IncidentBatchConfirmationDecisionKind.Verify, true, false, IncidentBatchConfirmationDecisionKind.Verify)]
+    [InlineData(IncidentBatchConfirmationDecisionKind.Review, true, false, IncidentBatchConfirmationDecisionKind.Review)]
+    public void StructuredAdmissionRoutesUnsupportedAndConflictedPairsSafely(
+        IncidentBatchConfirmationDecisionKind proposed,
+        bool specificConnectionSupported,
+        bool hasMaterialConflict,
+        IncidentBatchConfirmationDecisionKind expected)
+    {
+        var actual = IncidentBatchConfirmationAdmission.ResolveDecision(
+            proposed,
+            specificConnectionSupported,
+            hasMaterialConflict);
+
+        Assert.Equal(expected, actual);
     }
 
     [Fact]
@@ -645,6 +681,9 @@ public sealed class IncidentBatchRelationshipTests
     [InlineData(IncidentBatchConfirmationPrompt.PreviousPromptIdentity)]
     [InlineData(IncidentBatchConfirmationPrompt.PriorPromptIdentity)]
     [InlineData(IncidentBatchConfirmationPrompt.ApplicationOwnedPromptIdentity)]
+    [InlineData(IncidentBatchConfirmationPrompt.PreviousReviewPromptIdentity)]
+    [InlineData(IncidentBatchConfirmationPrompt.PriorEvidenceThresholdPromptIdentity)]
+    [InlineData(IncidentBatchConfirmationPrompt.PriorStructuredAdmissionPromptIdentity)]
     public void PreviousRelationshipVerifierResultsRemainReadable(string promptIdentity)
     {
         var bundle = Bundle(

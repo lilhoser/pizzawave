@@ -2675,6 +2675,30 @@ addresses, phrases, categories, talkgroups, or system labels. Review should
 remain the result for genuinely plausible continuity, not the fallback for
 generic resemblance.
 
+The 11 exact run-N verification requests were then replayed read-only while
+refining that evidence boundary. A prompt-only v6 rejected the speculative
+geography but inconsistently promoted a conflicting-patient pair. A hard
+conflict veto in v7 prevented that promotion but rejected real evolving
+incidents when changing entrapment status or one noisy ASR word was treated as
+a contradiction. The surviving v8 contract requires the model to separately
+report shared facts, whether a specific connection is supported, potential
+material conflicts, and whether a conflict remains unresolved after chronology
+and ASR are considered. Application code owns the transition:
+
+- no supported specific connection becomes Reject;
+- a supported connection with an unresolved material conflict becomes Review;
+- only a supported connection without unresolved conflict may retain the
+  model's Verify or Review decision.
+
+The final replay produced seven Reject, two Review, and two Verify outcomes
+with zero invalid results. Only the 115 Linda Drive trailer continuation
+retained a verified confirmed-membership proposal. The other Verify began as
+a provisional association and therefore remains non-merging operator Review.
+The noisy Creek Elementary confirmed proposal was downgraded to Review rather
+than lost or merged. Operator-visible candidates fell from seven to three
+without adding address, phrase, category, talkgroup, system-label, or regex
+membership rules.
+
 At 2026-07-23 19:19:12 UTC the constructor, relationship, verifier,
 exclusive-window, and canary switches were disabled and OT legacy incident
 execution was restored. The production database still matched the baseline.
