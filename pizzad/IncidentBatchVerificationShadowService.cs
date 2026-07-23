@@ -121,6 +121,9 @@ public sealed class IncidentBatchVerificationShadowService : BackgroundService
         _config.Setup.Completed &&
         _config.AiInsights.Enabled &&
         _config.AiInsights.IncidentBatchVerificationShadowEnabled &&
+        IncidentBatchExperimentWindow.AllowsExclusiveReplacementWork(
+            _config.AiInsights.IncidentBatchConstructorShadowExclusiveInferenceWindow,
+            _config.AiInsights.IncidentAnalysisExecutionEnabled) &&
         !string.IsNullOrWhiteSpace(_config.AiInsights.IncidentBatchConstructorShadowRunId) &&
         !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiBaseUrl) &&
         !string.IsNullOrWhiteSpace(_config.AiInsights.OpenAiModel);

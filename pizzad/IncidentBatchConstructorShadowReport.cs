@@ -10,6 +10,8 @@ public sealed record IncidentBatchShadowTotalsDto(
     int ProposedEvents,
     int AcceptedEvents,
     int RejectedEvents,
+    int ProposedMultiObservationEvents,
+    int AcceptedMultiObservationEvents,
     int NewEvents,
     int ProvisionalEvents,
     int ConfirmedMemberships,
@@ -35,6 +37,8 @@ public sealed record IncidentBatchShadowAttemptDto(
     int ProposedEventCount,
     int AcceptedEventCount,
     int RejectedEventCount,
+    int ProposedMultiObservationEventCount,
+    int AcceptedMultiObservationEventCount,
     int NewEventCount,
     int ProvisionalEventCount,
     int ConfirmedMembershipCount,
@@ -111,6 +115,8 @@ public sealed partial class EngineDatabase
             allAttempts.Sum(row => row.ProposedEventCount),
             allAttempts.Sum(row => row.AcceptedEventCount),
             allAttempts.Sum(row => row.RejectedEventCount),
+            allAttempts.Sum(row => row.ProposedMultiObservationEventCount),
+            allAttempts.Sum(row => row.AcceptedMultiObservationEventCount),
             allAttempts.Sum(row => row.NewEventCount),
             allAttempts.Sum(row => row.ProvisionalEventCount),
             allAttempts.Sum(row => row.ConfirmedMembershipCount),
@@ -209,6 +215,8 @@ public sealed partial class EngineDatabase
             proposedEvents,
             events.Count,
             Math.Max(0, proposedEvents - events.Count),
+            entry.Proposal.Events.Count(item => item.NewObservationIds.Count > 1),
+            events.Count(item => item.NewObservationIds.Count > 1),
             events.Count(IncidentBatchContract.IsOperatorVisibleNewEvent),
             events.Count(item => IncidentBatchContract.IsOperatorReviewEvent(item) ||
                                  (asynchronousProvisional &&
@@ -254,6 +262,6 @@ public sealed partial class EngineDatabase
         row.Entry.ProposalValidationErrors.Count == 0 &&
         (row.Entry.RelationshipProposalValidationErrors ?? []).Count == 0 &&
         (row.Entry.ConfirmationProposalValidationErrors ?? []).Count == 0;
-    private static IncidentBatchShadowTotalsDto EmptyBatchTotals() => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    private static IncidentBatchShadowTotalsDto EmptyBatchTotals() => new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     private static DateTime? ParseBatchUtc(string value) => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed) ? parsed : null;
 }

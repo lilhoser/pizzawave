@@ -11,14 +11,18 @@ public static class IncidentBatchPrompt
 {
     public const string PromptIdentity = "incident-batch-constructor-v13";
     public const string AsynchronousProvisionalPromptIdentity = "incident-batch-provisional-constructor-v2";
+    public const string ObservationIsolatedProvisionalPromptIdentity = "incident-batch-observation-isolated-provisional-constructor-v1";
     public const int MaximumReturnedEvents = 6;
 
     public static IncidentBatchPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
         IReadOnlyList<string> newObservationIds,
         IReadOnlyList<IncidentBatchCandidate> candidates,
-        bool asynchronousProvisional = false)
+        bool asynchronousProvisional = false,
+        bool observationIsolated = false)
     {
+        if (observationIsolated && candidates.Count > 0)
+            throw new ArgumentException("observation-isolated construction cannot include candidate events", nameof(candidates));
         var observations = bundle.Observations.ToDictionary(item => item.ObservationId, StringComparer.Ordinal);
         var newObservations = newObservationIds.Select(id => PromptObservation(observations[id])).ToList();
         object source = candidates.Count == 0
@@ -42,15 +46,22 @@ public static class IncidentBatchPrompt
         user.AppendLine("Omit routine, unclear, unsupported, low-information, or non-event observations. Omitted observations remain unresolved and are not classified as non-incidents.");
         user.AppendLine("Returning an empty events array is correct when none of the supplied observations clears that bar.");
         user.AppendLine($"Return at most {MaximumReturnedEvents} events. Choose the strongest source-grounded events and leave lower-priority observations unresolved rather than producing an oversized response.");
-        user.AppendLine("An event may contain one or several new observations. Each new observation may appear in at most one returned event.");
+        user.AppendLine(observationIsolated
+            ? "Each returned event must own exactly one new observation. Do not compare, combine, or infer a relationship between new observations in this stage. A separate relationship stage owns every cross-observation decision."
+            : "An event may contain one or several new observations. Each new observation may appear in at most one returned event.");
         if (candidates.Count > 0)
         {
             user.AppendLine("When new observations relate to a candidate event, return either confirmed_membership or provisional_association for those observations; do not also return them in a new_event or any second proposal.");
             if (asynchronousProvisional)
                 user.AppendLine("Both candidate dispositions are proposals only. confirmed_membership requests independent asynchronous verification and never changes membership in this intake pass.");
         }
-        user.AppendLine("Use disposition new_event only when at least two separately cited new observations mutually corroborate the same real-world event without relying on a candidate event. A candidate-free new_event remains in Review; it does not become operator-visible until a later confirmed_membership transition or operator action.");
-        user.AppendLine("Use provisional_event for a source-grounded candidate-free possible situation that lacks two-observation corroboration or otherwise has meaningful uncertainty. A provisional event is review evidence, not an operator-visible incident. A single-observation event must always be provisional_event.");
+        if (observationIsolated)
+            user.AppendLine("Use provisional_event for every returned source observation. It is review evidence, not an operator-visible incident. Do not claim corroboration, continuation, recurrence, or shared membership in this stage.");
+        else
+        {
+            user.AppendLine("Use disposition new_event only when at least two separately cited new observations mutually corroborate the same real-world event without relying on a candidate event. A candidate-free new_event remains in Review; it does not become operator-visible until a later confirmed_membership transition or operator action.");
+            user.AppendLine("Use provisional_event for a source-grounded candidate-free possible situation that lacks two-observation corroboration or otherwise has meaningful uncertainty. A provisional event is review evidence, not an operator-visible incident. A single-observation event must always be provisional_event.");
+        }
         user.AppendLine("No candidate-free proposal becomes operator-visible directly, regardless of how many observations it groups. Automatic visibility requires a separately evaluated confirmed_membership against prior Review state.");
         if (candidates.Count > 0)
         {
@@ -76,7 +87,9 @@ public static class IncidentBatchPrompt
             user.AppendLine("For each event, use only that event's own exact_quotes to write its operator_basis. The application derives operator-facing title and summary from validated exact quotes; do not return title or summary. Never borrow facts from omitted observations, candidate evidence not cited for that event, or a sibling event. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
         else
             user.AppendLine("For each event, use only that event's own exact_quotes to write its title, summary, and operator_basis. Never borrow facts from omitted observations, candidate evidence not cited for that event, or a sibling event. Preserve alternatives, unresolved questions, and uncertainty instead of forcing certainty.");
-        user.AppendLine("Compare every pair of drafted events before returning them. If two drafts may describe the same unfolding situation and the cited evidence cannot reliably separate them, combine their observations and evidence into one provisional_event for review instead of returning parallel new_event drafts.");
+        user.AppendLine(observationIsolated
+            ? "Do not compare drafted events or use one observation to interpret another. Return or omit each observation on its own evidence."
+            : "Compare every pair of drafted events before returning them. If two drafts may describe the same unfolding situation and the cited evidence cannot reliably separate them, combine their observations and evidence into one provisional_event for review instead of returning parallel new_event drafts.");
         user.AppendLine("Before returning JSON, silently reconsider every proposed event. Omit it if operator_basis cannot be supported directly by its exact quotes without inference from radio metadata or generic workflow.");
         user.AppendLine("Remove every discarded draft from the events array entirely. Never return an event that you decided should be omitted, and never return an event without exact evidence for every included new observation.");
         user.AppendLine("Copy every identifier exactly.");
@@ -84,20 +97,23 @@ public static class IncidentBatchPrompt
         user.AppendLine("Source bundle:");
         user.AppendLine(JsonSerializer.Serialize(source, EngineConfig.JsonOptions()));
         return new IncidentBatchPromptPayload(
-            candidates.Count == 0
+            observationIsolated
+                ? "You construct independent source-grounded provisional event claims. Each claim owns exactly one new observation. Application code rejects cross-observation ownership, validates citations, and delegates every relationship decision to a separate stage."
+                : candidates.Count == 0
                 ? "You construct immutable source-grounded incident groups from new observations only. Application code validates identity, ownership, and citations. A separate source-cited stage evaluates relationships to prior state."
                 : asynchronousProvisional
                     ? "You construct source-grounded provisional incident state in one intake pass. Application code validates identity, ownership, and citations. Candidate relationships enter an independent asynchronous verification queue and never merge in this pass."
                     : "You construct source-grounded incident events. Application code validates identity, ownership, and citations but does not interpret semantic meaning. Unsupported observations remain unresolved. Provisional associations never change event membership.",
             user.ToString(),
-            ResponseFormat(bundle, newObservationIds, candidates, asynchronousProvisional));
+            ResponseFormat(bundle, newObservationIds, candidates, asynchronousProvisional, observationIsolated));
     }
 
     private static object ResponseFormat(
         IncidentEventStateObservationBundle bundle,
         IReadOnlyList<string> newObservationIds,
         IReadOnlyList<IncidentBatchCandidate> candidates,
-        bool asynchronousProvisional)
+        bool asynchronousProvisional,
+        bool observationIsolated)
     {
         var observations = bundle.Observations.ToDictionary(item => item.ObservationId, StringComparer.Ordinal);
         var newTranscriptIds = newObservationIds.SelectMany(id => observations[id].Transcripts).Select(item => item.TranscriptId).Distinct(StringComparer.Ordinal).ToArray();
@@ -108,7 +124,9 @@ public static class IncidentBatchPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_constructor_v1",
+                name = observationIsolated
+                    ? "pizzawave_incident_batch_observation_isolated_constructor_v1"
+                    : "pizzawave_incident_batch_constructor_v1",
                 strict = true,
                 schema = new
                 {
@@ -128,9 +146,9 @@ public static class IncidentBatchPrompt
                                     ? (object)new
                                     {
                                         proposal_token = new { type = "string" },
-                                        disposition = DispositionSchema(candidates),
+                                        disposition = DispositionSchema(candidates, observationIsolated),
                                         candidate_token = new { type = "string", @enum = candidateTokens },
-                                        new_observation_ids = StringArraySchema(newObservationIds),
+                                        new_observation_ids = StringArraySchema(newObservationIds, observationIsolated),
                                         operator_basis = new { type = "string" },
                                         uncertainty = new { type = "number", minimum = 0, maximum = 1 },
                                         new_observation_evidence = CitationArraySchema(newTranscriptIds),
@@ -141,9 +159,9 @@ public static class IncidentBatchPrompt
                                     : new
                                     {
                                         proposal_token = new { type = "string" },
-                                        disposition = DispositionSchema(candidates),
+                                        disposition = DispositionSchema(candidates, observationIsolated),
                                         candidate_token = new { type = "string", @enum = candidateTokens },
-                                        new_observation_ids = StringArraySchema(newObservationIds),
+                                        new_observation_ids = StringArraySchema(newObservationIds, observationIsolated),
                                         title = new { type = "string" },
                                         summary = new { type = "string" },
                                         operator_basis = new { type = "string" },
@@ -175,10 +193,14 @@ public static class IncidentBatchPrompt
         };
     }
 
-    private static object DispositionSchema(IReadOnlyList<IncidentBatchCandidate> candidates) => new
+    private static object DispositionSchema(
+        IReadOnlyList<IncidentBatchCandidate> candidates,
+        bool observationIsolated) => new
     {
         type = "string",
-        @enum = candidates.Count == 0
+        @enum = observationIsolated
+            ? new[] { "provisional_event" }
+            : candidates.Count == 0
             ? new[] { "new_event", "provisional_event" }
             : new[] { "new_event", "provisional_event", "confirmed_membership", "provisional_association" }
     };
@@ -212,11 +234,27 @@ public static class IncidentBatchPrompt
         }
     };
 
-    private static object StringArraySchema(IEnumerable<string> values) => new
-    {
-        type = "array",
-        items = new { type = "string", @enum = values.ToArray() }
-    };
+    private static object StringArraySchema(IEnumerable<string> values, bool exactlyOne) =>
+        exactlyOne
+            ? new
+            {
+                type = "array",
+                minItems = 1,
+                maxItems = 1,
+                items = new { type = "string", @enum = values.ToArray() }
+            }
+            : (object)new
+            {
+                type = "array",
+                items = new { type = "string", @enum = values.ToArray() }
+            };
+
+    public static string Identity(bool asynchronousProvisional, bool observationIsolated) =>
+        observationIsolated
+            ? ObservationIsolatedProvisionalPromptIdentity
+            : asynchronousProvisional
+                ? AsynchronousProvisionalPromptIdentity
+                : PromptIdentity;
 
     private static object OpenStringArraySchema() => new { type = "array", items = new { type = "string" } };
 }
@@ -228,19 +266,22 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
     private readonly ILogger _logger;
     private readonly string _runId;
     private readonly bool _asynchronousProvisional;
+    private readonly bool _observationIsolated;
 
     public OpenAiIncidentBatchProposer(
         EngineConfig config,
         EngineDatabase database,
         ILogger logger,
         string runId,
-        bool asynchronousProvisional = false)
+        bool asynchronousProvisional = false,
+        bool observationIsolated = false)
     {
         _config = config;
         _database = database;
         _logger = logger;
         _runId = runId;
         _asynchronousProvisional = asynchronousProvisional;
+        _observationIsolated = observationIsolated;
     }
 
     public async Task<IncidentBatchProposal> ProposeAsync(
@@ -249,7 +290,12 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
         IReadOnlyList<IncidentBatchCandidate> candidates,
         CancellationToken ct)
     {
-        var prompt = IncidentBatchPrompt.Build(bundle, newObservationIds, candidates, _asynchronousProvisional);
+        var prompt = IncidentBatchPrompt.Build(
+            bundle,
+            newObservationIds,
+            candidates,
+            _asynchronousProvisional,
+            _observationIsolated);
         var model = _config.AiInsights.OpenAiModel;
         var body = new
         {
@@ -312,7 +358,7 @@ public sealed class OpenAiIncidentBatchProposer : IIncidentBatchProposer
                 $"model:incident-batch:{Guid.NewGuid():N}",
                 DateTimeOffset.UtcNow,
                 responseModel,
-                _asynchronousProvisional ? IncidentBatchPrompt.AsynchronousProvisionalPromptIdentity : IncidentBatchPrompt.PromptIdentity,
+                IncidentBatchPrompt.Identity(_asynchronousProvisional, _observationIsolated),
                 events);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

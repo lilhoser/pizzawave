@@ -191,6 +191,13 @@ public sealed class EngineConfig
         AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds = Math.Clamp(AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds, 5, 300);
         if (AiInsights.IncidentBatchConstructorShadowCandidateLimit <= 0) AiInsights.IncidentBatchConstructorShadowCandidateLimit = 4;
         AiInsights.IncidentBatchConstructorShadowCandidateLimit = Math.Clamp(AiInsights.IncidentBatchConstructorShadowCandidateLimit, 1, IncidentBatchContract.MaximumCandidateCount);
+        if (AiInsights.IncidentBatchConstructorShadowObservationIsolated)
+            AiInsights.IncidentBatchConstructorShadowSourceIsolated = true;
+        if (AiInsights.IncidentBatchRelationshipShadowEnabled)
+        {
+            AiInsights.IncidentBatchConstructorShadowObservationIsolated = true;
+            AiInsights.IncidentBatchConstructorShadowSourceIsolated = true;
+        }
         if (AiInsights.IncidentBatchVerificationShadowIntervalSeconds <= 0) AiInsights.IncidentBatchVerificationShadowIntervalSeconds = 30;
         AiInsights.IncidentBatchVerificationShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentBatchVerificationShadowIntervalSeconds, 5, 300);
         // Incident V3 is retained only as a read-only comparison baseline. Its
@@ -445,6 +452,9 @@ public sealed class AiInsightsConfig
     public int IncidentBatchConstructorShadowMaximumWaitSeconds { get; set; } = 120;
     public int IncidentBatchConstructorShadowCandidateLimit { get; set; } = 4;
     public bool IncidentBatchConstructorShadowSourceIsolated { get; set; }
+    public bool IncidentBatchConstructorShadowObservationIsolated { get; set; }
+    public bool IncidentBatchRelationshipShadowEnabled { get; set; }
+    public bool IncidentBatchConstructorShadowExclusiveInferenceWindow { get; set; }
     public bool IncidentBatchConstructorShadowContinuous { get; set; }
     public long IncidentBatchConstructorShadowStartAfterCallId { get; set; }
     public bool IncidentBatchVerificationShadowEnabled { get; set; }

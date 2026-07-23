@@ -54,6 +54,9 @@ public sealed class EngineConfigAiInsightsTests
         Assert.Equal(5, config.AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds);
         Assert.Equal(IncidentBatchContract.MaximumCandidateCount, config.AiInsights.IncidentBatchConstructorShadowCandidateLimit);
         Assert.False(config.AiInsights.IncidentBatchConstructorShadowSourceIsolated);
+        Assert.False(config.AiInsights.IncidentBatchConstructorShadowObservationIsolated);
+        Assert.False(config.AiInsights.IncidentBatchRelationshipShadowEnabled);
+        Assert.False(config.AiInsights.IncidentBatchConstructorShadowExclusiveInferenceWindow);
         Assert.False(config.AiInsights.IncidentBatchConstructorShadowContinuous);
         Assert.Equal(0, config.AiInsights.IncidentBatchConstructorShadowStartAfterCallId);
         Assert.False(config.AiInsights.IncidentBatchVerificationShadowEnabled);
@@ -69,6 +72,46 @@ public sealed class EngineConfigAiInsightsTests
     }
 
     [Fact]
+    public void ApplyDefaults_ObservationIsolationAlsoForcesCandidateFreeSourceContext()
+    {
+        var config = new EngineConfig
+        {
+            AiInsights = new AiInsightsConfig
+            {
+                IncidentBatchConstructorShadowObservationIsolated = true,
+                IncidentBatchConstructorShadowSourceIsolated = false
+            }
+        };
+
+        config.ApplyDefaults();
+
+        Assert.True(config.AiInsights.IncidentBatchConstructorShadowObservationIsolated);
+        Assert.True(config.AiInsights.IncidentBatchConstructorShadowSourceIsolated);
+    }
+
+    [Fact]
+    public void ApplyDefaults_RelationshipStageForcesObservationIsolatedSourceOwnership()
+    {
+        var config = new EngineConfig
+        {
+            AiInsights = new AiInsightsConfig
+            {
+                IncidentBatchRelationshipShadowEnabled = true,
+                IncidentBatchConstructorShadowObservationIsolated = false,
+                IncidentBatchConstructorShadowSourceIsolated = false
+            }
+        };
+
+        config.ApplyDefaults();
+
+        Assert.True(config.AiInsights.IncidentBatchRelationshipShadowEnabled);
+        Assert.True(config.AiInsights.IncidentBatchConstructorShadowObservationIsolated);
+        Assert.True(config.AiInsights.IncidentBatchConstructorShadowSourceIsolated);
+        Assert.False(config.AiInsights.IncidentBatchConstructorShadowExclusiveInferenceWindow);
+        Assert.True(config.AiInsights.IncidentAnalysisExecutionEnabled);
+    }
+
+    [Fact]
     public void BatchAdmissionPolicy_CombinesUsefulBatchesWithoutUnboundedDelay()
     {
         Assert.False(IncidentBatchAdmissionPolicy.ShouldProcess(true, 0, 24, 12, TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(2)));
@@ -77,6 +120,14 @@ public sealed class EngineConfigAiInsightsTests
         Assert.True(IncidentBatchAdmissionPolicy.ShouldProcess(true, 24, 24, 12, TimeSpan.Zero, TimeSpan.FromMinutes(2)));
         Assert.True(IncidentBatchAdmissionPolicy.ShouldProcess(true, 1, 24, 12, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(2)));
         Assert.True(IncidentBatchAdmissionPolicy.ShouldProcess(false, 1, 24, 12, TimeSpan.Zero, TimeSpan.FromMinutes(2)));
+    }
+
+    [Fact]
+    public void ExclusiveExperimentWorkRequiresAnExplicitWindowAndPausedProductionExecutor()
+    {
+        Assert.False(IncidentBatchExperimentWindow.AllowsExclusiveReplacementWork(false, false));
+        Assert.False(IncidentBatchExperimentWindow.AllowsExclusiveReplacementWork(true, true));
+        Assert.True(IncidentBatchExperimentWindow.AllowsExclusiveReplacementWork(true, false));
     }
 
     [Fact]

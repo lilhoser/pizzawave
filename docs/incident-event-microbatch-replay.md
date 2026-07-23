@@ -319,6 +319,27 @@ measured cohorts and is explicitly projected. The headroom scenario multiplies
 that higher proven demand by the configured gate. Verification load is excluded
 and reported as such; it cannot be hidden inside an intake capacity claim.
 
+## Observation-isolation audit
+
+The audit revalidates a stored constructor-shadow ledger against the
+one-observation source-ownership contract without calling a model or changing
+the snapshot:
+
+```powershell
+dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatchReplay.csproj -- `
+  --observation-isolation-audit `
+  --database C:\path\to\snapshot.db `
+  --run-id constructor-run-id `
+  --output artifacts\incident-event-microbatch-replay\isolation-audit.json
+```
+
+The database is opened read-only and every ledger payload hash is verified.
+The report counts prior proposals, proposals with non-singleton ownership,
+events retained by the new contract, and any multi-observation event that
+survived. It refuses to overwrite an existing report. This audit proves a
+structural ownership boundary only; it does not label singleton proposals as
+semantically useful incidents.
+
 ## Decision gates
 
 This experiment is not a route around the gates in

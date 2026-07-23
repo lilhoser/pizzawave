@@ -387,6 +387,91 @@ public sealed class IncidentBatchRelationshipTests
     }
 
     [Fact]
+    public async Task StagedRelationshipQueuesConfirmationWithoutMergingDuringIntake()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "White truck crashed on County Road 725."),
+            Observation("call:2", "transcript:2", "Critical injuries in that same white truck crash."));
+        var construction = new IncidentBatchEventProposal(
+            "event:update", IncidentBatchEventDisposition.ProvisionalEvent, string.Empty, ["call:2"],
+            "model title", "model summary", "crash update", 0.1,
+            [new IncidentEventStateTranscriptCitation("transcript:2", "same white truck crash")], [], [], []);
+        var constructor = new CapturingConstructorProposer(new IncidentBatchProposal(
+            "proposal:construction", Now, "test-model", IncidentBatchPrompt.PromptIdentity, [construction]));
+        var confirmed = Relationship(
+            "event:update", "candidate:crash", "transcript:2", "same white truck crash",
+            "transcript:1", "White truck crashed") with
+        {
+            Disposition = IncidentBatchRelationshipDisposition.ConfirmedMembership,
+            Uncertainty = 0
+        };
+        var relationship = new CapturingRelationshipProposer(Proposal(confirmed));
+        var prior = new IncidentBatchProjection(
+            "run:staged", "projection:prior", Now.AddMinutes(-1), ["ledger:prior"],
+            [new IncidentBatchProjectionEvent("projection:crash", ["call:1"], "Crash", "White truck crash", false, true, ["ledger:prior"])], []);
+        var coordinator = new IncidentBatchCoordinator(
+            constructor,
+            relationship,
+            new MemoryStore(),
+            new FixedTimeProvider(Now));
+
+        var result = await coordinator.RunAsync(
+            new IncidentBatchRunRequest(
+                "run:staged", "ledger:new", "projection:new",
+                [new IncidentBatchSingletonIdentity("call:2", "projection:update")],
+                "test",
+                $"test;{IncidentBatchContract.PerEventAcceptanceConfigurationToken};{IncidentBatchContract.ObservationIsolatedOwnershipConfigurationToken};{IncidentBatchRelationshipContract.ConfigurationToken};{IncidentBatchExecutionArchitecture.StagedRelationshipAsynchronousConfirmationToken}"),
+            bundle,
+            prior,
+            ["call:2"],
+            [new IncidentBatchCandidate("candidate:crash", "projection:crash", ["call:1"])],
+            CancellationToken.None);
+
+        Assert.True(IncidentBatchContract.ValidateLedgerEntry(result.LedgerEntry.Entry).IsValid);
+        Assert.Equal(2, result.Projection.Projection.Events.Count);
+        Assert.All(result.Projection.Projection.Events, item => Assert.False(item.OperatorVisible));
+        var pending = Assert.Single(result.Projection.Projection.ProvisionalAssociations);
+        Assert.Equal("ledger:new:event:update:candidate:crash", pending.AssociationId);
+        var request = Assert.Single(IncidentBatchVerificationQueueContract.BuildRequests(result.LedgerEntry.Entry));
+        Assert.Equal(IncidentBatchEventDisposition.ConfirmedMembership, request.ProposedDisposition);
+        var context = IncidentBatchVerificationQueueContract.BuildContext(result.LedgerEntry.Entry, request);
+        Assert.Equal(confirmed, context.Relationship);
+
+        var confirmation = new IncidentBatchConfirmationProposal(
+            "confirmation:staged",
+            Now.AddSeconds(1),
+            "test-model",
+            IncidentBatchConfirmationPrompt.PromptIdentity,
+            [new IncidentBatchConfirmationDecision(
+                "event:update",
+                "candidate:crash",
+                IncidentBatchConfirmationDecisionKind.Verify,
+                "Both calls explicitly identify the same white-truck crash.",
+                [new IncidentEventStateTranscriptCitation("transcript:2", "same white truck crash")],
+                [new IncidentEventStateTranscriptCitation("transcript:1", "White truck crashed")],
+                [],
+                [])]);
+        var verificationResult = IncidentBatchVerificationQueueContract.BuildResult(
+            result.LedgerEntry.Entry,
+            request,
+            confirmation,
+            new IncidentBatchConfirmationExecutionContext(100, string.Empty),
+            Now.AddSeconds(2));
+        Assert.Equal(IncidentBatchVerificationOutcome.Verified, verificationResult.Outcome);
+        var verifiedProjection = IncidentBatchVerificationProjector.Apply(
+            result.Projection.Projection,
+            result.LedgerEntry.Entry,
+            request,
+            verificationResult,
+            "projection:verified",
+            Now.AddSeconds(2));
+        var merged = Assert.Single(verifiedProjection.Events);
+        Assert.Equal(["call:1", "call:2"], merged.ObservationIds);
+        Assert.True(merged.OperatorVisible);
+        Assert.Empty(verifiedProjection.ProvisionalAssociations);
+    }
+
+    [Fact]
     public async Task IndependentVerifierAllowsGroundedConfirmationToMergeEvents()
     {
         var bundle = Bundle(

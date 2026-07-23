@@ -92,6 +92,51 @@ public sealed class IncidentBatchConstructorPipelineTests
     }
 
     [Fact]
+    public async Task ObservationIsolatedOwnershipRejectsGroupedProposalWithoutDiscardingValidSibling()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "Caller reports a vehicle in the ditch."),
+            Observation("call:2", "transcript:2", "A tow truck is responding to the ditch."),
+            Observation("call:3", "transcript:3", "A tree is blocking the northbound lane."));
+        var grouped = Event(
+            "event:grouped",
+            IncidentBatchEventDisposition.ProvisionalEvent,
+            string.Empty,
+            ["call:1", "call:2"],
+            "Vehicle in ditch",
+            "A vehicle is in a ditch.",
+            [Citation("transcript:1", "vehicle in the ditch"), Citation("transcript:2", "tow truck is responding")],
+            []);
+        var singleton = Event(
+            "event:tree",
+            IncidentBatchEventDisposition.ProvisionalEvent,
+            string.Empty,
+            ["call:3"],
+            "Tree blocking lane",
+            "A tree is blocking a lane.",
+            [Citation("transcript:3", "tree is blocking the northbound lane")],
+            []);
+
+        var result = await RunAsync(
+            bundle,
+            ["call:1", "call:2", "call:3"],
+            [],
+            new FixedProposer(Proposal([grouped, singleton]) with
+            {
+                PromptIdentity = IncidentBatchPrompt.ObservationIsolatedProvisionalPromptIdentity
+            }),
+            executionToken: IncidentBatchContract.ObservationIsolatedOwnershipConfigurationToken);
+
+        Assert.Contains(
+            result.LedgerEntry.Entry.ProposalValidationErrors,
+            error => error.Contains("must contain exactly one new observation", StringComparison.Ordinal));
+        Assert.Equal(["event:tree"], IncidentBatchContract.AcceptedEvents(result.LedgerEntry.Entry).Select(item => item.ProposalToken));
+        var review = Assert.Single(result.Projection.Projection.Events, item => item.OperatorReview);
+        Assert.Equal(["call:3"], review.ObservationIds);
+        Assert.Equal(2, result.Projection.Projection.Events.Count(item => !item.OperatorVisible && !item.OperatorReview));
+    }
+
+    [Fact]
     public async Task ProvisionalEventIsGroupedForReviewWithoutBecomingVisible()
     {
         var bundle = Bundle(
@@ -449,6 +494,77 @@ public sealed class IncidentBatchConstructorPipelineTests
             selection.Candidates,
             asynchronousProvisional: true).UserPrompt,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RelationshipContextRetainsCandidatesWithoutExposingThemToObservationIsolatedConstructor()
+    {
+        var priorCall = Call(10, "White truck crashed on County Road 725.", 1000);
+        var newCall = Call(11, "Critical injuries in that white truck crash.", 1010);
+        var prior = PriorProjection(new IncidentBatchProjectionEvent(
+            "projection:event:existing", ["call:10"], "Crash", "Crash", true, false, ["ledger:prior"]));
+
+        var selection = IncidentBatchLiveSelection.BuildConstructorContext(
+            [newCall],
+            [priorCall, newCall],
+            [new VectorSearchMatchDto(10, 0.8, "similar")],
+            prior,
+            4,
+            Now,
+            sourceIsolated: true,
+            includeRelationshipCandidates: true);
+
+        Assert.Single(selection.Candidates);
+        Assert.Equal(2, selection.Bundle.Observations.Count);
+        var sourcePrompt = IncidentBatchPrompt.Build(
+            selection.Bundle,
+            selection.NewObservationIds,
+            [],
+            asynchronousProvisional: true,
+            observationIsolated: true);
+        Assert.DoesNotContain("White truck crashed", sourcePrompt.UserPrompt, StringComparison.Ordinal);
+
+        var relationshipPrompt = IncidentBatchRelationshipPrompt.Build(
+            selection.Bundle,
+            [new IncidentBatchRelationshipSource("source-1", selection.NewObservationIds)],
+            selection.Candidates);
+        Assert.Contains("White truck crashed", relationshipPrompt.UserPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ObservationIsolatedPromptMakesOwnershipStructuralAndOmitsRelationshipWork()
+    {
+        var bundle = Bundle(
+            Observation("call:1", "transcript:1", "Vehicle in a ditch."),
+            Observation("call:2", "transcript:2", "Tree blocking the road."));
+
+        var prompt = IncidentBatchPrompt.Build(
+            bundle,
+            ["call:1", "call:2"],
+            [],
+            asynchronousProvisional: true,
+            observationIsolated: true);
+        var schema = System.Text.Json.JsonSerializer.Serialize(prompt.ResponseFormat, EngineConfig.JsonOptions());
+        using var document = System.Text.Json.JsonDocument.Parse(schema);
+        var eventProperties = document.RootElement
+            .GetProperty("json_schema")
+            .GetProperty("schema")
+            .GetProperty("properties")
+            .GetProperty("events")
+            .GetProperty("items")
+            .GetProperty("properties");
+        var ownership = eventProperties.GetProperty("new_observation_ids");
+        var dispositions = eventProperties.GetProperty("disposition").GetProperty("enum").EnumerateArray().Select(item => item.GetString()).ToList();
+
+        Assert.Equal(1, ownership.GetProperty("minItems").GetInt32());
+        Assert.Equal(1, ownership.GetProperty("maxItems").GetInt32());
+        Assert.Equal(["provisional_event"], dispositions);
+        Assert.Contains("must own exactly one new observation", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Contains("Do not compare, combine, or infer a relationship", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("combine their observations", prompt.UserPrompt, StringComparison.Ordinal);
+        Assert.Equal(
+            IncidentBatchPrompt.ObservationIsolatedProvisionalPromptIdentity,
+            IncidentBatchPrompt.Identity(asynchronousProvisional: true, observationIsolated: true));
     }
 
     [Fact]

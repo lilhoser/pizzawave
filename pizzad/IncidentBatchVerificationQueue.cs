@@ -44,8 +44,15 @@ public sealed record IncidentBatchVerificationContext(
 public static class IncidentBatchExecutionArchitecture
 {
     public const string AsynchronousProvisionalToken = "execution=asynchronous-provisional-v1";
+    public const string StagedRelationshipAsynchronousConfirmationToken =
+        "execution=staged-relationship-async-confirmation-v1";
 
     public static bool UsesAsynchronousProvisionalVerification(string configurationIdentity) =>
+        configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(token => string.Equals(token, AsynchronousProvisionalToken, StringComparison.Ordinal) ||
+                          string.Equals(token, StagedRelationshipAsynchronousConfirmationToken, StringComparison.Ordinal));
+
+    public static bool UsesSourceOnlyAsynchronousIntake(string configurationIdentity) =>
         configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Contains(AsynchronousProvisionalToken, StringComparer.Ordinal);
 }
@@ -56,6 +63,29 @@ public static class IncidentBatchVerificationQueueContract
     {
         if (!IncidentBatchExecutionArchitecture.UsesAsynchronousProvisionalVerification(entry.Execution.ConfigurationIdentity))
             return [];
+
+        if (entry.RelationshipProposal is not null)
+        {
+            var sources = IncidentBatchContract.AcceptedEvents(entry)
+                .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
+                .ToList();
+            return IncidentBatchRelationshipContract.AcceptedRelationships(
+                    entry.Bundle,
+                    sources,
+                    entry.Candidates,
+                    entry.RelationshipProposal)
+                .Select(item => new IncidentBatchVerificationRequest(
+                    $"{entry.LedgerEntryId}:verify:{item.SourceProposalToken}:{item.CandidateToken}",
+                    entry.RunId,
+                    entry.LedgerEntryId,
+                    entry.RecordedAtUtc,
+                    item.SourceProposalToken,
+                    item.CandidateToken,
+                    item.Disposition == IncidentBatchRelationshipDisposition.ConfirmedMembership
+                        ? IncidentBatchEventDisposition.ConfirmedMembership
+                        : IncidentBatchEventDisposition.ProvisionalAssociation))
+                .ToList();
+        }
 
         return IncidentBatchContract.AcceptedEvents(entry)
             .Where(item => item.Disposition is IncidentBatchEventDisposition.ConfirmedMembership or IncidentBatchEventDisposition.ProvisionalAssociation)
@@ -102,9 +132,24 @@ public static class IncidentBatchVerificationQueueContract
                        ?? throw new ArgumentException("verification request does not belong to its source ledger entry", nameof(request));
         if (expected != request)
             throw new ArgumentException("verification request does not match its source proposal", nameof(request));
-        var proposal = IncidentBatchContract.AcceptedEvents(entry).Single(item => item.ProposalToken == request.SourceProposalToken);
+        var proposal = IncidentBatchContract.AcceptedEvents(entry)
+            .Single(item => item.ProposalToken == request.SourceProposalToken);
         var candidate = entry.Candidates.Single(item => item.CandidateToken == request.CandidateToken);
         var source = new IncidentBatchRelationshipSource(proposal.ProposalToken, proposal.NewObservationIds);
+        if (entry.RelationshipProposal is not null)
+        {
+            var stagedRelationship = IncidentBatchRelationshipContract.AcceptedRelationships(
+                    entry.Bundle,
+                    IncidentBatchContract.AcceptedEvents(entry)
+                        .Select(item => new IncidentBatchRelationshipSource(item.ProposalToken, item.NewObservationIds))
+                        .ToList(),
+                    entry.Candidates,
+                    entry.RelationshipProposal)
+                .Single(item =>
+                    item.SourceProposalToken == request.SourceProposalToken &&
+                    item.CandidateToken == request.CandidateToken);
+            return new IncidentBatchVerificationContext(source, candidate, stagedRelationship);
+        }
         var disposition = request.ProposedDisposition == IncidentBatchEventDisposition.ConfirmedMembership
             ? IncidentBatchRelationshipDisposition.ConfirmedMembership
             : IncidentBatchRelationshipDisposition.ProvisionalAssociation;
@@ -211,7 +256,9 @@ public static class IncidentBatchVerificationProjector
             SourceLedgerEntryIds = item.SourceLedgerEntryIds.ToList()
         }).ToList();
         var links = prior.ProvisionalAssociations.ToList();
-        var associationId = $"{sourceEntry.LedgerEntryId}:{request.SourceProposalToken}";
+        var associationId = sourceEntry.RelationshipProposal is null
+            ? $"{sourceEntry.LedgerEntryId}:{request.SourceProposalToken}"
+            : $"{sourceEntry.LedgerEntryId}:{request.SourceProposalToken}:{request.CandidateToken}";
         var context = IncidentBatchVerificationQueueContract.BuildContext(sourceEntry, request);
         var sourceObservationIds = context.Source.NewObservationIds.ToHashSet(StringComparer.Ordinal);
         var pendingLink = links.SingleOrDefault(item => item.AssociationId == associationId);

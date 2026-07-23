@@ -11,6 +11,12 @@ if (args.Contains("--combined-capacity-plan", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--observation-isolation-audit", StringComparer.Ordinal))
+{
+    await ObservationIsolationAudit.RunAsync(args);
+    return;
+}
+
 if (args.Contains("--batch-constructor-scenario-replay", StringComparer.Ordinal))
 {
     await BatchConstructorScenarioReplay.RunAsync(args);

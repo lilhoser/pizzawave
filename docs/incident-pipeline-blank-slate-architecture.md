@@ -2203,7 +2203,8 @@ observation-isolated intake: each source proposal may own evidence from exactly
 one new observation, while any cross-observation relationship must be proposed
 and verified in the separate relationship path. That is a structural evidence
 contract, not a semantic keyword rule. The relationship path remains disabled
-until it has a shared-Paxan scheduler and a non-mutating capacity proof. The
+until legacy incident generation is deliberately paused for an exclusive,
+non-mutating capacity proof. The
 source constructor also still needs a measured way to reduce Review volume
 without address, phrase, category, talkgroup, quality-label, regex, or other
 static semantic admission rules.
@@ -2215,6 +2216,45 @@ snapshots are preserved at
 `/etc/pizzawave/pizzad.json.pre-ot-batch-source-isolated-20260723-h-20260723T055242Z.bak`
 and
 `/etc/pizzawave/pizzad.json.post-ot-batch-source-isolated-20260723-h-20260723T090040Z.bak`.
+
+The local implementation checkpoint after Run H makes that conclusion
+structural. Observation-isolated construction has its own prompt identity and
+JSON schema. Every returned event must own exactly one new observation, and
+the application independently rejects any event that owns zero or multiple
+new observations while retaining valid singleton siblings. Candidate
+transcripts can be retrieved for the relationship stage without appearing in
+the constructor request. Enabling the relationship stage forces
+observation-isolated source ownership.
+
+The frozen Run H ledger was audited read-only with
+`incident-observation-isolation-audit-v1`. Across 64 ledger entries and 84
+proposals, the new contract rejected all 15 multi-observation proposals,
+retained 69 singleton proposals, and admitted zero multi-observation events.
+This is a structural regression result, not a claim that all 69 singleton
+proposals are useful incidents.
+
+No new inference service is part of this checkpoint. The final architecture
+experiment uses a bounded maintenance window instead: pause legacy incident
+generation on OT and RPI, leave capture, transcription, embeddings, and the
+rest of each PizzaWave instance online, and give the non-mutating replacement
+exclusive use of the existing Paxan inference path. Relationship and
+confirmation shadows fail closed unless the OT configuration explicitly marks
+the exclusive window and disables its production incident executor. No
+configuration default silently disables production work.
+
+The experiment runs observation-isolated source construction, performs
+candidate comparison only in the relationship stage, and leaves every result
+in the append-only shadow ledger. RPI needs no replacement code deployment.
+Its legacy incident executor is paused by a backed-up configuration change
+while the combined frozen OT/RPI workload is exercised from OT. At the stop
+boundary, restore legacy generation on both hosts and verify that their durable
+queues return to current processing before declaring the maintenance complete.
+The gates are complete replay coverage, zero cross-observation source
+ownership, no repeated model failures, useful source-cited relationship output,
+and combined-workload completion within the maintenance budget. Passing that
+experiment ends architecture experimentation and moves the work to a
+reversible production canary; it is not a reason to resume prompt or batch-size
+tuning.
 
 ### Initial OT shadow checkpoint
 

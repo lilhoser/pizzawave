@@ -133,6 +133,7 @@ public static class IncidentBatchContract
     public const string EvidenceSummaryProjectionConfigurationToken = "projection=evidence-narrative-v2";
     public const string OldestUnseenCursorConfigurationToken = "cursor=oldest-unseen-v1;cadence=fixed-start-v1";
     public const string CorroboratedVisibilityConfigurationToken = "visibility=confirmed-membership-v2";
+    public const string ObservationIsolatedOwnershipConfigurationToken = "source-ownership=one-observation-v1";
 
     public static bool IsOperatorVisibleNewEvent(IncidentBatchEventProposal _) => false;
 
@@ -188,7 +189,8 @@ public static class IncidentBatchContract
         IncidentEventStateObservationBundle bundle,
         IReadOnlyList<string> newObservationIds,
         IReadOnlyList<IncidentBatchCandidate> candidates,
-        IncidentBatchProposal proposal)
+        IncidentBatchProposal proposal,
+        string configurationIdentity = "")
     {
         var errors = new List<string>();
         RequireValue(proposal.ProposalId, "batch proposal id", errors);
@@ -205,6 +207,9 @@ public static class IncidentBatchContract
         var derivesDisplayTextFromEvidence = string.Equals(
             proposal.PromptIdentity,
             IncidentBatchPrompt.AsynchronousProvisionalPromptIdentity,
+            StringComparison.Ordinal) || string.Equals(
+            proposal.PromptIdentity,
+            IncidentBatchPrompt.ObservationIsolatedProvisionalPromptIdentity,
             StringComparison.Ordinal);
         foreach (var item in proposal.Events)
         {
@@ -218,6 +223,8 @@ public static class IncidentBatchContract
             RequireUnique(item.NewObservationIds, $"new observation id in event proposal '{item.ProposalToken}'", errors);
             if (item.NewObservationIds.Count == 0)
                 errors.Add($"event proposal '{item.ProposalToken}' contains no new observations");
+            if (UsesObservationIsolatedOwnership(configurationIdentity) && item.NewObservationIds.Count != 1)
+                errors.Add($"observation-isolated event proposal '{item.ProposalToken}' must contain exactly one new observation");
             foreach (var observationId in item.NewObservationIds)
             {
                 if (!newObservationIds.Contains(observationId, StringComparer.Ordinal))
@@ -277,13 +284,18 @@ public static class IncidentBatchContract
         RequireValue(entry.Execution.ConfigurationIdentity, "batch execution configuration identity", errors);
         if (entry.Execution.ProposerDurationMilliseconds < 0)
             errors.Add("batch proposer duration cannot be negative");
-        if (IncidentBatchExecutionArchitecture.UsesAsynchronousProvisionalVerification(entry.Execution.ConfigurationIdentity) &&
+        if (IncidentBatchExecutionArchitecture.UsesSourceOnlyAsynchronousIntake(entry.Execution.ConfigurationIdentity) &&
             (entry.RelationshipProposal is not null || entry.ConfirmationProposal is not null))
         {
             errors.Add("asynchronous provisional intake cannot contain synchronous relationship or confirmation output");
         }
         var constructionCandidates = entry.RelationshipProposal is null ? entry.Candidates : [];
-        var proposalValidation = ValidateProposal(entry.Bundle, entry.NewObservationIds, constructionCandidates, entry.Proposal);
+        var proposalValidation = ValidateProposal(
+            entry.Bundle,
+            entry.NewObservationIds,
+            constructionCandidates,
+            entry.Proposal,
+            entry.Execution.ConfigurationIdentity);
         if (!entry.ProposalValidationErrors.SequenceEqual(proposalValidation.Errors, StringComparer.Ordinal))
             errors.Add("batch ledger proposal validation errors do not match deterministic validation");
         if (entry.RelationshipProposal is not null)
@@ -361,7 +373,8 @@ public static class IncidentBatchContract
             bundle,
             newObservationIds,
             candidates,
-            proposal with { Events = [] });
+            proposal with { Events = [] },
+            configurationIdentity);
         if (!headerValidation.IsValid)
             return [];
 
@@ -381,7 +394,8 @@ public static class IncidentBatchContract
                 bundle,
                 newObservationIds,
                 candidates,
-                proposal with { Events = [item] }).IsValid)
+                proposal with { Events = [item] },
+                configurationIdentity).IsValid)
             .ToList();
     }
 
@@ -528,6 +542,10 @@ public static class IncidentBatchContract
         configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Contains(PerCitationAcceptanceConfigurationToken, StringComparer.Ordinal);
 
+    public static bool UsesObservationIsolatedOwnership(string configurationIdentity) =>
+        configurationIdentity.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Contains(ObservationIsolatedOwnershipConfigurationToken, StringComparer.Ordinal);
+
     private static void RequireValue(string? value, string owner, List<string> errors)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -650,6 +668,22 @@ public static class IncidentBatchProjector
             {
                 var sourceEventId = sourceEventIds[relationship.SourceProposalToken];
                 var candidate = entry.Candidates.Single(item => item.CandidateToken == relationship.CandidateToken);
+                if (asynchronousProvisional)
+                {
+                    links.Add(new IncidentBatchProjectedAssociation(
+                        $"{entry.LedgerEntryId}:{relationship.SourceProposalToken}:{relationship.CandidateToken}",
+                        sourceEventId,
+                        candidate.ProjectionEventId,
+                        relationship.RelationshipStatement,
+                        relationship.Uncertainty,
+                        relationship.SourceEvidence,
+                        relationship.CandidateEvidence,
+                        relationship.AlternativeInterpretations,
+                        relationship.UnresolvedQuestions,
+                        entry.RelationshipProposal.ProposalId,
+                        entry.LedgerEntryId));
+                    continue;
+                }
                 var sourceIndex = events.FindIndex(item => item.ProjectionEventId == sourceEventId);
                 var targetIndex = events.FindIndex(item => item.ProjectionEventId == candidate.ProjectionEventId);
                 if (sourceIndex < 0 || targetIndex < 0)
@@ -803,7 +837,12 @@ public sealed class IncidentBatchCoordinator
             timer.Stop();
         }
         var constructionCandidates = _relationshipProposer is null ? candidates : [];
-        var proposalValidation = IncidentBatchContract.ValidateProposal(bundle, newObservationIds, constructionCandidates, proposal);
+        var proposalValidation = IncidentBatchContract.ValidateProposal(
+            bundle,
+            newObservationIds,
+            constructionCandidates,
+            proposal,
+            request.ConfigurationIdentity);
         IncidentBatchRelationshipProposal? relationshipProposal = null;
         IReadOnlyList<string>? relationshipValidationErrors = null;
         IncidentBatchRelationshipExecutionContext? relationshipExecution = null;
