@@ -2424,6 +2424,54 @@ Both production executors were restored immediately afterward. OT and RPI
 health were `ok`, AI failures remained zero, and `trunk-recorder` retained PID
 `3068317` on OT and `884754` on RPI.
 
+#### Phased OT cutover result
+
+Run `ot-batch-production-cutover-20260723-k` started on OT at approximately
+2026-07-23 15:45:06 UTC above no-backfill fence `1451110`. OT legacy incident
+execution was disabled while the source-isolated constructor, relationship
+stage, independent verifier, exclusive inference window, and verified canary
+persistence were enabled. RPI remained on the legacy pipeline and was not
+deployed or reconfigured.
+
+Ten batches processed 145 observations. They retained 39 singleton Review
+events, proposed four confirmed memberships and ten provisional associations,
+and left 106 observations unresolved. Fourteen relationships entered
+independent verification. At the rollback boundary, one was still pending,
+nine had been rejected, one had been verified, and three were invalid.
+
+The three invalid verifier results repeatedly supplied non-exact transcript
+quotes; one also duplicated a citation. The deterministic evidence contract
+rejected all three before projection or persistence, so the failure remained
+fail-closed. Repeated ungrounded verifier output nevertheless met the
+predeclared rollback condition.
+
+One independently verified membership completed while the rollback restart was
+in progress and exercised the live positive-write path. Calls `1451384` and
+`1451406` are adjacent Hamilton County medical transmissions about the same
+86-year-old female being transported to Memorial. The verifier cited exact
+quotes from both stored transcripts and returned no validation errors. The
+atomic canary transaction created incident `7106`, attached exactly those two
+calls, and added audit row `53507` with operation
+`incident_batch_canary_persist`. There was no ownership conflict or partial
+write. Production counts therefore advanced from 5,691 incidents, maximum ID
+7,105, and 53,506 audits to 5,692 incidents, maximum ID 7,106, and 53,507
+audits. This is an intended, grounded canary write, not a manual data change.
+
+OT was rolled back at approximately 16:07 UTC: canary persistence,
+constructor, relationship, verifier, and exclusive-window switches are off,
+and legacy incident execution is on. Only `pizzad` was restarted. OT and RPI
+health were `ok`, AI completion failures were zero, and `trunk-recorder`
+retained PID `3068317` on OT and `884754` on RPI. The configuration immediately
+before rollback is preserved at
+`/etc/pizzawave/pizzad.json.pre-rollback-20260723T160719Z.bak`.
+
+The run proves that the atomic verified-write boundary works on live evidence,
+but the current verifier is not reliable enough for continued production
+ownership. The next change must address citation generation or constrain the
+verifier to evidence selections that the application can validate without
+weakening exact grounding. Another production cutover is not justified until
+the repeated invalid-citation mode passes replay and shadow evidence.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
