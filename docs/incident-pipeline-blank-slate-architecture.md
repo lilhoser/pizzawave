@@ -2026,6 +2026,62 @@ shadow projection if intake advanced while inference was running. All of this
 remains shadow-only: it does not write production incidents or require static
 semantic rules, labels, categories, talkgroups, phrases, or quality classes.
 
+### Run F asynchronous intake-capacity checkpoint
+
+Run `ot-batch-provisional-intake-20260722-f` exercised the replacement intake
+path on OT with legacy incident construction paused, the independent verifier
+disabled, a fresh no-backfill fence at call `1442645`, and a 24-observation
+maximum batch size. The evidence stop was reached after 27.52 minutes. The
+append-only ledger retained 22 completed batches, including 21 candidate-backed
+batches, and 184 distinct observations. OT received 200 usable transcript
+observations during the same fenced interval. Intake therefore achieved 6.69
+observations per minute against 7.27 arrivals per minute and ended 16
+observations behind. This is a substantial improvement over the retired
+three-stage execution shape, but it does not provide real-time recovery
+headroom on Paxan with `qwen/qwen3.6-35b-a3b@q8_0`.
+
+All 22 constructor requests succeeded and consumed 64,727 prompt tokens and
+22,793 completion tokens. Constructor inference occupied 1,462.910 seconds,
+or 88.6 percent of the complete run. Mean constructor latency was 66.50
+seconds, median latency was 64.53 seconds, the measured 90th-percentile value
+was 126.45 seconds, and the maximum was 142.83 seconds. Retrieval used 55.311
+seconds total, including one 31.067-second outlier. Constructor plus retrieval
+therefore occupied approximately 92 percent of wall time before scheduling
+delays. The inference ledger showed no competing PizzaWave completion during
+the longest constructor request, so that tail latency was intrinsic to the
+large constructor request rather than production endpoint contention.
+
+The model proposed 62 events. Per-event validation admitted 47 as Review-only
+provisional events and rejected 15; no constructor output became an
+operator-visible incident or confirmed membership. Five batches contained
+one or more exact-citation, duplicate-observation, or duplicate-candidate
+contract violations. Those failures remained fail-closed without discarding
+valid sibling events. Only six accepted candidate relationships were enqueued
+for independent verification, and no verifier ran during the capacity test.
+This confirms both sides of the replacement boundary: candidate-aware intake
+can sharply reduce downstream verification demand, but its semantic output is
+not safe to merge without the independent verifier.
+
+The durable cursor audit found zero usable, transcription-ready calls omitted
+at or below the highest processed call ID (`1443017`). Run F wrote no
+production incident state. The constructor and verifier shadows were disabled
+at the stop boundary, legacy incident execution was restored, `pizzad` alone
+was restarted, and `trunk-recorder` retained PID `3068317`. Configuration
+snapshots are preserved at
+`/etc/pizzawave/pizzad.json.pre-ot-batch-provisional-intake-20260722-f-20260723T005957Z.bak`
+and
+`/etc/pizzawave/pizzad.json.post-ot-batch-provisional-intake-20260722-f-20260723T012728Z.bak`.
+
+Run F closes the architecture-selection experiment. The asynchronous
+provisional boundary is retained; the serial three-stage constructor is not
+restored and batch-size tuning is not repeated. The verifier must remain
+disabled until it is scheduled only from demonstrably idle capacity and cannot
+compete with intake. Separately, the constructor requires a faster capable
+local model or equivalent production compute on Paxan before this shadow can
+replace the legacy incident path. Those are explicit capacity gates, not
+reasons to weaken citation validation, introduce static semantic rules, or
+resume prompt-by-prompt architecture pivots.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
