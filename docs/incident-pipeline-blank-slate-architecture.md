@@ -2529,6 +2529,69 @@ The pre-run and stopped-run configurations are preserved at
 and
 `/etc/pizzawave/pizzad.json.stop-ot-batch-verifier-evidence-shadow-20260723-l-20260723T170806Z.bak`.
 
+#### Completed application-owned-evidence verifier shadow
+
+After OT `trunk-recorder` remained stable, run
+`ot-batch-verifier-evidence-shadow-20260723-m` started at approximately
+2026-07-23 17:13:32 UTC above no-backfill fence `1452318`. OT legacy incident
+execution was paused, application-owned verifier evidence was enabled, and
+canary persistence remained off. The correct post-restart production baseline
+was 5,698 incidents, maximum incident ID 7,112, and 53,554
+incident-operation audits. RPI remained on the legacy pipeline and was not
+deployed or reconfigured.
+
+The 45-minute run processed 339 observations in 24 constructor batches and
+completed all 15 enqueued verifications. Five relationships were verified and
+ten were rejected. There were zero invalid verifier results, zero unknown or
+misowned evidence identifiers, zero model execution errors, and zero
+production writes. Average verifier latency was 24,496 milliseconds and the
+maximum was 41,578 milliseconds. OT production counts remained exactly at the
+baseline through the stop boundary.
+
+Application-owned evidence solved the safety defect seen in verifier v3.
+Every decision used exact transcript spans resolved by the application, and
+all five verified relationships were well grounded on inspection. They
+included repeated active-shooter traffic and two matching missing-juvenile
+broadcasts. The verifier did not invent, alter, or duplicate quote text.
+
+Semantic decision quality is not yet sufficient for production ownership.
+Four of the ten rejections are likely false negatives on exact live evidence:
+
+- Two black Nissan Altima broadcasts 85 seconds apart shared the same erratic
+  driving behavior and near-identical plate fragments. The verifier treated
+  ASR's `Altima` versus `Ultima` as a material vehicle contradiction.
+- A highway crash dispatch was followed 138 and 158 seconds later by police
+  and fire traffic about an unresponsive male receiving Narcan. The verifier
+  rejected both follow-ups because they did not repeat the original location,
+  even though one explicitly repeated that units were responding to an
+  accident with injuries.
+- Continued active-shooter traffic on the same operational channel was
+  rejected after ASR rendered related phrases as `sight down`, `shooting
+  down`, and `shooter down`.
+
+The remaining six rejections were supported by materially different patients,
+locations, or operational situations. This is a small operator-style audit,
+not a statistically complete accuracy benchmark, but the repeated failure
+shape is clear: verifier v4 is fail-closed and citation-safe while remaining
+too literal about ASR variation and context carried by follow-up calls. The
+next change should correct that general reasoning boundary and route
+well-supported but still uncertain continuity to Review rather than forcing a
+hard rejection. It must not add phrase lists, address rules, talkgroup rules,
+categories, regex membership checks, or other static semantic authority.
+Another production cutover remains blocked until a bounded shadow demonstrates
+the corrected behavior without reducing citation safety.
+
+The run stopped at approximately 17:59 UTC. Constructor, relationship,
+verifier, exclusive-window, and canary switches are off, and OT legacy
+incident execution is on. The stop configuration is preserved at
+`/etc/pizzawave/pizzad.json.pre-stop-ot-batch-verifier-evidence-shadow-20260723-m-20260723T175933Z.bak`.
+The first atomic config install accidentally used ownership that prevented the
+`pizzawave` service account from reading the file, causing a brief `pizzad`
+restart loop. Ownership was corrected to `root:pizzawave`, mode `0660`, and
+`pizzad` recovered at approximately 18:00:56 UTC. No production data changed
+during the interruption. OT `trunk-recorder` retained PID `3411589` with one
+historical restart, and RPI `trunk-recorder` retained PID `884754`.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
