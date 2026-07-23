@@ -2256,6 +2256,55 @@ experiment ends architecture experimentation and moves the work to a
 reversible production canary; it is not a reason to resume prompt or batch-size
 tuning.
 
+#### Bounded integrated maintenance-window result
+
+Run `ot-batch-integrated-exclusive-20260723-i` exercised the staged path on OT
+from 2026-07-23 13:01 UTC until approximately 13:12 UTC. Legacy incident
+generation was temporarily paused on OT and RPI so the replacement could use
+the existing Paxan inference path without competing with production incident
+requests. Capture, transcription, embeddings, alerts, and `trunk-recorder`
+remained online. RPI received no replacement code, and the replacement made no
+production incident changes.
+
+Five constructor batches processed 79 new OT observations. The structural
+source contract admitted 22 singleton Review proposals, rejected one proposal
+with an invalid exact citation, admitted no multi-observation source proposal,
+and exposed no event to operators. The separate relationship stage proposed
+six possible connections. Five independent confirmations completed before the
+maintenance window ended, and all five were rejected. The remaining weak
+association stayed pending in the append-only shadow ledger when the shadow
+was disabled.
+
+The rejected relationships included several important negative controls:
+
+- a traffic blockage joined to a different collision report;
+- shoulder-pain medical traffic joined to a generic traffic-control call;
+- a location-only road call joined to the shoulder-pain call;
+- a proposed confirmed membership between `611` and a candidate transcript
+  that corrected itself from `611` to `613`; and
+- a semi blocking a road joined to an earlier lane-blockage report.
+
+This validates the staged safety boundary: a relationship-stage suggestion,
+including one labeled as confirmed membership, cannot become incident
+membership without a separate confirmation decision. It does not establish
+that the path has useful recall because the bounded sample contained no
+independently verified positive relationship.
+
+The run also did not prove combined OT-and-RPI capacity. OT source construction
+averaged 106,577 milliseconds per batch and peaked at 188,695 milliseconds.
+Completed confirmations averaged 40,654 milliseconds and peaked at 49,248
+milliseconds. RPI was paused rather than replayed through the replacement.
+Those measurements are sufficient to reject an always-on parallel deployment
+with the current inference scheduling, but they are not grounds for another
+prompt-tuning loop or a separate gateway service.
+
+At the stop boundary, constructor, relationship, and confirmation shadows were
+disabled and legacy incident generation was restored on both hosts. OT's
+latest completed source cursor advanced from `12:46:30Z` to `12:57:23Z` during
+post-window verification, and RPI advanced to `13:04:25Z`. Both health
+endpoints were `ok`, AI completion failures remained zero, and
+`trunk-recorder` retained PID `3068317` on OT and PID `884754` on RPI.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
