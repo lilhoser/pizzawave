@@ -30,6 +30,7 @@ public sealed class IncidentBatchCanaryPersistenceTests
         var incident = Assert.Single(incidents);
         Assert.Equal(appended.Commit.Commit.IncidentId, incident.Id);
         Assert.Equal(appended.Commit.Commit.IncidentKey, incident.IncidentKey);
+        Assert.Equal("White-truck crash", incident.Title);
         Assert.Equal([fixture.PriorCallId, fixture.SourceCallId], incident.Calls.Select(call => call.CallId).Order());
         Assert.Contains("White truck crash is active", incident.Detail, StringComparison.Ordinal);
         Assert.Contains("Critical injuries", incident.Detail, StringComparison.Ordinal);
@@ -217,6 +218,32 @@ public sealed class IncidentBatchCanaryPersistenceTests
     }
 
     [Fact]
+    public async Task VerifiedStandaloneEventPersistsOneCallIncidentWithVerifierTitle()
+    {
+        await using var fixture = await CanaryFixture.CreateAsync();
+        var staged = await fixture.StageVerifiedStandaloneAsync();
+
+        var appended = await fixture.Database.AppendIncidentBatchVerificationResultWithCanaryAsync(
+            staged.BaseProjectionSequence,
+            staged.SourceEntry,
+            staged.Request,
+            staged.Result,
+            staged.Projection,
+            CancellationToken.None);
+
+        Assert.Equal(IncidentBatchCanaryCommitOutcome.Persisted, appended.Commit.Commit.Outcome);
+        Assert.Equal([fixture.SourceCallId], appended.Commit.Commit.CallIds);
+        var incidents = await fixture.Database.ListIncidentsAsync(
+            fixture.Now.AddMinutes(-5).ToUnixTimeSeconds(),
+            fixture.Now.AddMinutes(5).ToUnixTimeSeconds(),
+            CancellationToken.None);
+        var incident = Assert.Single(incidents);
+        Assert.Equal("Critical injuries after white-truck crash", incident.Title);
+        Assert.Equal([fixture.SourceCallId], incident.Calls.Select(call => call.CallId));
+        Assert.Contains("Critical injuries", incident.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReviewedConfirmedMembershipIsDowngradedIntoOperatorReviewWithoutPersistingIncident()
     {
         await using var fixture = await CanaryFixture.CreateAsync();
@@ -355,6 +382,129 @@ public sealed class IncidentBatchCanaryPersistenceTests
                 0,
                 IncidentBatchConfirmationDecisionKind.Review);
 
+        public async Task<StagedVerification> StageVerifiedStandaloneAsync()
+        {
+            var sourceObservationId = $"call:{SourceCallId}";
+            var sourceObservation = new IncidentEventStateSourceObservation(
+                sourceObservationId,
+                SourceCallId,
+                Now.ToUnixTimeSeconds(),
+                string.Empty,
+                null,
+                [new IncidentEventStateTranscriptObservation(
+                    "transcript:source",
+                    "Critical injuries in that white truck crash.",
+                    "test",
+                    Now)],
+                new Dictionary<string, IncidentEventStateMetadataObservation>());
+            var bundle = new IncidentEventStateObservationBundle(
+                "bundle:standalone",
+                Now,
+                [sourceObservation],
+                []);
+            var prior = new IncidentBatchProjection(
+                RunId,
+                "projection:prior",
+                Now.AddMinutes(-1),
+                [],
+                [],
+                []);
+            var constructorProposal = new IncidentBatchProposal(
+                "proposal:standalone",
+                Now,
+                "test-model",
+                IncidentBatchPrompt.ObservationIsolatedProvisionalPromptIdentity,
+                [new IncidentBatchEventProposal(
+                    "event:standalone",
+                    IncidentBatchEventDisposition.ProvisionalEvent,
+                    string.Empty,
+                    [sourceObservationId],
+                    "Critical-injury crash",
+                    "Critical injuries were reported after a white-truck crash.",
+                    "The transmission describes a concrete incident that requires independent verification.",
+                    0.1,
+                    [new IncidentEventStateTranscriptCitation("transcript:source", "Critical injuries")],
+                    [],
+                    [],
+                    [])]);
+            var coordinator = new IncidentBatchCoordinator(
+                new FixedProposer(constructorProposal),
+                new FixedRelationshipProposer(new IncidentBatchRelationshipProposal(
+                    "relationship:standalone",
+                    Now,
+                    "test-model",
+                    IncidentBatchRelationshipPrompt.PromptIdentity,
+                    [])),
+                new IncidentBatchProvisionalStore(Database),
+                new FixedTimeProvider(Now));
+            var executionIdentity = string.Join(";",
+                "test",
+                IncidentBatchContract.PerEventAcceptanceConfigurationToken,
+                IncidentBatchContract.PerCitationAcceptanceConfigurationToken,
+                IncidentBatchExecutionArchitecture.StagedRelationshipAsynchronousConfirmationToken,
+                IncidentBatchContract.ObservationIsolatedOwnershipConfigurationToken,
+                IncidentBatchRelationshipContract.ConfigurationToken,
+                IncidentBatchStandaloneVerificationContract.ConfigurationToken,
+                IncidentBatchCanaryGate.ConfigurationToken);
+            var batch = await coordinator.RunAsync(
+                new IncidentBatchRunRequest(
+                    RunId,
+                    "ledger:standalone",
+                    "projection:standalone",
+                    [new IncidentBatchSingletonIdentity(sourceObservationId, "projection:event:source")],
+                    "test",
+                    executionIdentity),
+                bundle,
+                prior,
+                [sourceObservationId],
+                [],
+                CancellationToken.None);
+            Assert.True(
+                batch.LedgerEntry.Entry.ProposalValidationErrors.Count == 0,
+                string.Join("; ", batch.LedgerEntry.Entry.ProposalValidationErrors));
+            Assert.True(
+                (batch.LedgerEntry.Entry.RelationshipProposalValidationErrors ?? []).Count == 0,
+                string.Join("; ", batch.LedgerEntry.Entry.RelationshipProposalValidationErrors ?? []));
+            var request = Assert.Single(await Database.ListIncidentBatchVerificationRequestsAsync(
+                RunId,
+                10,
+                CancellationToken.None)).Request;
+            Assert.Equal(IncidentBatchVerificationKind.StandaloneEvent, request.Kind);
+            var proposal = new IncidentBatchStandaloneVerificationProposal(
+                "standalone-verification:canary",
+                Now.AddSeconds(1),
+                "test-verifier",
+                IncidentBatchStandaloneVerificationPrompt.PromptIdentity,
+                new IncidentBatchStandaloneVerificationDecision(
+                    "event:standalone",
+                    IncidentBatchConfirmationDecisionKind.Verify,
+                    true,
+                    "Critical injuries after white-truck crash",
+                    "The transcript directly reports a concrete crash with critical injuries.",
+                    [new IncidentEventStateTranscriptCitation("transcript:source", "Critical injuries in that white truck crash")],
+                    [],
+                    []));
+            var result = IncidentBatchVerificationQueueContract.BuildStandaloneResult(
+                batch.LedgerEntry.Entry,
+                request,
+                proposal,
+                new IncidentBatchConfirmationExecutionContext(900, string.Empty),
+                Now.AddSeconds(2));
+            var projection = IncidentBatchVerificationProjector.Apply(
+                batch.Projection.Projection,
+                batch.LedgerEntry.Entry,
+                request,
+                result,
+                "projection:standalone-verified",
+                Now.AddSeconds(2));
+            return new StagedVerification(
+                batch.Projection.Sequence,
+                batch.LedgerEntry.Entry,
+                request,
+                result,
+                projection);
+        }
+
         private async Task<StagedVerification> StageVerificationAsync(
             IncidentBatchRelationshipDisposition disposition,
             double uncertainty,
@@ -446,6 +596,7 @@ public sealed class IncidentBatchCanaryPersistenceTests
                 IncidentBatchExecutionArchitecture.StagedRelationshipAsynchronousConfirmationToken,
                 IncidentBatchContract.ObservationIsolatedOwnershipConfigurationToken,
                 IncidentBatchRelationshipContract.ConfigurationToken,
+                IncidentBatchStandaloneVerificationContract.ConfigurationToken,
                 IncidentBatchCanaryGate.ConfigurationToken);
             var batch = await coordinator.RunAsync(
                 new IncidentBatchRunRequest(
@@ -489,7 +640,10 @@ public sealed class IncidentBatchCanaryPersistenceTests
                     [],
                     confirmationDecision == IncidentBatchConfirmationDecisionKind.Review
                         ? ["The later transmission does not repeat County Road 725."]
-                        : [])]);
+                        : [],
+                    confirmationDecision == IncidentBatchConfirmationDecisionKind.Verify
+                        ? "White-truck crash"
+                        : string.Empty)]);
             var result = IncidentBatchVerificationQueueContract.BuildResult(
                 batch.LedgerEntry.Entry,
                 request,

@@ -159,7 +159,8 @@ public sealed class IncidentBatchConstructorPersistenceTests
                     [new IncidentEventStateTranscriptCitation("transcript:11", "white truck crash")],
                     [new IncidentEventStateTranscriptCitation("transcript:10", "White truck crashed")],
                     [],
-                    [])]);
+                    [],
+                    "White-truck crash")]);
             var verificationResult = IncidentBatchVerificationQueueContract.BuildResult(
                 result.LedgerEntry.Entry,
                 request,

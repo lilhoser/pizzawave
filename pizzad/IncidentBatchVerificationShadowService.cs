@@ -56,18 +56,31 @@ public sealed class IncidentBatchVerificationShadowService : BackgroundService
         var request = storedRequest.Request;
         var sourceEntry = await _database.GetIncidentBatchLedgerEntryAsync(runId, request.SourceLedgerEntryId, ct)
                           ?? throw new InvalidDataException($"Verification request '{request.RequestId}' references a missing batch ledger entry.");
-        var context = IncidentBatchVerificationQueueContract.BuildContext(sourceEntry.Entry, request);
-        var verifier = new OpenAiIncidentBatchConfirmationVerifier(_config, _database, _logger, runId);
         var timer = Stopwatch.StartNew();
-        IncidentBatchConfirmationProposal proposal;
+        IncidentBatchConfirmationProposal? relationshipProposal = null;
+        IncidentBatchStandaloneVerificationProposal? standaloneProposal = null;
         try
         {
-            proposal = await verifier.VerifyAsync(
-                sourceEntry.Entry.Bundle,
-                [context.Source],
-                [context.Candidate],
-                [context.Relationship],
-                ct);
+            if (request.Kind == IncidentBatchVerificationKind.StandaloneEvent)
+            {
+                var context = IncidentBatchVerificationQueueContract.BuildStandaloneContext(sourceEntry.Entry, request);
+                var verifier = new OpenAiIncidentBatchStandaloneVerifier(_config, _database, _logger, runId);
+                standaloneProposal = await verifier.VerifyAsync(
+                    sourceEntry.Entry.Bundle,
+                    context.Event,
+                    ct);
+            }
+            else
+            {
+                var context = IncidentBatchVerificationQueueContract.BuildContext(sourceEntry.Entry, request);
+                var verifier = new OpenAiIncidentBatchConfirmationVerifier(_config, _database, _logger, runId);
+                relationshipProposal = await verifier.VerifyAsync(
+                    sourceEntry.Entry.Bundle,
+                    [context.Source],
+                    [context.Candidate],
+                    [context.Relationship],
+                    ct);
+            }
         }
         finally
         {
@@ -75,12 +88,23 @@ public sealed class IncidentBatchVerificationShadowService : BackgroundService
         }
 
         var now = DateTimeOffset.UtcNow;
-        var result = IncidentBatchVerificationQueueContract.BuildResult(
-            sourceEntry.Entry,
-            request,
-            proposal,
-            new IncidentBatchConfirmationExecutionContext(timer.ElapsedMilliseconds, string.Empty),
-            now);
+        var execution = new IncidentBatchConfirmationExecutionContext(timer.ElapsedMilliseconds, string.Empty);
+        var result = request.Kind == IncidentBatchVerificationKind.StandaloneEvent
+            ? IncidentBatchVerificationQueueContract.BuildStandaloneResult(
+                sourceEntry.Entry,
+                request,
+                standaloneProposal ?? throw new InvalidDataException("Standalone verifier returned no proposal."),
+                execution,
+                now)
+            : IncidentBatchVerificationQueueContract.BuildResult(
+                sourceEntry.Entry,
+                request,
+                relationshipProposal ?? throw new InvalidDataException("Relationship verifier returned no proposal."),
+                execution,
+                now);
+        var proposalId = request.Kind == IncidentBatchVerificationKind.StandaloneEvent
+            ? standaloneProposal!.ProposalId
+            : relationshipProposal!.ProposalId;
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var latest = await _database.GetLatestIncidentBatchProjectionAsync(runId, ct)
@@ -90,14 +114,15 @@ public sealed class IncidentBatchVerificationShadowService : BackgroundService
                 sourceEntry.Entry,
                 request,
                 result,
-                $"batch-verification:{request.RequestId}:{proposal.ProposalId}:{attempt}",
+                $"batch-verification:{request.RequestId}:{proposalId}:{attempt}",
                 now);
             try
             {
                 IncidentBatchStoredCanaryCommit? canaryCommit = null;
                 if (_config.AiInsights.IncidentBatchCanaryPersistenceEnabled &&
                     result.Outcome == IncidentBatchVerificationOutcome.Verified &&
-                    request.ProposedDisposition == IncidentBatchEventDisposition.ConfirmedMembership)
+                    (request.Kind == IncidentBatchVerificationKind.StandaloneEvent ||
+                     request.ProposedDisposition == IncidentBatchEventDisposition.ConfirmedMembership))
                 {
                     var persisted = await _database.AppendIncidentBatchVerificationResultWithCanaryAsync(
                         latest.Sequence,
@@ -119,8 +144,9 @@ public sealed class IncidentBatchVerificationShadowService : BackgroundService
                         ct);
                 }
                 _logger.LogInformation(
-                    "Incident batch asynchronous verification completed request {RequestId}: outcome={Outcome}, durationMs={DurationMs}, validationErrors={ValidationErrorCount}, canaryPersistence={CanaryPersistence}, canaryIncidentId={CanaryIncidentId}",
+                    "Incident batch asynchronous verification completed request {RequestId}: kind={Kind}, outcome={Outcome}, durationMs={DurationMs}, validationErrors={ValidationErrorCount}, canaryPersistence={CanaryPersistence}, canaryIncidentId={CanaryIncidentId}",
                     request.RequestId,
+                    request.Kind,
                     result.Outcome,
                     timer.ElapsedMilliseconds,
                     result.ValidationErrors.Count,

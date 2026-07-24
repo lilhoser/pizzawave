@@ -493,7 +493,7 @@ public sealed partial class EngineDatabase : IIncidentBatchStore
                 "incident batch canary persistence is blocked: verification belongs to a different run");
         }
         var intent = IncidentBatchCanaryContract.BuildIntent(sourceEntry, request, result, projection)
-                     ?? throw new InvalidOperationException("only independently verified confirmed membership can be persisted by the incident batch canary");
+                     ?? throw new InvalidOperationException("only independently verified incident state can be persisted by the incident batch canary");
         var appended = await AppendIncidentBatchVerificationResultCoreAsync(
             baseProjectionSequence,
             sourceEntry,
@@ -797,8 +797,8 @@ public sealed partial class EngineDatabase : IIncidentBatchStore
                 await link.ExecuteNonQueryAsync(ct);
             }
             reason = created
-                ? "independently verified membership created the canary incident"
-                : "independently verified membership updated the canary incident";
+                ? "independently verified incident state created the canary incident"
+                : "independently verified incident state updated the canary incident";
         }
 
         var commit = new IncidentBatchCanaryCommit(
@@ -855,8 +855,8 @@ public sealed partial class EngineDatabase : IIncidentBatchStore
         var accepted = outcome == IncidentBatchCanaryCommitOutcome.Persisted;
         var auditReason = accepted
             ? created
-                ? "accepted:create incident via verified batch canary"
-                : "accepted:update incident via verified batch canary"
+                ? "accepted:create incident via verified batch pipeline"
+                : "accepted:update incident via verified batch pipeline"
             : $"rejected:verified batch canary ownership conflict: {reason}";
         var metadata = JsonSerializer.Serialize(new
         {

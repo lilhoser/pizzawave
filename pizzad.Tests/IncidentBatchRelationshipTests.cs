@@ -540,7 +540,8 @@ public sealed class IncidentBatchRelationshipTests
                 [new IncidentEventStateTranscriptCitation("transcript:2", "same white truck crash")],
                 [new IncidentEventStateTranscriptCitation("transcript:1", "White truck crashed")],
                 [],
-                [])]);
+                [],
+                "White-truck crash")]);
         var verificationResult = IncidentBatchVerificationQueueContract.BuildResult(
             result.LedgerEntry.Entry,
             request,
@@ -739,7 +740,8 @@ public sealed class IncidentBatchRelationshipTests
                     "transcript:1",
                     "patient could be alert in the store")],
                 [],
-                [])]);
+                [],
+                "Patient alert inside store")]);
         var verificationResult = IncidentBatchVerificationQueueContract.BuildResult(
             result.LedgerEntry.Entry,
             request,
@@ -824,7 +826,8 @@ public sealed class IncidentBatchRelationshipTests
                     new IncidentEventStateTranscriptCitation("transcript:2", "White truck crashed")
                 ],
                 [new IncidentEventStateTranscriptCitation("transcript:1", "White truck crashed")],
-                [], [])]));
+                [], [],
+                "White-truck crash")]));
         var prior = new IncidentBatchProjection(
             "run:verify", "projection:prior", Now.AddMinutes(-1), ["ledger:prior"],
             [new IncidentBatchProjectionEvent("projection:crash", ["call:1"], "Crash", "White truck crash", false, true, ["ledger:prior"])], []);

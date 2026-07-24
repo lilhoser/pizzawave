@@ -563,7 +563,15 @@ function App() {
     ? engineHealth.incidentAnalysisQueueHealth.message
     : "";
   const queueBlockedNotes = [engineHealth?.aiWorkBlockedReason, aiCompletionIssue, incidentAnalysisIssue, embeddingIssue].filter(Boolean);
-  const queueHealth = aiCompletionIssue || incidentAnalysisIssue || embeddingIssue ? "blocked" : queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
+  const queueActuallyBlocked = Boolean(engineHealth?.aiWorkBlockedReason);
+  const processingIssueLabel = aiCompletionIssue
+    ? "AI issue"
+    : incidentAnalysisIssue
+      ? "Incident pipeline issue"
+      : embeddingIssue
+        ? "Embedding issue"
+        : "";
+  const queueHealth = queueActuallyBlocked ? "blocked" : processingIssueLabel ? "pressure" : queueDepth <= 0 ? "clear" : engineHealth?.queueUnderPressure ? "pressure" : "draining";
   const audioTranscribedPerMinute = engineHealth?.recentAudioSecondsTranscribedPerMinute ?? 0;
   const audioIngestedPerMinute = engineHealth?.recentAudioSecondsIngestedPerMinute ?? 0;
   const ingestPaused = Boolean(engineHealth?.ingest?.paused);
@@ -608,6 +616,8 @@ function App() {
     : "No recent host resource sample.";
   const queueHealthText = queueHealth === "blocked"
     ? `Queue blocked ${queueDepth.toLocaleString()}`
+    : processingIssueLabel
+      ? processingIssueLabel
     : queueHealth === "clear"
       ? `Queue OK ${queueDepth.toLocaleString()}`
       : queueHealth === "pressure"

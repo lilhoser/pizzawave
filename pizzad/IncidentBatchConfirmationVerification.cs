@@ -20,7 +20,8 @@ public sealed record IncidentBatchConfirmationDecision(
     IReadOnlyList<IncidentEventStateTranscriptCitation> SourceEvidence,
     IReadOnlyList<IncidentEventStateTranscriptCitation> CandidateEvidence,
     IReadOnlyList<string> CounterEvidence,
-    IReadOnlyList<string> UnresolvedQuestions);
+    IReadOnlyList<string> UnresolvedQuestions,
+    string DisplayTitle = "");
 
 public sealed record IncidentBatchConfirmationProposal(
     string ProposalId,
@@ -172,6 +173,7 @@ public interface IIncidentBatchConfirmationVerifier
 
 public static class IncidentBatchConfirmationContract
 {
+    public const int MaximumDisplayTitleLength = 80;
     public const string LegacyConfigurationToken = "confirmation=independent-verifier-v1";
     public const string PreviousIndependentConfigurationToken = "relationship-verification=independent-v2";
     public const string PreviousReviewConfigurationToken = "relationship-verification=independent-v3";
@@ -201,7 +203,15 @@ public static class IncidentBatchConfirmationContract
         foreach (var unknown in actual.Except(expected, StringComparer.Ordinal))
             errors.Add($"confirmation verifier returned unknown pair '{DisplayKey(unknown)}'");
         foreach (var decision in proposal.Decisions)
+        {
             errors.AddRange(ValidateDecision(bundle, sources, candidates, expected, decision));
+            if (string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PromptIdentity, StringComparison.Ordinal) &&
+                decision.Decision == IncidentBatchConfirmationDecisionKind.Verify &&
+                string.IsNullOrWhiteSpace(decision.DisplayTitle))
+            {
+                errors.Add($"verified confirmation '{DisplayKey(DecisionKey(decision))}' requires a grounded display title");
+            }
+        }
         return new IncidentEventStateContractValidationResult(errors.Count == 0, errors);
     }
 
@@ -249,6 +259,10 @@ public static class IncidentBatchConfirmationContract
         if (retainOnlyExactEvidence)
             decisions = decisions.Select(item => RetainExactEvidence(bundle, sources, candidates, item));
         return decisions
+            .Where(item =>
+                !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PromptIdentity, StringComparison.Ordinal) ||
+                item.Decision != IncidentBatchConfirmationDecisionKind.Verify ||
+                !string.IsNullOrWhiteSpace(item.DisplayTitle))
             .Where(item => ValidateDecision(bundle, sources, candidates, expected, item).Count == 0)
             .ToDictionary(DecisionKey, item => item, StringComparer.Ordinal);
     }
@@ -336,6 +350,7 @@ public static class IncidentBatchConfirmationContract
         RequireValue(proposal.ProposalId, "confirmation proposal id", errors);
         RequireValue(proposal.ModelIdentity, "confirmation model identity", errors);
         if (!string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PromptIdentity, StringComparison.Ordinal) &&
+            !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PreviousResolvedConflictsPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PriorStructuredAdmissionPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PriorEvidenceThresholdPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PreviousReviewPromptIdentity, StringComparison.Ordinal) &&
@@ -365,6 +380,8 @@ public static class IncidentBatchConfirmationContract
             errors.Add($"confirmation statement for '{DisplayKey(key)}' exceeds {IncidentBatchRelationshipContract.MaximumTextLength} characters");
         if (!Enum.IsDefined(decision.Decision))
             errors.Add($"confirmation '{DisplayKey(key)}' has an invalid decision");
+        if (decision.DisplayTitle?.Length > MaximumDisplayTitleLength)
+            errors.Add($"confirmation display title for '{DisplayKey(key)}' exceeds {MaximumDisplayTitleLength} characters");
         if (!expected.Contains(key))
             return errors;
         var source = sources.Single(item => item.SourceProposalToken == decision.SourceProposalToken);
@@ -455,7 +472,8 @@ public static class IncidentBatchConfirmationPrompt
     public const string PreviousReviewPromptIdentity = "incident-batch-relationship-verifier-v5-review-downgrade";
     public const string PriorEvidenceThresholdPromptIdentity = "incident-batch-relationship-verifier-v6-evidence-threshold";
     public const string PriorStructuredAdmissionPromptIdentity = "incident-batch-relationship-verifier-v7-structured-admission";
-    public const string PromptIdentity = "incident-batch-relationship-verifier-v8-resolved-conflicts";
+    public const string PreviousResolvedConflictsPromptIdentity = "incident-batch-relationship-verifier-v8-resolved-conflicts";
+    public const string PromptIdentity = "incident-batch-relationship-verifier-v9-grounded-title";
 
     public static IncidentBatchConfirmationPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -514,6 +532,7 @@ public static class IncidentBatchConfirmationPrompt
         user.AppendLine("A material conflict is an explicit incompatible fact that makes separate incidents the better explanation. Set unresolved_material_conflict true only when that conflict remains after considering the supplied chronology and evidence. Different units at one scene and changing status in a later update are not conflicts. Do not use ASR uncertainty to erase clear incompatible patient, subject, vehicle, location, or circumstance evidence, but do not let one implausible ASR word override several converging specific facts.");
         user.AppendLine("Explicitly compare concrete subjects, locations, vehicles, identifiers, circumstances, operational progression, and chronology. Do not manufacture a mismatch from a detail that is merely absent or plausibly mistranscribed.");
         user.AppendLine("For verify, counter_evidence and unresolved_questions must both be empty. For review, include at least one concrete unresolved question or counterevidence item explaining why membership is not safe. Reject only when the specific relationship itself is unsupported or contradicted.");
+        user.AppendLine($"For verify, provide display_title as a concise operator-facing description of the shared event, at most {IncidentBatchConfirmationContract.MaximumDisplayTitleLength} characters. Base it only on the selected evidence, omit radio preambles and unit chatter, and introduce no unsupported fact. For review or reject, return an empty display_title.");
         user.AppendLine("Every decision must select evidence_id values from both source boundaries. Evidence spans and their exact quote text are owned by the application; return only their IDs and never generate, copy, edit, or paraphrase quote text.");
         user.AppendLine("Rejection prevents a merge but does not prove the events are unrelated; each source group remains independently reviewable.");
         user.AppendLine();
@@ -550,7 +569,7 @@ public static class IncidentBatchConfirmationPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_relationship_verifier_v8_resolved_conflicts",
+                name = "pizzawave_incident_batch_relationship_verifier_v9_grounded_title",
                 strict = true,
                 schema = new
                 {
@@ -576,13 +595,14 @@ public static class IncidentBatchConfirmationPrompt
                                     material_conflicts = Strings(),
                                     unresolved_material_conflict = new { type = "boolean" },
                                     decision = new { type = "string", @enum = new[] { "verify", "review", "reject" } },
+                                    display_title = new { type = "string", maxLength = IncidentBatchConfirmationContract.MaximumDisplayTitleLength },
                                     verification_statement = new { type = "string", maxLength = IncidentBatchRelationshipContract.MaximumTextLength },
                                     source_evidence_ids = EvidenceIds(sourceEvidenceIds),
                                     candidate_evidence_ids = EvidenceIds(candidateEvidenceIds),
                                     counter_evidence = Strings(),
                                     unresolved_questions = Strings()
                                 },
-                                required = new[] { "source_proposal_token", "candidate_token", "shared_connection_facts", "specific_connection_supported", "material_conflicts", "unresolved_material_conflict", "decision", "verification_statement", "source_evidence_ids", "candidate_evidence_ids", "counter_evidence", "unresolved_questions" }
+                                required = new[] { "source_proposal_token", "candidate_token", "shared_connection_facts", "specific_connection_supported", "material_conflicts", "unresolved_material_conflict", "decision", "display_title", "verification_statement", "source_evidence_ids", "candidate_evidence_ids", "counter_evidence", "unresolved_questions" }
                             }
                         }
                     },
@@ -674,7 +694,8 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
                         item.UnresolvedMaterialConflict,
                         item.MaterialConflicts,
                         item.CounterEvidence),
-                    item.UnresolvedQuestions);
+                    item.UnresolvedQuestions,
+                    item.DisplayTitle);
             }).ToList();
             await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
             return new IncidentBatchConfirmationProposal($"model:incident-batch-confirmation:{Guid.NewGuid():N}", DateTimeOffset.UtcNow, responseModel, IncidentBatchConfirmationPrompt.PromptIdentity, decisions);
@@ -730,6 +751,7 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
         [property: JsonPropertyName("material_conflicts")] IReadOnlyList<string> MaterialConflicts,
         [property: JsonPropertyName("unresolved_material_conflict")] bool UnresolvedMaterialConflict,
         [property: JsonPropertyName("decision")] string Decision,
+        [property: JsonPropertyName("display_title")] string DisplayTitle,
         [property: JsonPropertyName("verification_statement")] string VerificationStatement,
         [property: JsonPropertyName("source_evidence_ids")] IReadOnlyList<string> SourceEvidenceIds,
         [property: JsonPropertyName("candidate_evidence_ids")] IReadOnlyList<string> CandidateEvidenceIds,

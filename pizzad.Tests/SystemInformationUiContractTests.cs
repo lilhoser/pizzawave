@@ -295,6 +295,8 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("aria-label=\"Call data window\"", source, StringComparison.Ordinal);
         Assert.Contains("onClick={() => goSystem(\"services\")}>{livePillText}</button>", source, StringComparison.Ordinal);
         Assert.Contains("onClick={() => goSystem(\"jobs\")}>Jobs", source, StringComparison.Ordinal);
+        Assert.Contains("const queueActuallyBlocked = Boolean(engineHealth?.aiWorkBlockedReason)", source, StringComparison.Ordinal);
+        Assert.Contains("? \"AI issue\"", source, StringComparison.Ordinal);
         Assert.Contains("`Queue blocked ${queueDepth.toLocaleString()}`", source, StringComparison.Ordinal);
     }
 

@@ -3115,6 +3115,39 @@ decision. Transcription and embedding queues were healthy. OT
 `trunk-recorder` remained PID `2409838` with restart count 2. RPI was neither
 deployed nor reconfigured.
 
+#### Independently verified standalone incidents and display titles
+
+The initial permanent writer admitted only independently verified relationships.
+That made every incident require at least two related calls, even when one
+transmission already contained enough evidence for a concrete incident. It
+also used a clipped evidence span as the incident title. Neither behavior is an
+architectural requirement.
+
+The replacement now queues a separate verification request for each accepted
+standalone constructor event that is not already participating in an accepted
+same-batch relationship. The standalone verifier receives only that event's
+new observations. It must decide Verify, Review, or Reject; cite exact source
+transcript evidence; state whether a concrete operator-worthy occurrence is
+supported; and provide a concise evidence-grounded display title. Verify
+persists a one-call incident through the same audited writer. Review remains
+non-persistent operator-review state, and Reject or invalid output fails closed.
+If a later verified relationship connects another call, the existing projection
+event and incident key are reused, so the incident is updated rather than
+duplicated.
+
+Relationship verification remains independent and mandatory for call
+membership. Its existing response schema now also supplies the concise display
+title used after a verified merge. Title generation therefore adds no model
+request and has no authority over membership. Both title contracts are bounded
+to 80 characters, require application-validated evidence, and contain no
+address, phrase, category, talkgroup, system, label, or event-taxonomy rule.
+
+The global status pill was corrected at the same boundary. A recent AI,
+incident-pipeline, or embedding warning no longer renders as `Queue blocked 0`.
+Only an explicit `aiWorkBlockedReason` may claim that work is blocked; otherwise
+the pill names the actual subsystem issue while retaining the detailed health
+message.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

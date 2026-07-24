@@ -107,7 +107,9 @@ public static class IncidentBatchCanaryContract
         if (projection.RunId != request.RunId)
             throw new ArgumentException("canary projection belongs to a different run", nameof(projection));
 
-        if (result.Outcome != IncidentBatchVerificationOutcome.Verified ||
+        if (result.Outcome != IncidentBatchVerificationOutcome.Verified)
+            return null;
+        if (request.Kind == IncidentBatchVerificationKind.Relationship &&
             request.ProposedDisposition != IncidentBatchEventDisposition.ConfirmedMembership)
             return null;
         var configurationTokens = sourceEntry.Execution.ConfigurationIdentity
@@ -116,34 +118,53 @@ public static class IncidentBatchCanaryContract
         if (sourceEntry.RelationshipProposal is null ||
             !configurationTokens.Contains(IncidentBatchExecutionArchitecture.StagedRelationshipAsynchronousConfirmationToken) ||
             !configurationTokens.Contains(IncidentBatchContract.ObservationIsolatedOwnershipConfigurationToken) ||
-            !configurationTokens.Contains(IncidentBatchCanaryGate.ConfigurationToken))
+            !configurationTokens.Contains(IncidentBatchCanaryGate.ConfigurationToken) ||
+            (request.Kind == IncidentBatchVerificationKind.StandaloneEvent &&
+             !configurationTokens.Contains(IncidentBatchStandaloneVerificationContract.ConfigurationToken)))
         {
             throw new InvalidDataException(
                 "verified canary membership did not originate from the staged observation-isolated canary architecture");
         }
 
-        var context = IncidentBatchVerificationQueueContract.BuildContext(sourceEntry, request);
-        var target = projection.Events.SingleOrDefault(item =>
-            item.ProjectionEventId == context.Candidate.ProjectionEventId);
+        IncidentBatchProjectionEvent? target;
+        double score;
+        if (request.Kind == IncidentBatchVerificationKind.StandaloneEvent)
+        {
+            var context = IncidentBatchVerificationQueueContract.BuildStandaloneContext(sourceEntry, request);
+            var sourceObservationIds = context.Event.NewObservationIds.ToHashSet(StringComparer.Ordinal);
+            target = projection.Events.SingleOrDefault(item =>
+                sourceObservationIds.IsSubsetOf(item.ObservationIds));
+            score = Math.Clamp(1d - context.Event.Uncertainty, 0d, 1d);
+        }
+        else
+        {
+            var context = IncidentBatchVerificationQueueContract.BuildContext(sourceEntry, request);
+            target = projection.Events.SingleOrDefault(item =>
+                item.ProjectionEventId == context.Candidate.ProjectionEventId);
+            if (target is not null &&
+                (!context.Source.NewObservationIds.ToHashSet(StringComparer.Ordinal).IsSubsetOf(target.ObservationIds) ||
+                 !context.Candidate.ObservationIds.ToHashSet(StringComparer.Ordinal).IsSubsetOf(target.ObservationIds)))
+            {
+                throw new InvalidDataException("verified canary target does not own both sides of the confirmed relationship");
+            }
+            score = Math.Clamp(1d - context.Relationship.Uncertainty, 0d, 1d);
+        }
         if (target is null)
             throw new InvalidDataException("verified canary target is absent from the resulting projection");
         if (!target.OperatorVisible || target.OperatorReview)
             throw new InvalidDataException("verified canary target is not an operator-visible confirmed event");
-        if (!context.Source.NewObservationIds.ToHashSet(StringComparer.Ordinal).IsSubsetOf(target.ObservationIds) ||
-            !context.Candidate.ObservationIds.ToHashSet(StringComparer.Ordinal).IsSubsetOf(target.ObservationIds))
-            throw new InvalidDataException("verified canary target does not own both sides of the confirmed relationship");
 
         var callIds = target.ObservationIds
             .Select(ParseCallObservationId)
             .Distinct()
             .Order()
             .ToList();
-        if (callIds.Count < 2)
-            throw new InvalidDataException("verified canary incidents require at least two distinct calls");
+        var minimumCallCount = request.Kind == IncidentBatchVerificationKind.StandaloneEvent ? 1 : 2;
+        if (callIds.Count < minimumCallCount)
+            throw new InvalidDataException($"verified canary incidents require at least {minimumCallCount} distinct call(s)");
         if (string.IsNullOrWhiteSpace(target.Title) || string.IsNullOrWhiteSpace(target.Summary))
             throw new InvalidDataException("verified canary incidents require source-grounded title and detail");
 
-        var score = Math.Clamp(1d - context.Relationship.Uncertainty, 0d, 1d);
         return new IncidentBatchCanaryPersistenceIntent(
             request.RunId,
             request.RequestId,
