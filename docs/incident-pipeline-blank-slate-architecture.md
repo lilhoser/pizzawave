@@ -3161,6 +3161,51 @@ while forbidding silent ASR repair and unsupported names, locations, agencies,
 medications, diagnoses, conditions, or status. This remains a model-owned
 presentation constraint, not a static semantic rule or a persistence gate.
 
+#### Conservative rollback after a confounded capacity signal
+
+The standalone-verification deployment remained grounded, but aggregate RPI
+queue telemetry raised a possible shared-Paxan capacity concern. While the OT
+replacement was active, RPI pending legacy work increased from 124 to 158 calls
+and the latest-completed source age increased from 7 to 17 minutes. The age
+then fell to 6 minutes around the time OT was rolled back. At approximately
+2026-07-24 00:56:27 UTC, the monitor conservatively disabled OT replacement
+ownership, verified persistence, constructor, relationship, verifier, and the
+exclusive inference window, then restored OT legacy incident execution. Only
+`pizzad` was restarted. No production data was changed manually, RPI was not
+deployed or reconfigured, and the pre-rollback configuration is preserved at:
+
+`/etc/pizzawave/pizzad.json.pre-capacity-rollback-20260724T0055Z.bak`
+
+Detailed request timing does not establish that the replacement starved RPI.
+The RPI legacy batch associated with the apparent recovery started at
+00:52:18 UTC, while the replacement was still active, and completed at
+00:56:25 UTC, approximately two seconds before the rollback. RPI legacy also
+performs a long extraction followed by multiple sequential evidence-verifier
+requests, so queue depth and completion age naturally oscillate with its batch
+phase. Shared-Paxan contention remains plausible, but the aggregate before/after
+samples are confounded and are not causal evidence.
+
+OT legacy began its first post-rollback extraction at 00:57:24 UTC and returned
+to current health by approximately 01:00:36 UTC. At 01:10:49 UTC, OT
+`trunk-recorder` independently exited because source 3 stopped receiving
+samples; systemd restarted it at 01:10:59 UTC as PID `330696`, restart count 3.
+Codex did not restart it. RPI `trunk-recorder` remained PID `884754`, restart
+count 0.
+
+After another 30 continuous minutes, both systems remained healthy and were
+completing fresh legacy work. At the final checkpoint, OT's latest completed
+source call was 11 minutes old with 204 pending and zero stale calls; RPI's was
+5 minutes old with 88 pending and one stale call. Recorder processes remained
+stable, OT legacy execution remained enabled, and all replacement execution,
+persistence, and ownership switches remained disabled.
+
+This rollback does not reject the replacement architecture or prove a Paxan
+capacity defect. Before another cutover, the remaining production gate is a
+controlled capacity comparison that records request occupancy, completion
+throughput, and queue latency for both systems under equivalent traffic
+windows. If simultaneous service cannot meet the currency objective, inference
+must be scheduled explicitly rather than relying on unsynchronized requests.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.
