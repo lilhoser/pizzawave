@@ -31,6 +31,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Assert that the trace window includes all verification requests for this pipeline.",
     )
+    parser.add_argument(
+        "--request-timings",
+        help="Optional reconciled request-timing JSON for a host without native duration telemetry.",
+    )
     return parser.parse_args()
 
 
@@ -66,6 +70,14 @@ def main() -> None:
 
     with sqlite3.connect(source_uri, uri=True) as source:
         source.row_factory = sqlite3.Row
+        usage_columns = {
+            str(row[1]) for row in source.execute("pragma table_info(lm_usage)")
+        }
+        duration_expression = (
+            "duration_milliseconds"
+            if "duration_milliseconds" in usage_columns
+            else "0"
+        )
         if args.pipeline == "legacy":
             usable = source.execute(
                 "select count(*) from calls where start_time >= ? and start_time < ? "
@@ -106,11 +118,28 @@ def main() -> None:
             "sum(case when success = 0 then 1 else 0 end) failed, "
             "coalesce(sum(prompt_tokens), 0) prompt, "
             "coalesce(sum(completion_tokens), 0) completion, "
-            "coalesce(sum(duration_milliseconds), 0) duration "
+            f"coalesce(sum({duration_expression}), 0) duration "
             f"from lm_usage where trigger_activity in ({placeholders}) "
             "and timestamp_utc >= ? and timestamp_utc < ?",
             (*triggers, start_utc, end_utc),
         ).fetchone()
+
+    request_duration = usage["duration"]
+    if args.request_timings:
+        timings = json.loads(
+            pathlib.Path(args.request_timings).resolve().read_text(encoding="utf-8")
+        )
+        if timings.get("systemId") != args.system_id.strip():
+            raise ValueError("request timings system does not match the trace")
+        if timings.get("cohortId") != args.cohort_id.strip():
+            raise ValueError("request timings cohort does not match the trace")
+        if timings.get("windowStartUtc") != start_utc or timings.get("windowEndUtc") != end_utc:
+            raise ValueError("request timings window does not match the trace")
+        if int(timings.get("requestCount") or 0) != int(usage["requests"]):
+            raise ValueError("request timings count does not match recorded LM usage")
+        request_duration = int(timings.get("requestDurationMilliseconds") or 0)
+    if usage["requests"] and request_duration <= 0:
+        raise ValueError("measured requests require positive duration telemetry")
 
     pipeline_name = "Legacy" if args.pipeline == "legacy" else "ProvisionalIntake"
     trace_id = (args.trace_id or "").strip() or (
@@ -130,7 +159,7 @@ def main() -> None:
         "failedRequests": usage["failed"] or 0,
         "promptTokens": usage["prompt"],
         "completionTokens": usage["completion"],
-        "requestDurationMilliseconds": usage["duration"],
+        "requestDurationMilliseconds": request_duration,
         "candidateBackedBatches": candidate_batches,
         "includesVerification": True,
     }
