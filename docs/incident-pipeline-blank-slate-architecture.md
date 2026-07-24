@@ -3148,6 +3148,19 @@ Only an explicit `aiWorkBlockedReason` may claim that work is blocked; otherwise
 the pill names the actual subsystem issue while retaining the detailed health
 message.
 
+The first two post-deployment batches proved the standalone path and also
+identified a presentation-only boundary. Seven standalone decisions completed
+without validation errors: five Verify decisions created one-call incidents
+and two Reject decisions created nothing. The incident facts and call ownership
+were grounded, but two generated titles silently repaired garbled ASR into an
+unsupported proper name or added a clinical interpretation not stated
+explicitly in the selected spans. This did not influence verification or
+membership, but it was not acceptable display grounding. The title prompts were
+therefore versioned again to require natural paraphrase of the ordinary event
+while forbidding silent ASR repair and unsupported names, locations, agencies,
+medications, diagnoses, conditions, or status. This remains a model-owned
+presentation constraint, not a static semantic rule or a persistence gate.
+
 ### Initial OT shadow checkpoint
 
 Commit `f571fd3` was deployed to OT only on 2026-07-21. RPI was not changed.

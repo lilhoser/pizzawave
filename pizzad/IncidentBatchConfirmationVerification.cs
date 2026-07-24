@@ -205,7 +205,7 @@ public static class IncidentBatchConfirmationContract
         foreach (var decision in proposal.Decisions)
         {
             errors.AddRange(ValidateDecision(bundle, sources, candidates, expected, decision));
-            if (string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PromptIdentity, StringComparison.Ordinal) &&
+            if (IncidentBatchConfirmationPrompt.RequiresGroundedDisplayTitle(proposal.PromptIdentity) &&
                 decision.Decision == IncidentBatchConfirmationDecisionKind.Verify &&
                 string.IsNullOrWhiteSpace(decision.DisplayTitle))
             {
@@ -260,7 +260,7 @@ public static class IncidentBatchConfirmationContract
             decisions = decisions.Select(item => RetainExactEvidence(bundle, sources, candidates, item));
         return decisions
             .Where(item =>
-                !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PromptIdentity, StringComparison.Ordinal) ||
+                !IncidentBatchConfirmationPrompt.RequiresGroundedDisplayTitle(proposal.PromptIdentity) ||
                 item.Decision != IncidentBatchConfirmationDecisionKind.Verify ||
                 !string.IsNullOrWhiteSpace(item.DisplayTitle))
             .Where(item => ValidateDecision(bundle, sources, candidates, expected, item).Count == 0)
@@ -351,6 +351,7 @@ public static class IncidentBatchConfirmationContract
         RequireValue(proposal.ModelIdentity, "confirmation model identity", errors);
         if (!string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PreviousResolvedConflictsPromptIdentity, StringComparison.Ordinal) &&
+            !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PreviousGroundedTitlePromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PriorStructuredAdmissionPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PriorEvidenceThresholdPromptIdentity, StringComparison.Ordinal) &&
             !string.Equals(proposal.PromptIdentity, IncidentBatchConfirmationPrompt.PreviousReviewPromptIdentity, StringComparison.Ordinal) &&
@@ -473,7 +474,12 @@ public static class IncidentBatchConfirmationPrompt
     public const string PriorEvidenceThresholdPromptIdentity = "incident-batch-relationship-verifier-v6-evidence-threshold";
     public const string PriorStructuredAdmissionPromptIdentity = "incident-batch-relationship-verifier-v7-structured-admission";
     public const string PreviousResolvedConflictsPromptIdentity = "incident-batch-relationship-verifier-v8-resolved-conflicts";
-    public const string PromptIdentity = "incident-batch-relationship-verifier-v9-grounded-title";
+    public const string PreviousGroundedTitlePromptIdentity = "incident-batch-relationship-verifier-v9-grounded-title";
+    public const string PromptIdentity = "incident-batch-relationship-verifier-v10-literal-title-boundary";
+
+    public static bool RequiresGroundedDisplayTitle(string promptIdentity) =>
+        string.Equals(promptIdentity, PromptIdentity, StringComparison.Ordinal) ||
+        string.Equals(promptIdentity, PreviousGroundedTitlePromptIdentity, StringComparison.Ordinal);
 
     public static IncidentBatchConfirmationPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -532,7 +538,8 @@ public static class IncidentBatchConfirmationPrompt
         user.AppendLine("A material conflict is an explicit incompatible fact that makes separate incidents the better explanation. Set unresolved_material_conflict true only when that conflict remains after considering the supplied chronology and evidence. Different units at one scene and changing status in a later update are not conflicts. Do not use ASR uncertainty to erase clear incompatible patient, subject, vehicle, location, or circumstance evidence, but do not let one implausible ASR word override several converging specific facts.");
         user.AppendLine("Explicitly compare concrete subjects, locations, vehicles, identifiers, circumstances, operational progression, and chronology. Do not manufacture a mismatch from a detail that is merely absent or plausibly mistranscribed.");
         user.AppendLine("For verify, counter_evidence and unresolved_questions must both be empty. For review, include at least one concrete unresolved question or counterevidence item explaining why membership is not safe. Reject only when the specific relationship itself is unsupported or contradicted.");
-        user.AppendLine($"For verify, provide display_title as a concise operator-facing description of the shared event, at most {IncidentBatchConfirmationContract.MaximumDisplayTitleLength} characters. Base it only on the selected evidence, omit radio preambles and unit chatter, and introduce no unsupported fact. For review or reject, return an empty display_title.");
+        user.AppendLine($"For verify, provide display_title as a concise, natural operator-facing description of the shared event, at most {IncidentBatchConfirmationContract.MaximumDisplayTitleLength} characters. Base it only on facts explicitly stated in selected evidence and omit radio preambles and unit chatter.");
+        user.AppendLine("You may paraphrase the ordinary event description, but never silently repair or expand garbled ASR. Do not infer a proper name, location, agency, medication, diagnosis, condition, or status that is not clearly stated in the evidence text. When a name or place is unclear, omit it. Avoid redundant phrases. For review or reject, return an empty display_title.");
         user.AppendLine("Every decision must select evidence_id values from both source boundaries. Evidence spans and their exact quote text are owned by the application; return only their IDs and never generate, copy, edit, or paraphrase quote text.");
         user.AppendLine("Rejection prevents a merge but does not prove the events are unrelated; each source group remains independently reviewable.");
         user.AppendLine();
@@ -569,7 +576,7 @@ public static class IncidentBatchConfirmationPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_relationship_verifier_v9_grounded_title",
+                name = "pizzawave_incident_batch_relationship_verifier_v10_literal_title_boundary",
                 strict = true,
                 schema = new
                 {

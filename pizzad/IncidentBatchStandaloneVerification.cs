@@ -48,7 +48,8 @@ public static class IncidentBatchStandaloneVerificationContract
             errors.Add("standalone verification proposal id is required");
         if (string.IsNullOrWhiteSpace(proposal.ModelIdentity))
             errors.Add("standalone verification model identity is required");
-        if (!string.Equals(proposal.PromptIdentity, IncidentBatchStandaloneVerificationPrompt.PromptIdentity, StringComparison.Ordinal))
+        if (!string.Equals(proposal.PromptIdentity, IncidentBatchStandaloneVerificationPrompt.PromptIdentity, StringComparison.Ordinal) &&
+            !string.Equals(proposal.PromptIdentity, IncidentBatchStandaloneVerificationPrompt.PreviousPromptIdentity, StringComparison.Ordinal))
             errors.Add("standalone verification prompt identity does not match the contract");
         if (proposal.GeneratedAtUtc == default)
             errors.Add("standalone verification timestamp is required");
@@ -155,7 +156,8 @@ public sealed record IncidentBatchStandaloneVerificationPromptPayload(
 
 public static class IncidentBatchStandaloneVerificationPrompt
 {
-    public const string PromptIdentity = "incident-batch-standalone-verifier-v1-grounded-title";
+    public const string PreviousPromptIdentity = "incident-batch-standalone-verifier-v1-grounded-title";
+    public const string PromptIdentity = "incident-batch-standalone-verifier-v2-literal-title-boundary";
 
     public static IncidentBatchStandaloneVerificationPromptPayload Build(
         IncidentEventStateObservationBundle bundle,
@@ -201,7 +203,8 @@ public static class IncidentBatchStandaloneVerificationPrompt
         user.AppendLine("Verify only when the transcript itself establishes a specific active or recently reported situation, response, hazard, crime, medical need, fire, missing person, traffic event, or other concrete occurrence. This list is illustrative, not a fixed taxonomy.");
         user.AppendLine("Reject routine identifiers, acknowledgements, channel logistics, generic status chatter, unintelligible fragments, and statements that do not establish a concrete occurrence.");
         user.AppendLine("Use review only when a concrete occurrence is evidenced but a material ambiguity prevents safe publication as a normal incident. Review never persists an incident.");
-        user.AppendLine("For verify, provide a concise operator-facing display_title based only on selected evidence. Omit radio preambles, unit chatter, and unsupported details.");
+        user.AppendLine("For verify, provide a concise, natural operator-facing display_title based only on facts explicitly stated in selected evidence. Omit radio preambles and unit chatter.");
+        user.AppendLine("You may paraphrase the ordinary event description, but never silently repair or expand garbled ASR. Do not infer a proper name, location, agency, medication, diagnosis, condition, or status that is not clearly stated in the evidence text. When a name or place is unclear, omit it. Avoid redundant phrases.");
         user.AppendLine($"display_title must be at most {IncidentBatchConfirmationContract.MaximumDisplayTitleLength} characters. For reject return an empty display_title.");
         user.AppendLine("Select one or more application-owned evidence_id values. Never generate, edit, or paraphrase quote text.");
         user.AppendLine("For verify, counter_evidence and unresolved_questions must be empty. For review, include the concrete remaining issue.");
@@ -220,7 +223,7 @@ public static class IncidentBatchStandaloneVerificationPrompt
             type = "json_schema",
             json_schema = new
             {
-                name = "pizzawave_incident_batch_standalone_verifier_v1",
+                name = "pizzawave_incident_batch_standalone_verifier_v2_literal_title_boundary",
                 strict = true,
                 schema = new
                 {
