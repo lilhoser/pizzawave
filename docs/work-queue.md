@@ -104,9 +104,12 @@ Cross-repository source state:
   replay did not attribute that improvement to FSK4: CQPSK produced 2,217
   messages versus FSK4's 2,161 with identical post-trigger deep-window counts.
   The exact pre-test CQPSK binary/config is restored and verified healthy.
-  FSK4 helps some retained impairment shapes but is not a general fix. The next
-  bounded discriminator is the existing BPF-800-M on RPI's Raymond RF path.
-  OT uses
+  FSK4 helps some retained impairment shapes but is not a general fix. The
+  BPF-800-M remains a later out-of-band-overload check, not the next
+  root-cause test. The next OT discriminator is the staged Ventax comparison:
+  first compare independent decoders using the exact same retained IQ, then
+  use a separate MCA208M output, matching RTL-SDR, and independent Ventax USB
+  path only if the same-IQ result warrants a live receiver comparison. OT uses
   RTL-SDR receivers behind an MCA208M while RPI uses Airspy receivers without
   that multicoupler;
   this hardware difference further weakens a single receiver/front-end-overload
@@ -240,9 +243,12 @@ Cross-repository source state:
      simulcast/multipath as the leading per-rig causes. The two triggers being
      42 seconds apart is a quota-selection artifact, not evidence of one shared
      interferer;
-   - use relocation of each existing antenna by roughly 8-15 inches as the
-     next no-new-antenna hardware test. Keep gain, centering, and recovery policy
-     unchanged during the comparison;
+   - for RPI, retain an 8-15 inch relocation as a later no-new-antenna
+     discriminator when the rig is physically available. For OT, do not
+     randomly move the 20-foot mast: the complete PCTEL MFBW7463 radiator is
+     already above the roofline. Follow the staged
+     [OT Ventax decoder-isolation handoff](field-tests/2026-07-24-ot-ventax-decoder-isolation-handoff.md)
+     instead;
    - retain OT North Bradley capture `1784584105012` as the completed cross-
      geography discriminator: its IQ power/CNR changed only about 0.4/0.5 dB,
      sample continuity was clean, and a fresh replay reproduced the low decode;

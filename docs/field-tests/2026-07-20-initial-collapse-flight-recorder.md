@@ -931,6 +931,18 @@ unchanged received channel power. Raymond can also experience a real received
 control-channel fade. Neither capture contained nonfinite, zero, or repeated
 adjacent samples, so neither edge is an SDR sample-delivery artifact.
 
+A second complete North Bradley event at `1784732918021` was initially omitted
+from this record. Its IQ file is 69,120,000 bytes with SHA-256
+`1d013a8bd266f84eaaee529a5383e828fd411ad76ad1dfdfd08a93e84638b454`;
+its JSON SHA-256 is
+`d0d98a4a6f7c871de7483d275dd497b6ce937d3bb0d4c0e7638f5d4e056dfbc4`
+and `completedUnixMs` is `1784732978271`. Both decoders fell on the fixed
+769.606250 MHz primary. Low-window narrow power was 2.47 dB below the healthy
+pre-trigger window, Hamilton and Cleveland stayed healthy, and samples were
+clean. Live recovered quickly after retuning while the fixed-primary shadow
+remained near 1 frame/sec. This is another site-local North Bradley impairment,
+not a host-wide or sample-delivery failure.
+
 The first rearm implementation exposed a quota flaw. OT began an incomplete
 Hamilton capture at `1784732621084`; North Bradley retune/Gardner scheduler
 errors had already begun about seven seconds earlier, and source 3 stopped
@@ -1041,13 +1053,16 @@ Next:
    channel during Raymond failure would be much stronger evidence than weather
    correlation.
 4. For OT, do not add another antenna and do not use the BPF-800-M as the next
-   test. First move the existing omni by roughly one wavelength if physically
-   practical and compare North Bradley episode rate while Hamilton and
-   Cleveland remain controls. If relocation is impossible or ineffective, the
-   durable hardware remedy is replacing, not supplementing, the omni with a
-   site-favoring directional antenna or using a receiver/demodulator designed
-   for P25 LSM. Keep co-channel work secondary unless a nonlocal NAC or site
-   identity appears.
+   test. The antenna is an in-band PCTEL MFBW7463 mounted about 20 feet high on
+   a PVC mast, roughly 16 inches from the metal building, with its complete
+   radiator above the roofline. Randomly moving that installation is not the
+   next controlled discriminator. First run the two-stage Ventax experiment:
+   compare independent decoders against the exact same retained IQ, then, only
+   if justified, compare a separate RTL-SDR and USB path from another MCA208M
+   output. The authoritative runbook is
+   [2026-07-24-ot-ventax-decoder-isolation-handoff.md](2026-07-24-ot-ventax-decoder-isolation-handoff.md).
+   Keep co-channel work secondary unless a nonlocal NAC or site identity
+   appears.
 5. Do not prioritize the BPF-800-M as a root-cause test. An in-band P25
    signal at the exact same frequency will pass that filter; it remains useful
    only as a final check for unrelated out-of-band front-end stress.
