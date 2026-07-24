@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -308,6 +309,7 @@ public sealed class OpenAiIncidentBatchStandaloneVerifier : IIncidentBatchStanda
         var endpoint = $"{_config.AiInsights.OpenAiBaseUrl.TrimEnd('/')}/chat/completions";
         var payload = JsonSerializer.Serialize(body, EngineConfig.JsonOptions());
         var responseText = string.Empty;
+        var requestStarted = Stopwatch.GetTimestamp();
         try
         {
             using var content = new StringContent(payload, Encoding.UTF8, "application/json");
@@ -346,7 +348,7 @@ public sealed class OpenAiIncidentBatchStandaloneVerifier : IIncidentBatchStanda
                 IncidentBatchConfirmationEvidenceCatalog.Resolve(parsed.EvidenceIds, evidenceCatalog),
                 parsed.CounterEvidence,
                 parsed.UnresolvedQuestions);
-            await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
+            await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ElapsedMilliseconds(requestStarted), ct);
             return new IncidentBatchStandaloneVerificationProposal(
                 $"model:incident-batch-standalone-verification:{Guid.NewGuid():N}",
                 DateTimeOffset.UtcNow,
@@ -363,6 +365,7 @@ public sealed class OpenAiIncidentBatchStandaloneVerifier : IIncidentBatchStanda
                 payload.Length,
                 false,
                 ex.GetBaseException().Message,
+                ElapsedMilliseconds(requestStarted),
                 CancellationToken.None);
             throw;
         }
@@ -375,6 +378,7 @@ public sealed class OpenAiIncidentBatchStandaloneVerifier : IIncidentBatchStanda
         int payloadChars,
         bool success,
         string error,
+        long durationMilliseconds,
         CancellationToken ct)
     {
         var usage = ReadUsage(responseText);
@@ -395,7 +399,8 @@ public sealed class OpenAiIncidentBatchStandaloneVerifier : IIncidentBatchStanda
                 payloadChars,
                 usage.PromptTokens,
                 usage.CompletionTokens,
-                usage.TotalTokens), ct);
+                usage.TotalTokens,
+                durationMilliseconds), ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -439,6 +444,8 @@ public sealed class OpenAiIncidentBatchStandaloneVerifier : IIncidentBatchStanda
     }
 
     private static string Trim(string value, int limit) => value.Length <= limit ? value : value[..limit];
+    private static long ElapsedMilliseconds(long started) =>
+        Math.Max(0, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
 
     private sealed record StandaloneResponse(
         [property: JsonPropertyName("source_proposal_token")] string SourceProposalToken,

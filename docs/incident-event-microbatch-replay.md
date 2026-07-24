@@ -271,8 +271,11 @@ The combined-capacity mode compares the established shared-Paxan legacy
 control with a mixed replacement run and a projected two-system replacement.
 It does not call a model, inspect transcript content, modify incidents, or
 declare the stable legacy pipeline overloaded. Capacity traces contain only
-bounded observation counts, request counts, token usage, constructor duration,
-and candidate-backed batch counts.
+bounded observation counts, request counts, token usage, measured endpoint
+duration, and candidate-backed batch counts. Protocol v2 requires every trace
+to include extraction and verification workload. It rejects the earlier
+constructor-only traces because they cannot answer the production capacity
+question.
 
 Export four traces from source databases opened read-only:
 
@@ -281,12 +284,14 @@ python3 scripts/export_incident_capacity_trace.py \
   --source /var/lib/pizzawave/pizzad.db \
   --output /tmp/ot-control.json \
   --cohort-id stable-control --system-id ot --pipeline legacy \
+  --includes-verification \
   --start CONTROL_START --end CONTROL_END
 
 python3 scripts/export_incident_capacity_trace.py \
   --source /var/lib/pizzawave/pizzad.db \
   --output /tmp/ot-run-f.json \
   --cohort-id run-f --system-id ot --pipeline provisional-intake \
+  --includes-verification \
   --run-id ot-batch-provisional-intake-20260722-f \
   --start-after-call-id 1442645 \
   --start 1784768397 --end 1784770058
@@ -313,11 +318,12 @@ dotnet run --project tools/IncidentEventMicroBatchReplay/IncidentEventMicroBatch
 ```
 
 The `old-old` and `new-old` scenarios remain explicitly measured, including
-their failed-request rates. `new-new` uses measured replacement cost per
-processed observation against the higher observation demand from those two
-measured cohorts and is explicitly projected. The headroom scenario multiplies
-that higher proven demand by the configured gate. Verification load is excluded
-and reported as such; it cannot be hidden inside an intake capacity claim.
+their failed-request rates, endpoint occupancy, and mean request duration.
+`new-new` uses measured full-pipeline replacement cost per processed
+observation against the higher observation demand from those two measured
+cohorts and is explicitly projected. The headroom scenario multiplies that
+higher proven demand by the configured gate. Verification load is mandatory
+and cannot be hidden inside an intake-only capacity claim.
 
 ## Observation-isolation audit
 

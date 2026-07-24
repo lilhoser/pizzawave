@@ -60,6 +60,7 @@ internal static class CombinedCapacityReplay
             report.ProtocolIdentity,
             report.ContentHash,
             report.ReplacementTokensPerProcessedObservation,
+            report.ReplacementDurationMillisecondsPerProcessedObservation,
             report.ReplacementObservationsPerRequest,
             report.Scenarios,
             outputPath

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -662,6 +663,7 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
         var endpoint = $"{_config.AiInsights.OpenAiBaseUrl.TrimEnd('/')}/chat/completions";
         var payload = JsonSerializer.Serialize(body, EngineConfig.JsonOptions());
         var responseText = string.Empty;
+        var requestStarted = Stopwatch.GetTimestamp();
         try
         {
             using var content = new StringContent(payload, Encoding.UTF8, "application/json");
@@ -704,17 +706,17 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
                     item.UnresolvedQuestions,
                     item.DisplayTitle);
             }).ToList();
-            await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ct);
+            await RecordUsageAsync(responseText, endpoint, model, payload.Length, true, string.Empty, ElapsedMilliseconds(requestStarted), ct);
             return new IncidentBatchConfirmationProposal($"model:incident-batch-confirmation:{Guid.NewGuid():N}", DateTimeOffset.UtcNow, responseModel, IncidentBatchConfirmationPrompt.PromptIdentity, decisions);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            await RecordUsageAsync(responseText, endpoint, model, payload.Length, false, ex.GetBaseException().Message, CancellationToken.None);
+            await RecordUsageAsync(responseText, endpoint, model, payload.Length, false, ex.GetBaseException().Message, ElapsedMilliseconds(requestStarted), CancellationToken.None);
             throw;
         }
     }
 
-    private async Task RecordUsageAsync(string responseText, string endpoint, string requestedModel, int payloadChars, bool success, string error, CancellationToken ct)
+    private async Task RecordUsageAsync(string responseText, string endpoint, string requestedModel, int payloadChars, bool success, string error, long durationMilliseconds, CancellationToken ct)
     {
         var usage = ReadUsage(responseText);
         try
@@ -722,7 +724,7 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
             await _database.AddLmUsageAsync(new TokenUsageEntryDto(
                 0, DateTime.UtcNow, $"incident batch confirmation shadow:{_runId}", "chat.completions", success, error,
                 endpoint, requestedModel, usage.ResponseModel, usage.FinishReason, payloadChars, payloadChars,
-                usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens), ct);
+                usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, durationMilliseconds), ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -749,6 +751,8 @@ public sealed class OpenAiIncidentBatchConfirmationVerifier : IIncidentBatchConf
     }
 
     private static string Trim(string value, int limit) => value.Length <= limit ? value : value[..limit];
+    private static long ElapsedMilliseconds(long started) =>
+        Math.Max(0, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
     private sealed record ConfirmationResponse([property: JsonPropertyName("decisions")] IReadOnlyList<ConfirmationItemResponse> Decisions);
     private sealed record ConfirmationItemResponse(
         [property: JsonPropertyName("source_proposal_token")] string SourceProposalToken,

@@ -1076,7 +1076,8 @@ public sealed record TokenUsageEntryDto(
     int PayloadChars,
     int PromptTokens,
     int CompletionTokens,
-    int TotalTokens);
+    int TotalTokens,
+    long DurationMilliseconds = 0);
 
 public sealed record EvidenceVerifierRunDto(
     long Id,

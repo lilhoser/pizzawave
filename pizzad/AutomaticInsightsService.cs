@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
@@ -581,6 +582,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         Exception? last = null;
         for (var attempt = 0; attempt <= 0; attempt++)
         {
+            var requestStarted = Stopwatch.GetTimestamp();
             try
             {
                 using var content = new StringContent(payload, Encoding.UTF8, "application/json");
@@ -593,12 +595,12 @@ public sealed class AutomaticInsightsService : BackgroundService
                 {
                     var message = $"LM incident extraction response was truncated at max_tokens={IncidentMaxOutputTokens}.";
                     if (recordTruncationUsage)
-                        await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, message, ct);
+                        await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, message, ElapsedMilliseconds(requestStarted), ct);
                     throw new InsightResponseTruncatedException(message);
                 }
 
                 var parsed = ParseIncidentExtractionResponse(text);
-                await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, true, recoveredFallback ? "recovered_after_truncation_split" : string.Empty, ct);
+                await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, true, recoveredFallback ? "recovered_after_truncation_split" : string.Empty, ElapsedMilliseconds(requestStarted), ct);
                 await RunIncidentV3FrameShadowAsync(systemShortName, activeIncidents, candidateCalls, parsed, ct);
                 await RunIncidentV2ShadowAsync(systemShortName, activeIncidents, candidateCalls, parsed, endpoint, ct);
                 return parsed;
@@ -615,13 +617,13 @@ public sealed class AutomaticInsightsService : BackgroundService
             catch (Exception ex) when (attempt < Math.Max(0, _config.AiInsights.MaxRetries))
             {
                 last = ex;
-                await RecordUsageAsync(string.Empty, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, ElapsedMilliseconds(requestStarted), CancellationToken.None);
                 await Task.Delay(500, ct);
             }
             catch (Exception ex)
             {
                 last = ex;
-                await RecordUsageAsync(string.Empty, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, ElapsedMilliseconds(requestStarted), CancellationToken.None);
                 break;
             }
         }
@@ -4586,12 +4588,13 @@ public sealed class AutomaticInsightsService : BackgroundService
 
         var payload = JsonSerializer.Serialize(body, EngineConfig.JsonOptions());
         _logger.LogInformation("Calling evidence verifier endpoint {Endpoint} with model {Model} for {System} incident '{Title}' ({ReviewCalls} call(s), {PayloadChars} chars, {TruncatedCalls} truncated)", endpoint, InsightModel(), systemShortName, title, prompt.IncludedCalls, payload.Length, truncatedCalls + prompt.OmittedCalls);
+        var requestStarted = Stopwatch.GetTimestamp();
         using var content = new StringContent(payload, Encoding.UTF8, "application/json");
         using var response = await client.PostAsync(endpoint, content, ct);
         var text = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
         {
-            await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, false, $"Evidence verifier HTTP {(int)response.StatusCode}: {Trim(text, 500)}", ct);
+            await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, false, $"Evidence verifier HTTP {(int)response.StatusCode}: {Trim(text, 500)}", ElapsedMilliseconds(requestStarted), ct);
             throw new InvalidOperationException($"Evidence verifier request failed with HTTP {(int)response.StatusCode}: {Trim(text, 1000)}");
         }
 
@@ -4599,12 +4602,12 @@ public sealed class AutomaticInsightsService : BackgroundService
         if (string.Equals(usage.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
         {
             var message = $"LM evidence verifier response was truncated at max_tokens={EvidenceVerifierMaxOutputTokens}.";
-            await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, false, message, ct);
+            await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, false, message, ElapsedMilliseconds(requestStarted), ct);
             throw new InsightResponseTruncatedException(message);
         }
 
         var parsed = ParseEvidenceVerificationResponse(text);
-        await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, true, string.Empty, ct);
+        await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, true, string.Empty, ElapsedMilliseconds(requestStarted), ct);
         return parsed with { ReviewedCalls = prompt.IncludedCalls, PromptOmittedCalls = prompt.OmittedCalls };
     }
 
@@ -4794,6 +4797,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         Exception? last = null;
         for (var attempt = 0; attempt <= Math.Max(0, _config.AiInsights.MaxRetries); attempt++)
         {
+            var requestStarted = Stopwatch.GetTimestamp();
             try
             {
                 using var content = new StringContent(payload, Encoding.UTF8, "application/json");
@@ -4806,12 +4810,12 @@ public sealed class AutomaticInsightsService : BackgroundService
                 if (string.Equals(usage.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
                 {
                     var message = $"LM response was truncated at max_tokens={budget.MaxOutputTokens}; retry with a smaller summary window.";
-                    await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, message, ct);
+                    await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, message, ElapsedMilliseconds(requestStarted), ct);
                     throw new InsightResponseTruncatedException(message);
                 }
 
                 var parsed = ParseResponse(text);
-                await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, true, string.Empty, ct);
+                await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, true, string.Empty, ElapsedMilliseconds(requestStarted), ct);
                 return parsed;
             }
             catch (InsightResponseTruncatedException)
@@ -4826,13 +4830,13 @@ public sealed class AutomaticInsightsService : BackgroundService
             catch (Exception ex) when (attempt < Math.Max(0, _config.AiInsights.MaxRetries))
             {
                 last = ex;
-                await RecordUsageAsync(string.Empty, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, ElapsedMilliseconds(requestStarted), CancellationToken.None);
                 await Task.Delay(500, ct);
             }
             catch (Exception ex)
             {
                 last = ex;
-                await RecordUsageAsync(string.Empty, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, ElapsedMilliseconds(requestStarted), CancellationToken.None);
                 break;
             }
         }
@@ -4843,7 +4847,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     private static bool IsCallerRequestedCompletionCancellation(Exception ex, CancellationToken ct) =>
         ct.IsCancellationRequested && ex is OperationCanceledException;
 
-    private async Task RecordUsageAsync(string responseText, string endpoint, int payloadChars, int inputChars, int attempt, bool success, string error, CancellationToken ct)
+    private async Task RecordUsageAsync(string responseText, string endpoint, int payloadChars, int inputChars, int attempt, bool success, string error, long durationMilliseconds, CancellationToken ct)
     {
         var usage = ExtractUsage(responseText);
         if (!success && usage.ReasoningTokens > 0 && !error.Contains("reasoning_tokens=", StringComparison.OrdinalIgnoreCase))
@@ -4865,8 +4869,12 @@ public sealed class AutomaticInsightsService : BackgroundService
             payloadChars,
             usage.PromptTokens,
             usage.CompletionTokens,
-            usage.TotalTokens), ct);
+            usage.TotalTokens,
+            durationMilliseconds), ct);
     }
+
+    private static long ElapsedMilliseconds(long started) =>
+        Math.Max(0, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
 
     private static (int PromptTokens, int CompletionTokens, int TotalTokens, int ReasoningTokens, string ResponseModel, string FinishReason) ExtractUsage(string text)
     {

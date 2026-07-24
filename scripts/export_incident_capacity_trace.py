@@ -26,6 +26,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-after-call-id", type=int, default=0)
     parser.add_argument("--trace-id")
     parser.add_argument("--legacy-trigger", default="automatic insights")
+    parser.add_argument(
+        "--includes-verification",
+        action="store_true",
+        help="Assert that the trace window includes all verification requests for this pipeline.",
+    )
     return parser.parse_args()
 
 
@@ -49,6 +54,8 @@ def main() -> None:
         raise ValueError("start-after-call-id is required for provisional-intake traces")
     if args.pipeline == "legacy" and args.start_after_call_id != 0:
         raise ValueError("legacy traces cannot use start-after-call-id")
+    if not args.includes_verification:
+        raise ValueError("--includes-verification is required for production capacity traces")
 
     output = pathlib.Path(args.output).resolve()
     if output.exists():
@@ -67,15 +74,22 @@ def main() -> None:
             ).fetchone()[0]
             trigger = args.legacy_trigger
             processed = 0
-            request_duration = 0
             candidate_batches = 0
+            triggers = [trigger]
         else:
             usable = source.execute(
                 "select count(*) from calls where id > ? and start_time < ? "
                 "and length(trim(coalesce(transcription, ''))) >= 12",
                 (args.start_after_call_id, args.end),
             ).fetchone()[0]
-            trigger = f"incident batch constructor shadow:{args.run_id.strip()}"
+            run_id = args.run_id.strip()
+            trigger = f"incident batch constructor shadow:{run_id}"
+            triggers = [
+                trigger,
+                f"incident batch relationship shadow:{run_id}",
+                f"incident batch confirmation shadow:{run_id}",
+                f"incident batch standalone verification:{run_id}",
+            ]
             ledger_rows = source.execute(
                 "select payload_json from incident_batch_constructor_shadow_ledger "
                 "where run_id = ? and recorded_at_utc >= ? and recorded_at_utc < ? "
@@ -84,20 +98,18 @@ def main() -> None:
             ).fetchall()
             payloads = [json.loads(row[0]) for row in ledger_rows]
             processed = sum(len(payload.get("newObservationIds", [])) for payload in payloads)
-            request_duration = sum(
-                int(payload.get("execution", {}).get("proposerDurationMilliseconds") or 0)
-                for payload in payloads
-            )
             candidate_batches = sum(bool(payload.get("candidates")) for payload in payloads)
 
+        placeholders = ",".join("?" for _ in triggers)
         usage = source.execute(
             "select count(*) requests, "
             "sum(case when success = 0 then 1 else 0 end) failed, "
             "coalesce(sum(prompt_tokens), 0) prompt, "
-            "coalesce(sum(completion_tokens), 0) completion "
-            "from lm_usage where trigger_activity = ? "
+            "coalesce(sum(completion_tokens), 0) completion, "
+            "coalesce(sum(duration_milliseconds), 0) duration "
+            f"from lm_usage where trigger_activity in ({placeholders}) "
             "and timestamp_utc >= ? and timestamp_utc < ?",
-            (trigger, start_utc, end_utc),
+            (*triggers, start_utc, end_utc),
         ).fetchone()
 
     pipeline_name = "Legacy" if args.pipeline == "legacy" else "ProvisionalIntake"
@@ -118,8 +130,9 @@ def main() -> None:
         "failedRequests": usage["failed"] or 0,
         "promptTokens": usage["prompt"],
         "completionTokens": usage["completion"],
-        "requestDurationMilliseconds": request_duration,
+        "requestDurationMilliseconds": usage["duration"],
         "candidateBackedBatches": candidate_batches,
+        "includesVerification": True,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(f"{output.name}.{uuid.uuid4().hex}.tmp")

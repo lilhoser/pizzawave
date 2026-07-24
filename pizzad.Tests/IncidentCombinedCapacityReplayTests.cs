@@ -18,6 +18,7 @@ public sealed class IncidentCombinedCapacityReplayTests
 
         Assert.Equal(IncidentCombinedCapacityReplayPlanner.ProtocolIdentity, report.ProtocolIdentity);
         Assert.Equal(500, report.ReplacementTokensPerProcessedObservation);
+        Assert.Equal(10_000, report.ReplacementDurationMillisecondsPerProcessedObservation);
         Assert.Equal(10, report.ReplacementObservationsPerRequest);
         Assert.Equal(64, report.ContentHash.Length);
 
@@ -27,6 +28,8 @@ public sealed class IncidentCombinedCapacityReplayTests
         Assert.Equal(3, oldOld.RequestsPerMinute);
         Assert.Equal(0, oldOld.FailedRequestsPerMinute);
         Assert.Equal(6000, oldOld.TokensPerMinute);
+        Assert.Equal(0.5, oldOld.RequestOccupancy, 6);
+        Assert.Equal(10_000, oldOld.MeanRequestDurationMilliseconds);
         Assert.Equal(0, oldOld.MeasuredProcessedObservationsPerMinute);
 
         var newOld = Assert.Single(report.Scenarios, item => item.Name == "new-old");
@@ -36,6 +39,8 @@ public sealed class IncidentCombinedCapacityReplayTests
         Assert.Equal(1.6, newOld.RequestsPerMinute, 6);
         Assert.Equal(0, newOld.FailedRequestsPerMinute);
         Assert.Equal(5000, newOld.TokensPerMinute);
+        Assert.Equal(7d / 6d, newOld.RequestOccupancy, 6);
+        Assert.Equal(43_750, newOld.MeanRequestDurationMilliseconds);
         Assert.Equal(6d / 7d, newOld.ReplacementCoverage, 6);
         Assert.Equal("ProvisionalIntake", newOld.PipelineBySystem["ot"]);
         Assert.Equal("Legacy", newOld.PipelineBySystem["rpi"]);
@@ -45,6 +50,8 @@ public sealed class IncidentCombinedCapacityReplayTests
         Assert.Equal(9, newNew.ObservationDemandPerMinute);
         Assert.Equal(0.9, newNew.RequestsPerMinute, 6);
         Assert.Equal(4500, newNew.TokensPerMinute);
+        Assert.Equal(1.5, newNew.RequestOccupancy, 6);
+        Assert.Equal(100_000, newNew.MeanRequestDurationMilliseconds);
         Assert.Equal(0, newNew.MeasuredProcessedObservationsPerMinute);
 
         var headroom = Assert.Single(report.Scenarios, item => item.Name == "new-new-headroom-target");
@@ -52,7 +59,8 @@ public sealed class IncidentCombinedCapacityReplayTests
         Assert.Equal(13.5, headroom.ObservationDemandPerMinute);
         Assert.Equal(1.35, headroom.RequestsPerMinute, 6);
         Assert.Equal(6750, headroom.TokensPerMinute);
-        Assert.All(report.Scenarios, scenario => Assert.False(scenario.IncludesVerification));
+        Assert.Equal(2.25, headroom.RequestOccupancy, 6);
+        Assert.All(report.Scenarios, scenario => Assert.True(scenario.IncludesVerification));
     }
 
     [Fact]
@@ -110,12 +118,22 @@ public sealed class IncidentCombinedCapacityReplayTests
         Assert.Contains("processed observations", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void TraceMustIncludeVerificationWorkload()
+    {
+        var trace = Traces()[0] with { IncludesVerification = false };
+
+        var error = Assert.Throws<ArgumentException>(trace.Validate);
+
+        Assert.Contains("verification workload", error.Message, StringComparison.Ordinal);
+    }
+
     private static IReadOnlyList<IncidentCapacityTrace> Traces() =>
     [
-        Trace("ot-old-control", "control", "ot", IncidentCapacityPipelineKind.Legacy, 70, 0, 20, 30_000, 10_000, 0, 0),
-        Trace("rpi-old-control", "control", "rpi", IncidentCapacityPipelineKind.Legacy, 20, 0, 10, 15_000, 5_000, 0, 0),
+        Trace("ot-old-control", "control", "ot", IncidentCapacityPipelineKind.Legacy, 70, 0, 20, 30_000, 10_000, 200_000, 0),
+        Trace("rpi-old-control", "control", "rpi", IncidentCapacityPipelineKind.Legacy, 20, 0, 10, 15_000, 5_000, 100_000, 0),
         Trace("ot-new-run-f", "run-f", "ot", IncidentCapacityPipelineKind.ProvisionalIntake, 70, 60, 6, 24_000, 6_000, 600_000, 5),
-        Trace("rpi-old-run-f", "run-f", "rpi", IncidentCapacityPipelineKind.Legacy, 10, 0, 10, 15_000, 5_000, 0, 0)
+        Trace("rpi-old-run-f", "run-f", "rpi", IncidentCapacityPipelineKind.Legacy, 10, 0, 10, 15_000, 5_000, 100_000, 0)
     ];
 
     private static IncidentCapacityTrace Trace(
@@ -144,5 +162,6 @@ public sealed class IncidentCombinedCapacityReplayTests
             promptTokens,
             completionTokens,
             durationMilliseconds,
-            candidateBatches);
+            candidateBatches,
+            true);
 }

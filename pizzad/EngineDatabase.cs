@@ -1142,10 +1142,12 @@ public sealed partial class EngineDatabase
         command.CommandText = """
             INSERT INTO lm_usage (
                 timestamp_utc, trigger_activity, request_kind, success, error, endpoint, request_model, response_model,
-                finish_reason, input_chars, payload_chars, prompt_tokens, completion_tokens, total_tokens)
+                finish_reason, input_chars, payload_chars, prompt_tokens, completion_tokens, total_tokens,
+                duration_milliseconds)
             VALUES (
                 $timestamp_utc, $trigger_activity, $request_kind, $success, $error, $endpoint, $request_model, $response_model,
-                $finish_reason, $input_chars, $payload_chars, $prompt_tokens, $completion_tokens, $total_tokens)
+                $finish_reason, $input_chars, $payload_chars, $prompt_tokens, $completion_tokens, $total_tokens,
+                $duration_milliseconds)
             RETURNING id;
             """;
         Add(command, "$timestamp_utc", entry.TimestampUtc.ToUniversalTime().ToString("O"));
@@ -1162,6 +1164,7 @@ public sealed partial class EngineDatabase
         Add(command, "$prompt_tokens", entry.PromptTokens);
         Add(command, "$completion_tokens", entry.CompletionTokens);
         Add(command, "$total_tokens", entry.TotalTokens);
+        Add(command, "$duration_milliseconds", Math.Max(0, entry.DurationMilliseconds));
         var result = await command.ExecuteScalarAsync(ct);
         var id = Convert.ToInt64(result);
         var includeLoopbackRelay = _config.AiInsights.ExecutionMode is "remote" or "lmlink";
@@ -4898,7 +4901,8 @@ public sealed partial class EngineDatabase
         reader.GetInt32(reader.GetOrdinal("payload_chars")),
         reader.GetInt32(reader.GetOrdinal("prompt_tokens")),
         reader.GetInt32(reader.GetOrdinal("completion_tokens")),
-        reader.GetInt32(reader.GetOrdinal("total_tokens")));
+        reader.GetInt32(reader.GetOrdinal("total_tokens")),
+        reader.GetInt64(reader.GetOrdinal("duration_milliseconds")));
 
     private static RemoteBandwidthEntryDto ReadRemoteBandwidthEntry(SqliteDataReader reader) => new(
         DateTime.Parse(reader.GetString(reader.GetOrdinal("timestamp_utc"))),
@@ -5174,6 +5178,7 @@ public sealed partial class EngineDatabase
 
     private async Task EnsureSchemaMigrationsAsync(SqliteConnection connection, CancellationToken ct)
     {
+        await AddColumnIfMissingAsync(connection, "lm_usage", "duration_milliseconds", "INTEGER NOT NULL DEFAULT 0", ct);
         await AddColumnIfMissingAsync(connection, "incident_event_state_link_shadow_ledger", "run_id", "TEXT NOT NULL DEFAULT 'legacy'", ct);
         await AddColumnIfMissingAsync(connection, "incident_event_state_link_shadow_projections", "run_id", "TEXT NOT NULL DEFAULT 'legacy'", ct);
         await ExecuteNonQueryAsync(connection, "DROP INDEX IF EXISTS idx_incident_event_state_link_shadow_ledger_observation_unique;", ct);
@@ -5416,7 +5421,8 @@ public sealed partial class EngineDatabase
                 payload_chars INTEGER NOT NULL DEFAULT 0,
                 prompt_tokens INTEGER NOT NULL DEFAULT 0,
                 completion_tokens INTEGER NOT NULL DEFAULT 0,
-                total_tokens INTEGER NOT NULL DEFAULT 0
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                duration_milliseconds INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_lm_usage_time ON lm_usage(timestamp_utc DESC);
 
@@ -5791,7 +5797,8 @@ public sealed partial class EngineDatabase
             payload_chars INTEGER NOT NULL DEFAULT 0,
             prompt_tokens INTEGER NOT NULL DEFAULT 0,
             completion_tokens INTEGER NOT NULL DEFAULT 0,
-            total_tokens INTEGER NOT NULL DEFAULT 0
+            total_tokens INTEGER NOT NULL DEFAULT 0,
+            duration_milliseconds INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_lm_usage_time ON lm_usage(timestamp_utc DESC);
 

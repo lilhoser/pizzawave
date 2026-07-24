@@ -27,7 +27,8 @@ public sealed record IncidentCapacityTrace(
     int PromptTokens,
     int CompletionTokens,
     long RequestDurationMilliseconds,
-    int CandidateBackedBatches)
+    int CandidateBackedBatches,
+    bool IncludesVerification)
 {
     public double DurationMinutes => (WindowEndUtc - WindowStartUtc).TotalMinutes;
     public int TotalTokens => PromptTokens + CompletionTokens;
@@ -56,6 +57,8 @@ public sealed record IncidentCapacityTrace(
             throw new ArgumentException($"legacy trace '{TraceId}' cannot use a replacement startup fence");
         if (Pipeline == IncidentCapacityPipelineKind.ProvisionalIntake && StartAfterCallId == 0)
             throw new ArgumentException($"replacement trace '{TraceId}' requires its no-backfill startup fence");
+        if (!IncludesVerification)
+            throw new ArgumentException($"trace '{TraceId}' must include verification workload");
     }
 }
 
@@ -68,6 +71,8 @@ public sealed record IncidentCapacityScenario(
     double RequestsPerMinute,
     double FailedRequestsPerMinute,
     double TokensPerMinute,
+    double RequestOccupancy,
+    double MeanRequestDurationMilliseconds,
     double ReplacementCoverage,
     bool IncludesVerification);
 
@@ -80,6 +85,7 @@ public sealed record IncidentCombinedCapacityReplayReport(
     string ReplacementSystemId,
     double HeadroomMultiplier,
     double ReplacementTokensPerProcessedObservation,
+    double ReplacementDurationMillisecondsPerProcessedObservation,
     double ReplacementObservationsPerRequest,
     IReadOnlyList<IncidentCapacityTrace> Traces,
     IReadOnlyList<IncidentCapacityScenario> Scenarios,
@@ -87,7 +93,7 @@ public sealed record IncidentCombinedCapacityReplayReport(
 
 public static class IncidentCombinedCapacityReplayPlanner
 {
-    public const string ProtocolIdentity = "incident-combined-capacity-replay-v1";
+    public const string ProtocolIdentity = "incident-combined-capacity-replay-v2-full-request-occupancy";
 
     public static IncidentCombinedCapacityReplayReport Build(
         string replayId,
@@ -139,6 +145,8 @@ public static class IncidentCombinedCapacityReplayPlanner
         var replacementProcessed = replacementTraces.Sum(trace => trace.ProcessedObservations);
         var replacementRequests = replacementTraces.Sum(trace => trace.Requests);
         var replacementTokensPerObservation = replacementTraces.Sum(trace => trace.TotalTokens) / (double)replacementProcessed;
+        var replacementDurationPerObservation =
+            replacementTraces.Sum(trace => trace.RequestDurationMilliseconds) / (double)replacementProcessed;
         var replacementObservationsPerRequest = replacementProcessed / (double)replacementRequests;
 
         var oldOldTraces = systems.Select(system => byBoundary[(controlCohortId, system, IncidentCapacityPipelineKind.Legacy)].Single()).ToList();
@@ -163,8 +171,10 @@ public static class IncidentCombinedCapacityReplayPlanner
             combinedDemand / replacementObservationsPerRequest,
             0,
             combinedDemand * replacementTokensPerObservation,
+            combinedDemand * replacementDurationPerObservation / 60_000d,
+            replacementDurationPerObservation * replacementObservationsPerRequest,
             0,
-            false);
+            true);
         var headroomDemand = combinedDemand * headroomMultiplier;
         var headroom = new IncidentCapacityScenario(
             "new-new-headroom-target",
@@ -175,8 +185,10 @@ public static class IncidentCombinedCapacityReplayPlanner
             headroomDemand / replacementObservationsPerRequest,
             0,
             headroomDemand * replacementTokensPerObservation,
+            headroomDemand * replacementDurationPerObservation / 60_000d,
+            replacementDurationPerObservation * replacementObservationsPerRequest,
             0,
-            false);
+            true);
         var orderedTraces = traces
             .OrderBy(trace => trace.CohortId, StringComparer.Ordinal)
             .ThenBy(trace => trace.SystemId, StringComparer.Ordinal)
@@ -204,6 +216,7 @@ public static class IncidentCombinedCapacityReplayPlanner
             replacementSystemId,
             headroomMultiplier,
             replacementTokensPerObservation,
+            replacementDurationPerObservation,
             replacementObservationsPerRequest,
             orderedTraces,
             scenarios,
@@ -222,6 +235,9 @@ public static class IncidentCombinedCapacityReplayPlanner
         var replacementDemand = traces
             .Where(trace => trace.Pipeline == IncidentCapacityPipelineKind.ProvisionalIntake)
             .Sum(trace => Rate(trace.UsableObservations, trace.DurationMinutes));
+        var totalRequests = traces.Sum(trace => trace.Requests);
+        var totalRequestDuration = traces.Sum(trace => trace.RequestDurationMilliseconds);
+        var windowDurationMilliseconds = traces[0].DurationMinutes * 60_000d;
         return new IncidentCapacityScenario(
             name,
             evidence,
@@ -231,8 +247,10 @@ public static class IncidentCombinedCapacityReplayPlanner
             traces.Sum(trace => Rate(trace.Requests, trace.DurationMinutes)),
             traces.Sum(trace => Rate(trace.FailedRequests, trace.DurationMinutes)),
             traces.Sum(trace => Rate(trace.TotalTokens, trace.DurationMinutes)),
+            totalRequestDuration / windowDurationMilliseconds,
+            totalRequests == 0 ? 0 : totalRequestDuration / (double)totalRequests,
             replacementDemand == 0 ? 0 : processed / replacementDemand,
-            false);
+            traces.All(trace => trace.IncludesVerification));
     }
 
     private static double Rate(double value, double durationMinutes) => value / durationMinutes;
