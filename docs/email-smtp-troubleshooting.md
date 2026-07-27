@@ -1,18 +1,18 @@
 # Email Alert Troubleshooting
 
 Email alerts are optional. Live calls can trigger email notifications when alert
-rules match; imported/historical calls store matches but suppress live email.
+rules match and the active profile allows the call. Historical/imported calls
+are not currently evaluated by the alert pipeline.
 
 ## Required Settings
 
 In **Settings -> Alerts** configure:
 
-- SMTP host and port;
-- username;
-- password or app password;
-- sender address;
-- recipient address;
-- TLS/SSL mode.
+- email provider;
+- sender account and app password;
+- recipient on each alert rule;
+- keyword, police-code, or combined criteria;
+- optional system-scoped talkgroups.
 
 Use the **Test** action before enabling alerts.
 
@@ -43,4 +43,5 @@ Common failures:
 - account blocks app password use;
 - recipient rejected by provider;
 - network firewall blocks outbound SMTP;
-- imported calls are being tested instead of live calls.
+- the active profile excludes the call category or talkgroup;
+- a talkgroup rule points at a different system with the same numeric TG ID.

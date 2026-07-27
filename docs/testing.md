@@ -53,7 +53,7 @@ Good candidates for future feature tests:
 - fake LLM/vector incident extraction using canned candidates and deterministic
   responses;
 - dashboard API shape checks over seeded incident/call/location data;
-- setup wizard validation against temp configs and fake command runners;
+- first-run prerequisite validation and Setup validation against temp configs and fake command runners;
 - a small Playwright smoke test that verifies dashboard/settings pages render
   without requiring real rig data.
 

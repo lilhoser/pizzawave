@@ -1,9 +1,34 @@
 namespace pizzad.Tests;
 
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
 
 public sealed class SetupTrConfigBuilderServiceTests
 {
+    private static SetupTrConfigBuilderService CreateService(EngineConfig? config = null)
+    {
+        var effectiveConfig = config ?? new EngineConfig();
+        return new SetupTrConfigBuilderService(
+            new HttpClient(),
+            effectiveConfig,
+            new TalkgroupCatalogService(effectiveConfig, NullLogger<TalkgroupCatalogService>.Instance));
+    }
+
+    private static SetupSdrDeviceDto RtlDevice(int index, string serial, int sampleRate = 2_400_000) =>
+        new(
+            index,
+            "RTL-SDR",
+            serial,
+            string.IsNullOrWhiteSpace(serial) ? $"RTL-SDR #{index}" : $"RTL-SDR {serial}",
+            "osmosdr",
+            string.IsNullOrWhiteSpace(serial) ? $"rtl={index},buflen=65536" : $"rtl={serial},buflen=65536",
+            "",
+            [sampleRate],
+            sampleRate,
+            "rtl-tuner-gain",
+            "32",
+            "");
+
     [Fact]
     public async Task ListSitesAsync_ReturnsSelectableRadioReferenceRows()
     {
@@ -13,7 +38,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 009 (9) Utica Hinds 769.58125 774.28125c 774.53125c
             2 (2) 013 (D) Jackson Hinds 769.16875 773.06875c 773.31875c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
 
         var result = await service.ListSitesAsync(new SetupTrConfigSitesRequest("4879", html), CancellationToken.None);
 
@@ -35,13 +60,13 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 013 (D) Jackson Hinds 769.16875 769.41875 773.06875c 773.31875c
             """;
         var config = new EngineConfig();
-        var service = new SetupTrConfigBuilderService(new HttpClient(), config);
+        var service = CreateService(config);
 
         var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "4879",
             HtmlText: html,
             SiteNames: "etv raymond",
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001")],
             SampleRate: 2_400_000), CancellationToken.None);
 
         var system = Assert.Single(draft.Systems);
@@ -63,13 +88,13 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 009 (9) Utica Hinds 769.58125 769.83125 774.03125 774.28125c 774.53125c 774.78125c
             """;
         var config = new EngineConfig();
-        var service = new SetupTrConfigBuilderService(new HttpClient(), config);
+        var service = CreateService(config);
 
         var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "4879",
             HtmlText: html,
             SiteNames: "etv raymond",
-            SdrSerials: "00000001,00000002",
+            SdrDevices: [RtlDevice(0, "00000001"), RtlDevice(1, "00000002")],
             SampleRate: 2_400_000), CancellationToken.None);
 
         var source = Assert.Single(draft.Sources);
@@ -82,76 +107,72 @@ public sealed class SetupTrConfigBuilderServiceTests
     }
 
     [Fact]
-    public async Task SourcePlanAsync_WarnsWhenSelectedSitesNeedMoreWindowsThanDetectedSdrs()
+    public async Task DraftAsync_WarnsWhenSelectedSitesNeedMoreWindowsThanDetectedSdrs()
     {
         var html = """
             Sites and Frequencies
             2 (2) 008 (8) Site One County 770.08125 770.33125c 770.58125c
             2 (2) 009 (9) Site Two County 856.11250 856.36250c 856.61250c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
 
-        var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "4879",
             HtmlText: html,
             SiteNames: "Site One County,Site Two County",
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001")],
             SampleRate: 2_400_000), CancellationToken.None);
 
-        Assert.Equal(2, plan.RequiredSourceCount);
-        Assert.Equal(1, plan.AvailableSourceCount);
-        Assert.Single(plan.Sources);
-        Assert.Contains(plan.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(plan.Warnings, warning => warning.Contains("uncovered control channels", StringComparison.OrdinalIgnoreCase));
+        Assert.Single(draft.Sources);
+        Assert.Contains(draft.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(draft.Warnings, warning => warning.Contains("uncovered control channels", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public async Task SourcePlanAsync_PreservesCommaInSelectedSiteNameList()
+    public async Task DraftAsync_PreservesCommaInSelectedSiteNameList()
     {
         var html = """
             Sites and Frequencies
             2 (2) 001 (1) Clarksville Simulcast Montgomery, TN 851.47500 851.66250c 852.17500c
             2 (2) 002 (2) Other Site County, TN 856.11250 856.36250c 856.61250c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
 
-        var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Clarksville Simulcast Montgomery, TN"],
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001", 2_048_000)],
             SampleRate: 2_048_000), CancellationToken.None);
 
-        var system = Assert.Single(plan.Systems);
+        var system = Assert.Single(draft.Systems);
         Assert.Equal("Clarksville Simulcast Montgomery, TN", system.SiteName);
-        Assert.DoesNotContain(plan.Warnings, warning => warning.Contains("No frequency table matched", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(draft.Warnings, warning => warning.Contains("No frequency table matched", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public async Task SourcePlanAsync_UsesTrGuardedBandwidthForControlChannelCoverage()
+    public async Task DraftAsync_UsesTrGuardedBandwidthForControlChannelCoverage()
     {
         var html = """
             Sites and Frequencies
             2 (2) 011 (B) Chattanooga Simulcast Hamilton, TN 855.21250c 856.23750c 856.76250c 857.23750c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
 
-        var narrow = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var narrow = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Chattanooga Simulcast Hamilton, TN"],
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001", 2_048_000)],
             SampleRate: 2_048_000), CancellationToken.None);
-        var wide = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var wide = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Chattanooga Simulcast Hamilton, TN"],
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001")],
             SampleRate: 2_400_000), CancellationToken.None);
 
-        Assert.Equal(2, narrow.RequiredSourceCount);
         Assert.Contains(narrow.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(1, wide.RequiredSourceCount);
         Assert.Empty(wide.Warnings);
         Assert.All(wide.Systems[0].ControlChannelsMhz, control => Assert.Contains(control, wide.Sources[0].CoveredFrequenciesMhz));
     }
@@ -163,7 +184,7 @@ public sealed class SetupTrConfigBuilderServiceTests
             Sites and Frequencies
             2 (2) 011 (B) Chattanooga Simulcast Hamilton, TN 855.21250c 856.23750c 856.76250c 857.23750c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
         var airspy = new SetupSdrDeviceDto(
             0,
             "Airspy",
@@ -201,53 +222,50 @@ public sealed class SetupTrConfigBuilderServiceTests
     }
 
     [Fact]
-    public async Task SourcePlanAsync_UsesPerDeviceSampleRateWindows()
+    public async Task DraftAsync_UsesPerDeviceSampleRateWindows()
     {
         var html = """
             Sites and Frequencies
             2 (2) 001 (1) Site One County 770.08125 770.33125c 770.58125c
             2 (2) 002 (2) Site Two County 856.11250 856.36250c 856.61250c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
         var airspy = new SetupSdrDeviceDto(0, "Airspy", "26A464DC28793293", "Airspy Mini", "osmosdr", "airspy=26A464DC28793293", "", [3_000_000, 6_000_000], 3_000_000, "airspy-linearity", "15", "");
         var rtl = new SetupSdrDeviceDto(1, "RTL-SDR", "00000002", "RTL-SDR Blog V4", "osmosdr", "rtl=00000002,buflen=65536", "", [2_400_000], 2_400_000, "rtl-tuner-gain", "32", "");
 
-        var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Site One County", "Site Two County"],
             SdrDevices: [airspy, rtl]), CancellationToken.None);
 
-        Assert.Equal(2, plan.AvailableSourceCount);
-        Assert.Equal(2, plan.Sources.Count);
-        Assert.Contains(plan.Sources, source => source.Type == "Airspy" && source.SampleRate == 3_000_000);
-        Assert.Contains(plan.Sources, source => source.Type == "RTL-SDR" && source.SampleRate == 2_400_000);
+        Assert.Equal(2, draft.Sources.Count);
+        Assert.Contains(draft.Sources, source => source.Type == "Airspy" && source.SampleRate == 3_000_000);
+        Assert.Contains(draft.Sources, source => source.Type == "RTL-SDR" && source.SampleRate == 2_400_000);
     }
 
     [Fact]
-    public async Task SourcePlanAsync_AirspyCanCoverMultipleSitesByControlChannels()
+    public async Task DraftAsync_AirspyCanCoverMultipleSitesByControlChannels()
     {
         var html = """
             Sites and Frequencies
             2 (2) 011 (B) Site One County 851.01250 855.21250c
             2 (2) 012 (C) Site Two County 859.98750 856.23750c
             """;
-        var service = new SetupTrConfigBuilderService(new HttpClient(), new EngineConfig());
+        var service = CreateService();
         var airspy = new SetupSdrDeviceDto(0, "Airspy", "26A464DC28793293", "Airspy Mini", "osmosdr", "airspy=26A464DC28793293", "", [3_000_000, 6_000_000], 3_000_000, "airspy-linearity", "15", "");
 
-        var plan = await service.SourcePlanAsync(new SetupTrConfigSourcePlanRequest(
+        var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "6355",
             HtmlText: html,
             SiteNameList: ["Site One County", "Site Two County"],
             SdrDevices: [airspy]), CancellationToken.None);
 
-        Assert.Equal(1, plan.RequiredSourceCount);
-        Assert.Equal(1, plan.AvailableSourceCount);
-        var source = Assert.Single(plan.Sources);
+        var source = Assert.Single(draft.Sources);
         Assert.Equal("Airspy", source.Type);
-        Assert.All(plan.Systems.SelectMany(system => system.ControlChannelsMhz), control => Assert.Contains(control, source.CoveredFrequenciesMhz));
-        Assert.DoesNotContain(plan.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(plan.Warnings, warning => warning.Contains("uncovered control channels", StringComparison.OrdinalIgnoreCase));
+        Assert.All(draft.Systems.SelectMany(system => system.ControlChannelsMhz), control => Assert.Contains(control, source.CoveredFrequenciesMhz));
+        Assert.DoesNotContain(draft.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(draft.Warnings, warning => warning.Contains("uncovered control channels", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -257,7 +275,7 @@ public sealed class SetupTrConfigBuilderServiceTests
         Directory.CreateDirectory(root);
         var trConfigPath = Path.Combine(root, "config.json");
         var config = new EngineConfig { ConfigPath = Path.Combine(root, "appsettings.json"), TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath } };
-        var service = new SetupTrConfigBuilderService(new HttpClient(), config);
+        var service = CreateService(config);
 
         var result = await service.SaveAsync(new SetupTrConfigSaveRequest("""
             {
@@ -286,7 +304,7 @@ public sealed class SetupTrConfigBuilderServiceTests
         Directory.CreateDirectory(root);
         var trConfigPath = Path.Combine(root, "config.json");
         var config = new EngineConfig { ConfigPath = Path.Combine(root, "appsettings.json"), TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath } };
-        var service = new SetupTrConfigBuilderService(new HttpClient(), config);
+        var service = CreateService(config);
 
         var result = await service.SaveAsync(new SetupTrConfigSaveRequest("""
             {
@@ -356,13 +374,13 @@ public sealed class SetupTrConfigBuilderServiceTests
             2 (2) 008 (8) ETV Raymond Hinds 770.08125 771.98125 773.03125c 773.28125c
             """;
         var config = new EngineConfig { TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath } };
-        var service = new SetupTrConfigBuilderService(new HttpClient(), config);
+        var service = CreateService(config);
 
         var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
             RadioReferenceSid: "4879",
             HtmlText: html,
             SiteNames: "etv raymond",
-            SdrSerials: "00000001",
+            SdrDevices: [RtlDevice(0, "00000001")],
             SampleRate: 2_400_000), CancellationToken.None);
 
         using var doc = JsonDocument.Parse(draft.ConfigJson);
@@ -390,6 +408,9 @@ public sealed class SetupTrConfigBuilderServiceTests
         Assert.Equal(9123, client.GetProperty("port").GetInt32());
         Assert.False(plugin.TryGetProperty("sftpHost", out _));
         Assert.Equal("etv-raymond", plugin.GetProperty("streams")[0].GetProperty("shortName").GetString());
+        var rfTelemetry = plugin.GetProperty("rf_telemetry");
+        Assert.True(rfTelemetry.GetProperty("enabled").GetBoolean());
+        Assert.Equal(15, rfTelemetry.GetProperty("sample_interval_seconds").GetInt32());
 
         Directory.Delete(root, recursive: true);
     }

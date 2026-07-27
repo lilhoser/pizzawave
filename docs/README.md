@@ -25,10 +25,10 @@ UI.
 
 ## Main Guides
 
-- [Quickstart](quickstart.md): install, first-run wizard, and basic validation.
+- [Quickstart](quickstart.md): install, first-run prerequisites, Setup, and basic validation.
 - [Deployment](deployment.md): package flow, service operations, and updates.
-- [Backup and Restore](backup-restore.md): full-state backups and staged wizard restore.
-- [Rig Migration](migration.md): move a rig to a new geography/site while preserving portable settings.
+- [Backup and Restore](backup-restore.md): full-state backups and staged restore.
+- [Reset and Site Setup](reset-and-setup.md): clean data, reset site state, or return to first-run before rebuilding Setup.
 - [Building](building.md): local development, self-contained packages, and deploy helpers.
 - [Testing](testing.md): BVT and medium feature-test lanes.
 - [Settings Schema](settings-schema.md): current `pizzad.json` sections.
@@ -38,9 +38,12 @@ UI.
   bearer auth, and Tailscale use.
 - [Quick Reference](quick-reference.md): commands, paths, and API probes.
 - [Operational Limits](operational-limits.md): queue pressure, AI limits, imports, and hardware notes.
+- [System Information Contract](system-information-contract.md): operator questions, evidence ownership, status language, and page inventory for System.
 - [Insights Behavior](insights-behavior-matrix.md): AI summaries, incidents, and alerts.
+- [Incident Pipeline Architecture](incident-pipeline-architecture.md): authoritative incident definition, dual-model design, and release gates.
+- [Incident Model Training Handoff](incident-model-training-handoff.md): bounded implementation plan for the local membership model and review workflow.
 - [Config Examples](config-examples-explained.md): trunk-recorder/callstream examples.
-- [SDR Setup](getting_started_with_sdrs.md): SDR and trunk-recorder concepts used by the wizard.
+- [SDR Setup](getting_started_with_sdrs.md): SDR and trunk-recorder concepts used by Setup.
 - [Email Troubleshooting](email-smtp-troubleshooting.md): SMTP alert setup.
 - [Current Status](current-status.md): active development handoff notes.
 - [Open TODO](open-todo.md): working backlog.
@@ -52,32 +55,27 @@ UI.
 2. `pizzad` persists call metadata and audio before doing expensive work.
 3. The transcription queue processes calls using the configured engine.
 4. Quality classification marks empty, inaudible, short, noisy, or failed calls.
-5. Alert matching runs for live and imported calls. Imported calls store matches
-   but suppress live/email notification.
+5. Alert matching runs for active-profile-eligible live calls. Historical or
+   imported calls are not currently evaluated by the live alert pipeline.
 6. Post-transcription metadata, embeddings, AI summaries, and incidents are
    generated within configured guardrails.
 7. The web UI receives live status through SSE and reads server-computed models
    through REST APIs.
 
-## First-Run Setup
+## First-Run and Setup
 
-After installing the package, open the web UI and complete the setup wizard. The
-wizard handles:
+After installing the package, open the web UI and complete first-run
+prerequisites. First-run handles:
 
-- existing trunk-recorder detection and backup;
-- fresh trunk-recorder source-build flow when needed;
-- callstream patching;
-- talkgroup CSV import or creation;
-- monitored area mappings for geolocation;
-- transcription engine and model selection;
-- optional AI Insights through LM Link/OpenAI-compatible endpoints;
-- optional local or remote embedding endpoints backed by local Qdrant;
-- optional email alerts;
-- optional SFTP and local import configuration;
-- RTL-SDR calibration assistance.
+- existing trunk-recorder detection/reuse or fresh trunk-recorder source-build;
+- optional LM Link host support for AI Insights;
+- optional native Qdrant host support.
 
-The wizard saves progress incrementally and enables full engine operation only
-after required gates are complete.
+After first-run finishes, PizzaWave opens Setup. Setup owns location, systems
+and sites, talkgroups, RF path, SDR inventory, waterfall/RF validation, source
+planning, TR config apply, and monitoring resume. Settings owns app behavior
+such as transcription, AI, embeddings, alerts, playback, security, and service
+settings.
 
 ## Public Interfaces
 
@@ -108,4 +106,4 @@ security boundary. The callstream ingest listener should remain localhost-only.
 Write/admin token changes and protected config writes use the installed
 sudo-backed setup helper on Linux. Alert SMTP passwords are stored in the local
 PizzaWave credential store and are not returned through settings/setup status or
-exported as cleartext in migration profiles.
+backup/restore metadata.

@@ -22,7 +22,7 @@ The package installs the engine under `/opt/pizzawave/pizzad`, creates the
 `pizzawave` user, creates `/etc/pizzawave/pizzad.json` if missing, enables
 `pizzad.service`, and serves the web UI on port `8080`.
 
-## Open the Wizard
+## Open First-Run
 
 Open:
 
@@ -30,25 +30,26 @@ Open:
 http://<pizzawave-host>:8080
 ```
 
-If setup has not been completed, the web UI enters the first-run wizard.
+If first-run has not been completed, the web UI enters the first-run wizard.
 
-Required wizard gates:
+First-run prerequisite gates:
 
-1. Stack choice: reuse an existing trunk-recorder installation or build a fresh one.
-2. Trunk-recorder config and callstream patching.
-3. Talkgroup CSV import or creation.
-4. Transcription engine and model.
-5. Monitored area mappings for geolocation.
-6. Final validation and enablement.
+1. Trunk Recorder: reuse an existing installation or build a fresh one.
+2. LM Link: optionally prepare host support for AI Insights.
+3. Qdrant: optionally install native Qdrant.
+4. Finish: validate required host prerequisites.
 
-Optional wizard gates:
+After first-run finishes, PizzaWave opens **Setup**. Use Setup for:
 
-- AI Insights through LM Link or another OpenAI-compatible endpoint.
-- Vector DB / Qdrant embeddings for incident matching.
-- Email alerts.
-- SFTP archive import.
-- Local import from an existing trunk-recorder recordings directory.
-- RTL-SDR calibration.
+- location and monitored/geolocation areas;
+- systems/sites and RadioReference IDs;
+- talkgroup import, category assignment, and system-level exclusions;
+- hardware/RF path and SDR inventory;
+- waterfall, P25 ID, RF sweep, and call-quality validation;
+- SDR source planning and final TR config apply/resume.
+
+Use **Settings** for transcription, AI, embeddings, alerts, playback, profiles,
+security, storage, and service behavior.
 
 ## Validate the Service
 

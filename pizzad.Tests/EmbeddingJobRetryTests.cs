@@ -5,6 +5,37 @@ namespace pizzad.Tests;
 public sealed class EmbeddingJobRetryTests
 {
     [Fact]
+    public void RetrievalEvidenceUsesTranscriptContentRatherThanQualityLabels()
+    {
+        var call = Call("retrieval-evidence") with
+        {
+            Transcription = "1159 Harrison Pike West, apartment 2208.",
+            TranscriptionStatus = "poor_quality",
+            QualityReason = "repetitive"
+        };
+
+        Assert.True(TranscriptRetrievalEvidence.IsUsable(call));
+        Assert.False(TranscriptRetrievalEvidence.IsUsable(call with { Transcription = "10-4" }));
+        Assert.False(TranscriptRetrievalEvidence.IsUsable(call with { Transcription = "   " }));
+    }
+
+    [Fact]
+    public void RepetitiveTranscriptRoutesToRetrievalButNotIncidentAnalysis()
+    {
+        var call = Call("retrieval-routing") with
+        {
+            Transcription = "1159 Harrison Pike West, apartment 2208.",
+            TranscriptionStatus = "poor_quality",
+            QualityReason = "repetitive"
+        };
+        var quality = new TranscriptionQuality("poor_quality", "repetitive", IncludeInSummaries: false);
+
+        Assert.True(TranscriptDownstreamRouting.ShouldEnqueueEmbedding(suppressDownstream: false, call));
+        Assert.False(TranscriptDownstreamRouting.ShouldEnqueueEmbedding(suppressDownstream: true, call));
+        Assert.False(TranscriptDownstreamRouting.ShouldEnqueueInsights(suppressDownstream: false, quality));
+    }
+
+    [Fact]
     public async Task ListPendingEmbeddingJobs_DoesNotImmediatelyRetryFailedJobs()
     {
         using var temp = new TempStore();

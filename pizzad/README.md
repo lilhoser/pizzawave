@@ -76,7 +76,7 @@ helper instead of ZIP archives. ZIP files created on Windows can preserve
 backslashes in native runtime paths and break Whisper runtime loading on Linux.
 
 ```powershell
-.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@192.168.2.42 -SshKey $env:USERPROFILE\.ssh\pizzawave_rpi_ed25519 -Rid linux-arm64
+.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@100.105.110.92 -SshKey $env:USERPROFILE\.ssh\pizzawave_rpi_ed25519 -Rid linux-arm64
 .\scripts\deploy_pizzad_tar.ps1 -HostName lilhoser@192.168.1.173 -Rid linux-x64
 ```
 

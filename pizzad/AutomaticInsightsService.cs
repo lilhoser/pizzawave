@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
@@ -55,6 +56,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     private DateTimeOffset _nextAttemptAt = DateTimeOffset.MinValue;
     private DateTimeOffset _nextIncidentRunAt = DateTimeOffset.MinValue;
     private DateTimeOffset _nextQueueGateLogAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _nextDurableQueueRefreshAt = DateTimeOffset.MinValue;
     private int _failureStreak;
 
     public AutomaticInsightsService(
@@ -75,28 +77,31 @@ public sealed class AutomaticInsightsService : BackgroundService
         _logger = logger;
     }
 
-    public void Enqueue(EngineCall call)
+    public async Task EnqueueAsync(EngineCall call, CancellationToken ct)
     {
-        if (!_config.Setup.Completed || !IsEnabled() || !DownstreamProfilePolicy.Allows(_config, call))
+        if (!_config.Setup.Completed || !IsConfigured() || !DownstreamProfilePolicy.Allows(_config, _catalog, call))
             return;
+        if (IncidentBatchProductionGate.OwnsProduction(_config.AiInsights))
+            return;
+        await _database.QueueIncidentAnalysisAsync(call.Id, ct);
         _queue.Enqueue(call);
     }
 
     public int ConfiguredBatchSize => BatchSize();
 
-    public bool IsConfiguredAndEnabled => IsEnabled();
+    public bool IsConfiguredAndEnabled => IsConfigured() && _config.AiInsights.IncidentAnalysisExecutionEnabled;
 
     public bool IsSetupComplete => _config.Setup.Completed;
 
     public async Task<int> GenerateWindowForCallsAsync(List<EngineCall> calls, CancellationToken ct)
     {
-        if (!IsEnabled())
+        if (!IsConfigured())
             throw new InvalidOperationException("AI insights are disabled or not fully configured.");
 
         calls = calls
             .Where(c => string.Equals(c.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
                         string.Equals(c.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
-                        DownstreamProfilePolicy.Allows(_config, c) &&
+                        DownstreamProfilePolicy.Allows(_config, _catalog, c) &&
                         !string.IsNullOrWhiteSpace(c.Transcription))
             .OrderBy(c => c.StartTime)
             .ToList();
@@ -120,8 +125,9 @@ public sealed class AutomaticInsightsService : BackgroundService
         {
             try
             {
-                if (_config.Setup.Completed && IsEnabled())
+                if (_config.Setup.Completed && IsConfigured() && _config.AiInsights.IncidentAnalysisExecutionEnabled)
                 {
+                    await RefreshDurableQueueAsync(stoppingToken);
                     DrainQueue();
                     await PumpAsync(stoppingToken);
                 }
@@ -137,18 +143,49 @@ public sealed class AutomaticInsightsService : BackgroundService
 
     private void DrainQueue()
     {
+        var minimumStartTime = IncidentAnalysisMinimumStartTime();
         lock (_gate)
         {
             while (_queue.TryDequeue(out var call))
             {
+                if (call.StartTime < minimumStartTime)
+                    continue;
                 if (_pending.Any(c => c.Id == call.Id))
                     continue;
                 _pending.Add(call);
             }
 
-            var max = Math.Max(_config.AiInsights.MaxPendingCalls, BatchSize());
-            if (_pending.Count > max)
-                _pending.RemoveRange(0, _pending.Count - max);
+        }
+    }
+
+    private async Task RefreshDurableQueueAsync(CancellationToken ct)
+    {
+        if (DateTimeOffset.UtcNow < _nextDurableQueueRefreshAt)
+            return;
+        _nextDurableQueueRefreshAt = DateTimeOffset.UtcNow.AddSeconds(30);
+        var minimumStartTime = IncidentAnalysisMinimumStartTime();
+        var skipped = await _database.SkipStaleIncidentAnalysisJobsAsync(
+            minimumStartTime,
+            $"Skipped because the call aged beyond the {_config.AiInsights.IncidentAnalysisMaximumAgeMinutes}-minute live incident-analysis window.",
+            ct);
+        if (skipped > 0)
+        {
+            _logger.LogWarning(
+                "Skipped {Count:N0} stale incident-analysis job(s) older than {MaximumAgeMinutes} minutes so current traffic cannot be starved",
+                skipped,
+                _config.AiInsights.IncidentAnalysisMaximumAgeMinutes);
+        }
+        HashSet<long> known;
+        lock (_gate)
+        {
+            _pending.RemoveAll(call => call.StartTime < minimumStartTime);
+            known = _pending.Select(call => call.Id).ToHashSet();
+        }
+        var durableLimit = Math.Max(BatchSize(), Math.Max(1, _config.AiInsights.MaxPendingCalls));
+        foreach (var call in await _database.ListPendingIncidentAnalysisCallsAsync(durableLimit, minimumStartTime, ct))
+        {
+            if (!known.Contains(call.Id))
+                _queue.Enqueue(call);
         }
     }
 
@@ -184,32 +221,40 @@ public sealed class AutomaticInsightsService : BackgroundService
             if (_pending.Count == 0)
                 return;
 
-            batch = _pending.ToList();
+            batch = SelectCurrentIncidentBatch(_pending, BatchSize()).ToList();
         }
 
         if (batch.Count == 0)
             return;
 
-        var start = DateTimeOffset.UtcNow.Add(MaxIncidentSpan.Negate()).ToUnixTimeSeconds();
-        var end = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var currentWindowStart = now - (long)MaxIncidentSpan.TotalSeconds;
+        var handledCallIds = new HashSet<long>();
         try
         {
             var incidents = 0;
             var truncatedSystems = 0;
-            var handledCallIds = batch.Select(c => c.Id).ToHashSet();
-            var stale = await _database.ConcludeStaleManagedIncidentsAsync(start, ct);
-            foreach (var system in batch.Select(c => c.SystemShortName).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase))
+            handledCallIds.UnionWith(batch.Where(c => string.IsNullOrWhiteSpace(c.SystemShortName)).Select(c => c.Id));
+            if (handledCallIds.Count > 0)
             {
-                var newCallIds = batch
-                    .Where(c => string.Equals(c.SystemShortName, system, StringComparison.OrdinalIgnoreCase))
-                    .Select(c => c.Id)
-                    .ToHashSet();
-                if (newCallIds.Count == 0)
-                    continue;
+                await _database.MarkIncidentAnalysisCompletedAsync(handledCallIds, ct);
+                lock (_gate)
+                    _pending.RemoveAll(c => handledCallIds.Contains(c.Id));
+            }
+            var stale = await _database.ConcludeStaleManagedIncidentsAsync(currentWindowStart, ct);
+            foreach (var slice in BuildIncidentProcessingSlices(batch, IncidentPromptCandidateLimit(), now))
+            {
+                var newCallIds = slice.Calls.Select(c => c.Id).ToHashSet();
 
                 try
                 {
-                    incidents += await ExtractIncidentsForSystemAsync(system, start, end, newCallIds, ct);
+                    incidents += await ExtractIncidentsForSystemAsync(slice.SystemShortName, slice.Start, slice.End, newCallIds, ct);
+                    await _database.MarkIncidentAnalysisCompletedAsync(newCallIds, ct);
+                    handledCallIds.UnionWith(newCallIds);
+                    lock (_gate)
+                    {
+                        _pending.RemoveAll(c => newCallIds.Contains(c.Id));
+                    }
                 }
                 catch (InsightResponseTruncatedException ex)
                 {
@@ -217,7 +262,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                     _logger.LogWarning(
                         ex,
                         "Automatic incident extraction truncated for {System} after split fallback; preserving {Count} triggering call(s) for a later retry.",
-                        system,
+                        slice.SystemShortName,
                         newCallIds.Count);
                     throw;
                 }
@@ -230,7 +275,8 @@ public sealed class AutomaticInsightsService : BackgroundService
             _failureStreak = 0;
             _nextAttemptAt = DateTimeOffset.UtcNow;
             _nextIncidentRunAt = DateTimeOffset.UtcNow.AddSeconds(IncidentRunIntervalSeconds());
-            await _events.PublishAsync("summary_updated", new { windowId = 0, start, end, incidents }, ct);
+            var eventStart = handledCallIds.Count == 0 ? currentWindowStart : batch.Where(c => handledCallIds.Contains(c.Id)).Min(c => c.StartTime);
+            await _events.PublishAsync("summary_updated", new { windowId = 0, start = eventStart, end = now, incidents }, ct);
             _logger.LogInformation(
                 "Automatic incident extraction updated {Incidents} incident(s), concluded {StaleIncidents} stale incident(s), from {Calls} new call(s); truncated systems={TruncatedSystems}",
                 incidents,
@@ -240,6 +286,15 @@ public sealed class AutomaticInsightsService : BackgroundService
         }
         catch (Exception ex)
         {
+            var stillPendingIds = batch.Select(call => call.Id).Except(handledCallIds).ToList();
+            try
+            {
+                await _database.MarkIncidentAnalysisAttemptFailedAsync(stillPendingIds, ex.GetBaseException().Message, CancellationToken.None);
+            }
+            catch (Exception persistenceException)
+            {
+                _logger.LogWarning(persistenceException, "Failed to persist incident-analysis retry evidence for {Count} calls", stillPendingIds.Count);
+            }
             _failureStreak++;
             var cooldownSeconds = Math.Min(300, 5 * (1 << Math.Min(_failureStreak, 5)));
             _nextAttemptAt = DateTimeOffset.UtcNow.AddSeconds(cooldownSeconds);
@@ -249,11 +304,70 @@ public sealed class AutomaticInsightsService : BackgroundService
         }
     }
 
+    public static IReadOnlyList<IncidentProcessingSlice> BuildIncidentProcessingSlices(IReadOnlyList<EngineCall> batch, int maxCalls, long now)
+    {
+        maxCalls = Math.Max(1, maxCalls);
+        var slices = new List<IncidentProcessingSlice>();
+        foreach (var systemGroup in batch
+                     .Where(call => !string.IsNullOrWhiteSpace(call.SystemShortName))
+                     .GroupBy(call => call.SystemShortName.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var hourGroup in systemGroup
+                         .OrderBy(call => call.StartTime)
+                         .GroupBy(call => call.StartTime / 3600))
+            {
+                foreach (var chunk in hourGroup.Chunk(maxCalls))
+                {
+                    var calls = chunk.OrderBy(call => call.StartTime).ToList();
+                    var start = Math.Max(0, calls.Min(call => call.StartTime) - (long)MaxIncidentSpan.TotalSeconds);
+                    var lastEvent = calls.Max(call => Math.Max(call.StartTime, call.StopTime));
+                    var end = Math.Min(now, lastEvent + (long)MaxIncidentSpan.TotalSeconds);
+                    slices.Add(new IncidentProcessingSlice(systemGroup.Key, start, Math.Max(start, end), calls));
+                }
+            }
+        }
+        return slices.OrderBy(slice => slice.Calls[0].StartTime).ToList();
+    }
+
+    public static IReadOnlyList<EngineCall> SelectCurrentIncidentBatch(IReadOnlyList<EngineCall> pending, int maxCalls)
+    {
+        maxCalls = Math.Max(1, maxCalls);
+        var groups = pending
+            .GroupBy(call => call.SystemShortName?.Trim() ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new
+            {
+                System = group.Key,
+                Calls = new Queue<EngineCall>(group
+                    .OrderByDescending(call => call.StartTime)
+                    .ThenByDescending(call => call.Id))
+            })
+            .OrderByDescending(group => group.Calls.Peek().StartTime)
+            .ThenBy(group => group.System, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var selected = new List<EngineCall>(Math.Min(maxCalls, pending.Count));
+        while (selected.Count < maxCalls && groups.Any(group => group.Calls.Count > 0))
+        {
+            foreach (var group in groups)
+            {
+                if (selected.Count >= maxCalls)
+                    break;
+                if (group.Calls.TryDequeue(out var call))
+                    selected.Add(call);
+            }
+        }
+        return selected
+            .OrderBy(call => call.StartTime)
+            .ThenBy(call => call.Id)
+            .ToList();
+    }
+
+    public sealed record IncidentProcessingSlice(string SystemShortName, long Start, long End, IReadOnlyList<EngineCall> Calls);
+
     private async Task<int> ExtractIncidentsForSystemAsync(string systemShortName, long start, long end, HashSet<long> newCallIds, CancellationToken ct)
     {
         var recent = (await _database.ListCallsAsync(start, end, null, ct))
             .Where(c => string.Equals(c.SystemShortName, systemShortName, StringComparison.OrdinalIgnoreCase))
-            .Where(c => DownstreamProfilePolicy.Allows(_config, c))
+            .Where(c => DownstreamProfilePolicy.Allows(_config, _catalog, c))
             .Where(IsIncidentEligibleCall)
             .Where(IsCatalogIncidentEligibleOrStrongSignal)
             .OrderBy(c => c.StartTime)
@@ -264,6 +378,9 @@ public sealed class AutomaticInsightsService : BackgroundService
         var activeIncidents = (await _database.ListIncidentsAsync(start, end, ct))
             .Where(i => !string.Equals(i.Status, "concluded", StringComparison.OrdinalIgnoreCase))
             .Where(i => i.Calls.Any(c => string.Equals(c.SystemShortName, systemShortName, StringComparison.OrdinalIgnoreCase)))
+            .Select(FilterIncidentForActiveProfile)
+            .Where(i => i is not null)
+            .Cast<IncidentDto>()
             .ToList();
         var locationRows = await _database.ListCallLocationsAsync(start, end, ct);
         var vectorMatches = await SearchVectorCandidatesAsync(systemShortName, activeIncidents, recent, newCallIds, start, end, ct);
@@ -465,6 +582,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         Exception? last = null;
         for (var attempt = 0; attempt <= 0; attempt++)
         {
+            var requestStarted = Stopwatch.GetTimestamp();
             try
             {
                 using var content = new StringContent(payload, Encoding.UTF8, "application/json");
@@ -477,12 +595,12 @@ public sealed class AutomaticInsightsService : BackgroundService
                 {
                     var message = $"LM incident extraction response was truncated at max_tokens={IncidentMaxOutputTokens}.";
                     if (recordTruncationUsage)
-                        await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, message, ct);
+                        await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, message, ElapsedMilliseconds(requestStarted), ct);
                     throw new InsightResponseTruncatedException(message);
                 }
 
                 var parsed = ParseIncidentExtractionResponse(text);
-                await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, true, recoveredFallback ? "recovered_after_truncation_split" : string.Empty, ct);
+                await RecordUsageAsync(text, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, true, recoveredFallback ? "recovered_after_truncation_split" : string.Empty, ElapsedMilliseconds(requestStarted), ct);
                 await RunIncidentV3FrameShadowAsync(systemShortName, activeIncidents, candidateCalls, parsed, ct);
                 await RunIncidentV2ShadowAsync(systemShortName, activeIncidents, candidateCalls, parsed, endpoint, ct);
                 return parsed;
@@ -499,13 +617,13 @@ public sealed class AutomaticInsightsService : BackgroundService
             catch (Exception ex) when (attempt < Math.Max(0, _config.AiInsights.MaxRetries))
             {
                 last = ex;
-                await RecordUsageAsync(string.Empty, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, ElapsedMilliseconds(requestStarted), CancellationToken.None);
                 await Task.Delay(500, ct);
             }
             catch (Exception ex)
             {
                 last = ex;
-                await RecordUsageAsync(string.Empty, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, candidateCalls.Sum(c => c.Call.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, ElapsedMilliseconds(requestStarted), CancellationToken.None);
                 break;
             }
         }
@@ -755,7 +873,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     }
 
     private static IncidentCallDto ToIncidentCallDto(EngineCall call) =>
-        new(call.Id, call.StartTime, call.Transcription, $"/api/v1/calls/{call.Id}/audio", call.Category, call.TalkgroupName, call.SystemShortName);
+        new(call.Id, call.StartTime, call.Transcription, CallAudioLinks.ForCall(call.Id, call.AudioPath), call.Category, call.TalkgroupName, call.SystemShortName, call.Talkgroup);
 
     private static IncidentFrameCurrentIncidentV3 BuildIncidentV3CurrentIncident(
         IncidentStateItem incident,
@@ -1622,7 +1740,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 FirstSeen = callIds.Min(c => c.StartTime),
                 LastSeen = callIds.Max(c => c.StartTime),
                 Confidence = Math.Clamp(item.Confidence, 0, 1),
-                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName)).ToList()
+                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, CallAudioLinks.ForCall(c.Id, c.AudioPath), c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
             };
             var mergeIncidentIds = target.MergeIncidents.Select(i => i.Id).ToList();
             var id = mergeIncidentIds.Count == 0
@@ -1647,7 +1765,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 FirstSeen = callIds.Min(c => c.StartTime),
                 LastSeen = callIds.Max(c => c.StartTime),
                 Confidence = Math.Clamp(item.Confidence, 0, 1),
-                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio", c.Category, c.TalkgroupName, c.SystemShortName)).ToList()
+                Calls = callIds.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, CallAudioLinks.ForCall(c.Id, c.AudioPath), c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
             };
             var acceptedReason = existingIncident is null ? "accepted:create incident" : "accepted:update incident";
             if (!string.IsNullOrWhiteSpace(decision.Reason))
@@ -1980,7 +2098,8 @@ public sealed class AutomaticInsightsService : BackgroundService
             "public_safety_event",
             [],
             false,
-            null);
+            null,
+            Guid.NewGuid().ToString("N"));
 
     private static IncidentDto ChoosePrimaryIncidentForMerge(IReadOnlyList<IncidentDto> incidents) =>
         incidents
@@ -4014,6 +4133,9 @@ public sealed class AutomaticInsightsService : BackgroundService
             .ToList();
         var auditMetadata = new
         {
+            title = item.Title,
+            detail = item.Detail,
+            category = item.Category,
             eventClass = item.EventClass,
             logisticsOnly = item.LogisticsOnly,
             parentEventEvidence = item.ParentEventEvidence,
@@ -4029,7 +4151,8 @@ public sealed class AutomaticInsightsService : BackgroundService
             reason,
             scores.Count == 0 ? 0 : scores.Average(),
             JsonSerializer.Serialize(callIds),
-            JsonSerializer.Serialize(auditMetadata, EngineConfig.JsonOptions())), ct);
+            JsonSerializer.Serialize(auditMetadata, EngineConfig.JsonOptions()),
+            item.CandidateTraceKey), ct);
     }
 
     private async Task AuditReconciliationOperationAsync(
@@ -4055,7 +4178,8 @@ public sealed class AutomaticInsightsService : BackgroundService
                 candidateIndex = audit.CandidateIndex,
                 source = "structured_reconciliation",
                 note = "No transcript regex was used; decision used structured anchors, geocodes, time, categories, and RAG scores."
-            }, EngineConfig.JsonOptions())), ct);
+            }, EngineConfig.JsonOptions()),
+            item.CandidateTraceKey), ct);
     }
 
     private static bool HasStructuredIncidentLink(
@@ -4464,12 +4588,13 @@ public sealed class AutomaticInsightsService : BackgroundService
 
         var payload = JsonSerializer.Serialize(body, EngineConfig.JsonOptions());
         _logger.LogInformation("Calling evidence verifier endpoint {Endpoint} with model {Model} for {System} incident '{Title}' ({ReviewCalls} call(s), {PayloadChars} chars, {TruncatedCalls} truncated)", endpoint, InsightModel(), systemShortName, title, prompt.IncludedCalls, payload.Length, truncatedCalls + prompt.OmittedCalls);
+        var requestStarted = Stopwatch.GetTimestamp();
         using var content = new StringContent(payload, Encoding.UTF8, "application/json");
         using var response = await client.PostAsync(endpoint, content, ct);
         var text = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
         {
-            await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, false, $"Evidence verifier HTTP {(int)response.StatusCode}: {Trim(text, 500)}", ct);
+            await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, false, $"Evidence verifier HTTP {(int)response.StatusCode}: {Trim(text, 500)}", ElapsedMilliseconds(requestStarted), ct);
             throw new InvalidOperationException($"Evidence verifier request failed with HTTP {(int)response.StatusCode}: {Trim(text, 1000)}");
         }
 
@@ -4477,12 +4602,12 @@ public sealed class AutomaticInsightsService : BackgroundService
         if (string.Equals(usage.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
         {
             var message = $"LM evidence verifier response was truncated at max_tokens={EvidenceVerifierMaxOutputTokens}.";
-            await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, false, message, ct);
+            await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, false, message, ElapsedMilliseconds(requestStarted), ct);
             throw new InsightResponseTruncatedException(message);
         }
 
         var parsed = ParseEvidenceVerificationResponse(text);
-        await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, true, string.Empty, ct);
+        await RecordUsageAsync(text, endpoint, payload.Length, reviewCalls.Take(prompt.IncludedCalls).Sum(c => c.Transcription?.Length ?? 0), 1, true, string.Empty, ElapsedMilliseconds(requestStarted), ct);
         return parsed with { ReviewedCalls = prompt.IncludedCalls, PromptOmittedCalls = prompt.OmittedCalls };
     }
 
@@ -4626,7 +4751,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                     FirstSeen = calls.Min(c => c.StartTime),
                     LastSeen = calls.Max(c => c.StartTime),
                     Confidence = Math.Clamp(ev.Confidence, 0, 1),
-                    Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, $"/api/v1/calls/{c.Id}/audio")).ToList()
+                    Calls = calls.Select(c => new IncidentCallDto(c.Id, c.StartTime, c.Transcription, CallAudioLinks.ForCall(c.Id, c.AudioPath), c.Category, c.TalkgroupName, c.SystemShortName, c.Talkgroup)).ToList()
                 };
             })
             .Where(e => e != null)
@@ -4672,6 +4797,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         Exception? last = null;
         for (var attempt = 0; attempt <= Math.Max(0, _config.AiInsights.MaxRetries); attempt++)
         {
+            var requestStarted = Stopwatch.GetTimestamp();
             try
             {
                 using var content = new StringContent(payload, Encoding.UTF8, "application/json");
@@ -4684,12 +4810,12 @@ public sealed class AutomaticInsightsService : BackgroundService
                 if (string.Equals(usage.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
                 {
                     var message = $"LM response was truncated at max_tokens={budget.MaxOutputTokens}; retry with a smaller summary window.";
-                    await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, message, ct);
+                    await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, message, ElapsedMilliseconds(requestStarted), ct);
                     throw new InsightResponseTruncatedException(message);
                 }
 
                 var parsed = ParseResponse(text);
-                await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, true, string.Empty, ct);
+                await RecordUsageAsync(text, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, true, string.Empty, ElapsedMilliseconds(requestStarted), ct);
                 return parsed;
             }
             catch (InsightResponseTruncatedException)
@@ -4704,13 +4830,13 @@ public sealed class AutomaticInsightsService : BackgroundService
             catch (Exception ex) when (attempt < Math.Max(0, _config.AiInsights.MaxRetries))
             {
                 last = ex;
-                await RecordUsageAsync(string.Empty, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, ElapsedMilliseconds(requestStarted), CancellationToken.None);
                 await Task.Delay(500, ct);
             }
             catch (Exception ex)
             {
                 last = ex;
-                await RecordUsageAsync(string.Empty, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, CancellationToken.None);
+                await RecordUsageAsync(string.Empty, endpoint, payload.Length, calls.Sum(c => c.Transcription?.Length ?? 0), attempt + 1, false, ex.Message, ElapsedMilliseconds(requestStarted), CancellationToken.None);
                 break;
             }
         }
@@ -4721,7 +4847,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     private static bool IsCallerRequestedCompletionCancellation(Exception ex, CancellationToken ct) =>
         ct.IsCancellationRequested && ex is OperationCanceledException;
 
-    private async Task RecordUsageAsync(string responseText, string endpoint, int payloadChars, int inputChars, int attempt, bool success, string error, CancellationToken ct)
+    private async Task RecordUsageAsync(string responseText, string endpoint, int payloadChars, int inputChars, int attempt, bool success, string error, long durationMilliseconds, CancellationToken ct)
     {
         var usage = ExtractUsage(responseText);
         if (!success && usage.ReasoningTokens > 0 && !error.Contains("reasoning_tokens=", StringComparison.OrdinalIgnoreCase))
@@ -4743,8 +4869,12 @@ public sealed class AutomaticInsightsService : BackgroundService
             payloadChars,
             usage.PromptTokens,
             usage.CompletionTokens,
-            usage.TotalTokens), ct);
+            usage.TotalTokens,
+            durationMilliseconds), ct);
     }
+
+    private static long ElapsedMilliseconds(long started) =>
+        Math.Max(0, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
 
     private static (int PromptTokens, int CompletionTokens, int TotalTokens, int ReasoningTokens, string ResponseModel, string FinishReason) ExtractUsage(string text)
     {
@@ -4935,7 +5065,8 @@ public sealed class AutomaticInsightsService : BackgroundService
                     GetString(item, "event_class"),
                     ReadStringArray(item, "parent_event_evidence"),
                     item.TryGetProperty("logistics_only", out var logisticsOnly) && logisticsOnly.ValueKind == JsonValueKind.True,
-                    ReadEventLocation(item)));
+                    ReadEventLocation(item),
+                    Guid.NewGuid().ToString("N")));
             }
         }
         return new IncidentExtractionResult(incidents);
@@ -5140,9 +5271,35 @@ public sealed class AutomaticInsightsService : BackgroundService
         return !call.IsImported && text.Length >= 12;
     }
 
+    private IncidentDto? FilterIncidentForActiveProfile(IncidentDto incident)
+    {
+        var visibleCalls = incident.Calls
+            .Where(c => DownstreamProfilePolicy.Allows(_config, _catalog, c.Category, c.SystemShortName, c.Talkgroup))
+            .ToList();
+        if (visibleCalls.Count == 0)
+            return null;
+        if (visibleCalls.Count == incident.Calls.Count)
+            return incident;
+
+        var category = visibleCalls
+            .GroupBy(c => string.IsNullOrWhiteSpace(c.Category) ? "other" : c.Category.Trim().ToLowerInvariant())
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault()?.Key ?? "other";
+        return incident with
+        {
+            Title = "Profile-visible active incident",
+            Detail = "Hidden talkgroup evidence was removed from this active incident context.",
+            Category = category,
+            FirstSeen = visibleCalls.Min(c => c.RawTimestamp),
+            LastSeen = visibleCalls.Max(c => c.RawTimestamp),
+            Calls = visibleCalls
+        };
+    }
+
     private bool IsCatalogIncidentEligibleOrStrongSignal(EngineCall call)
     {
-        if (_catalog.IsIncidentEligible(call.Talkgroup))
+        if (_catalog.IsIncidentEligible(call.SystemShortName, call.Talkgroup))
             return true;
         return IncidentCandidateValidator.HasStrongIncidentSignal($"{call.TalkgroupName} {call.Transcription}");
     }
@@ -5195,7 +5352,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         return IncidentEvidenceClassifier.Analyze(evidenceText).Category;
     }
 
-    private bool IsEnabled() =>
+    private bool IsConfigured() =>
         _config.Setup.Completed &&
         _config.AiInsights.Enabled &&
         !string.IsNullOrWhiteSpace(InsightBaseUrl()) &&
@@ -5204,6 +5361,9 @@ public sealed class AutomaticInsightsService : BackgroundService
     private int BatchSize() => Math.Max(1, _config.AiInsights.BatchSize <= 0 ? DefaultBatchSize : _config.AiInsights.BatchSize);
 
     private int IncidentRunIntervalSeconds() => Math.Clamp(_config.AiInsights.IncidentRunIntervalSeconds <= 0 ? 300 : _config.AiInsights.IncidentRunIntervalSeconds, 60, 1800);
+
+    private long IncidentAnalysisMinimumStartTime() =>
+        DateTimeOffset.UtcNow.AddMinutes(-_config.AiInsights.IncidentAnalysisMaximumAgeMinutes).ToUnixTimeSeconds();
 
     private int IncidentPromptCandidateLimit() => Math.Clamp(_config.AiInsights.IncidentPromptCandidateLimit <= 0 ? 18 : _config.AiInsights.IncidentPromptCandidateLimit, 6, 40);
 
@@ -5329,7 +5489,7 @@ public sealed class AutomaticInsightsService : BackgroundService
     }
 
     private IncidentCandidateCall ToIncidentCandidateCall(EngineCall call) =>
-        new(call.Id, call.StartTime, call.Transcription, call.Category, call.TalkgroupName, call.SystemShortName, IncidentEligible: _catalog.IsIncidentEligible(call.Talkgroup));
+        new(call.Id, call.StartTime, call.Transcription, call.Category, call.TalkgroupName, call.SystemShortName, IncidentEligible: _catalog.IsIncidentEligible(call.SystemShortName, call.Talkgroup));
 
     private IncidentCandidateCall ToIncidentCandidateCall(EngineCall call, IReadOnlyDictionary<long, IReadOnlyList<CallAnchorRecord>> anchorsByCall) =>
         new(
@@ -5340,7 +5500,7 @@ public sealed class AutomaticInsightsService : BackgroundService
             call.TalkgroupName,
             call.SystemShortName,
             anchorsByCall.TryGetValue(call.Id, out var anchors) ? anchors : [],
-            _catalog.IsIncidentEligible(call.Talkgroup));
+            _catalog.IsIncidentEligible(call.SystemShortName, call.Talkgroup));
 
     private static string StripCodeFence(string content) =>
         Regex.Replace(content.Trim(), "^```(?:json)?\\s*|\\s*```$", string.Empty, RegexOptions.IgnoreCase);
@@ -5653,7 +5813,8 @@ public sealed class AutomaticInsightsService : BackgroundService
         string EventClass,
         List<string> ParentEventEvidence,
         bool LogisticsOnly,
-        IncidentEventLocation? EventLocation);
+        IncidentEventLocation? EventLocation,
+        string CandidateTraceKey);
     private sealed record IncidentEventLocation(
         string Kind,
         string Route,

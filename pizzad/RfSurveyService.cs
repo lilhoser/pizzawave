@@ -1,17 +1,25 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Numerics;
 using System.Net.Sockets;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Security.Cryptography;
 
 namespace pizzad;
 
 public sealed class RfSurveyService
 {
     private const double TrUsableHalfBandwidthFactor = 0.46875;
+    private const int ControlChannelCarrierToleranceHz = 8_000;
+    private const int MinUsableTranscriptionGateChars = 12;
+    private const int WaterfallHistoryFrameLimit = 4;
+    private static readonly TimeSpan WaterfallConsumeTimeout = TimeSpan.FromMinutes(5);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeExperimentCancellations = new();
+    private readonly ConcurrentDictionary<string, WaterfallRuntime> _activeWaterfalls = new();
+    private readonly ConcurrentDictionary<string, RfSurveyWaterfallStatusDto> _lastWaterfalls = new();
 
     private static readonly string[] ScopeInvalidatedExperimentTypes =
     [
@@ -29,7 +37,7 @@ public sealed class RfSurveyService
         @"\[(?<system>[^\]]+)\]\s+(?:freq:\s*)?(?<freq>\d+(?:\.\d+)?)\s+MHz\s+(?:Control Channel Message Decode Rate:\s*)?(?<rate>-?\d+(?:\.\d+)?)\s*(?:/sec|msg/sec)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex TrCallEventRegex = new(
-        @"\[(?<system>[^\]]+)\]\s+(?<call>\d+)C\s+TG:\s+(?<tg>\d+)\s+Freq:\s+(?<freq>\d+(?:\.\d+)?)\s+MHz\s+(?<message>.*)$",
+        @"\[(?<system>[^\]]+)\]\s+(?<call>\d+)C\s+TG:\s+(?<tg>\d+)\b.*?\bFreq:\s+(?<freq>\d+(?:\.\d+)?)\s+MHz\s+(?<message>.*)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex CallstreamNoSamplesRegex = new(
         @"call_end\s+callstream\s+with\s+call\s+id\s+(?<call>\d+)\s+has\s+no\s+samples",
@@ -38,20 +46,26 @@ public sealed class RfSurveyService
     private readonly EngineDatabase _database;
     private readonly SetupCalibrationService _calibration;
     private readonly SetupJobService _jobs;
+    private readonly TalkgroupCatalogService _talkgroups;
     private readonly ILogger<RfSurveyService> _logger;
+    private readonly TrConfigArtifactProvenanceStore? _configProvenance;
 
     public RfSurveyService(
         EngineConfig config,
         EngineDatabase database,
         SetupCalibrationService calibration,
         SetupJobService jobs,
-        ILogger<RfSurveyService> logger)
+        TalkgroupCatalogService talkgroups,
+        ILogger<RfSurveyService> logger,
+        TrConfigArtifactProvenanceStore? configProvenance = null)
     {
         _config = config;
         _database = database;
         _calibration = calibration;
         _jobs = jobs;
+        _talkgroups = talkgroups;
         _logger = logger;
+        _configProvenance = configProvenance;
     }
 
     public string ArtifactRoot => Path.Combine(_config.Storage.AppDataRoot, "rf-surveys");
@@ -63,9 +77,18 @@ public sealed class RfSurveyService
         foreach (var session in await _database.ListRfSurveySessionsAsync(ct))
         {
             var row = await _database.GetRfSurveySessionAsync(session.Id, ct);
-            sessions.Add(row == null
-                ? NormalizeAppliedSourcePlanSession(session)
-                : await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, ct));
+            if (row == null)
+            {
+                sessions.Add(NormalizeAppliedSourcePlanSession(session));
+                continue;
+            }
+
+            var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
+                row.Value.Session,
+                NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.Value.ProfileJson) ?? new RfSurveyProfileDto()),
+                ct);
+            var recovered = await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, persist: false, ct);
+            sessions.Add(recovered with { SdrSummary = SummarizeSelectedSdrs(profile) });
         }
         return new RfSurveyListDto(sessions, ArtifactRoot);
     }
@@ -92,6 +115,7 @@ public sealed class RfSurveyService
         RfSurveySessionDto session,
         string profileJson,
         string toolPrepJson,
+        bool persist,
         CancellationToken ct)
     {
         if (HasAppliedSourcePlan(session))
@@ -125,8 +149,11 @@ public sealed class RfSurveyService
                 Verdict = "source_plan_candidate",
                 SourcePlanSummary = sourcePlanSummary
             };
-            await _database.UpdateRfSurveySessionAsync(recovered, profileJson, toolPrepJson, ct);
-            await WriteArtifactAsync(recovered.ArtifactPath, "survey.json", recovered, ct);
+            if (persist)
+            {
+                await _database.UpdateRfSurveySessionAsync(recovered, profileJson, toolPrepJson, ct);
+                await WriteArtifactAsync(recovered.ArtifactPath, "survey.json", recovered, ct);
+            }
             return recovered;
         }
         catch
@@ -142,30 +169,31 @@ public sealed class RfSurveyService
         var warnings = new List<string>(plan.Warnings);
         var liveDefinitions = plan.Systems.Select(system => new RfSurveySystemDto(system.ShortName, system.ShortName, system.ControlChannelsHz, system.VoiceFrequenciesHz)).ToList();
         var requestDefinitions = NormalizeSystemDefinitions(request.SystemDefinitions);
-        var availableDefinitions = MergeSystemDefinitions(liveDefinitions, requestDefinitions);
+        var availableDefinitions = MergeSystemDefinitions(requestDefinitions, liveDefinitions);
         var selectedSystems = SelectCalibrationSystems(plan.Systems, requestedSystemNames);
         var selectedDefinitions = SelectSurveySystems(availableDefinitions, requestedSystemNames);
         var selectedSystem = selectedSystems.FirstOrDefault(system =>
                 selectedDefinitions.Any(definition => string.Equals(definition.ShortName, system.ShortName, StringComparison.OrdinalIgnoreCase)))
             ?? selectedSystems.FirstOrDefault();
         var selectedSystemNames = selectedDefinitions.Select(system => system.ShortName).ToList();
+        var profileSystemNames = requestedSystemNames.Count > 0 ? requestedSystemNames : selectedSystemNames;
         var requestedSourcePlanNames = NormalizeRequestedSystemNames(request.SourcePlanSystemShortNames, null);
         var sourcePlanSystemNames = requestedSourcePlanNames.Count > 0
             ? requestedSourcePlanNames
-                .Where(name => selectedSystemNames.Any(selected => string.Equals(selected, name, StringComparison.OrdinalIgnoreCase)))
-                .DefaultIfEmpty(selectedSystemNames.FirstOrDefault() ?? string.Empty)
+                .Where(name => profileSystemNames.Any(selected => string.Equals(selected, name, StringComparison.OrdinalIgnoreCase)))
+                .DefaultIfEmpty(profileSystemNames.FirstOrDefault() ?? string.Empty)
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList()
-            : selectedSystemNames;
+            : profileSystemNames;
         var unresolvedNames = requestedSystemNames
             .Where(requested => selectedSystemNames.All(selected => !string.Equals(selected, requested, StringComparison.OrdinalIgnoreCase)))
             .ToList();
         foreach (var name in unresolvedNames)
-            warnings.Add($"TR system '{name}' was not found in the current Radio Setup source plan.");
+            warnings.Add($"TR system '{name}' was not found in the current Setup source plan.");
 
-        if (requestedSystemNames.Count > 0 && selectedSystems.Count == 0)
-            warnings.Add("No TR system was available. Complete setup/TR config before running Radio Setup.");
+        if (requestedSystemNames.Count > 0 && selectedDefinitions.Count == 0)
+            warnings.Add("No TR system was available. Complete setup/TR config before running RF validation.");
 
         var liveSources = plan.Sources.Select(source => new RfSurveySourceDto(
             source.Index,
@@ -179,25 +207,20 @@ public sealed class RfSurveyService
         var sourceOverride = request.SdrSources is { Count: > 0 };
         var sources = sourceOverride
             ? NormalizeRfSurveySources(request.SdrSources!)
-            : request.SelectedSourceIndexes is { Count: 0 } ? []
             : requestedSystemNames.Count > 0 ? liveSources : [];
+        var sourceAssignments = NormalizeSourceAssignments(request.SourceAssignments, selectedDefinitions, sources);
 
-        var devices = sources.Select(source => new RfSurveySdrDeviceDto(
-            source.Index,
-            source.Serial,
-            string.IsNullOrWhiteSpace(source.Serial) ? $"{source.SdrType} source {source.Index}" : $"{source.SdrType} {source.Serial}",
-            source.SdrType,
-            source.Device,
-            string.IsNullOrWhiteSpace(source.Serial) ? "Serial was not present in the TR source device string." : string.Empty)).ToList();
+        var devices = BuildSdrDevices(sources);
 
         return new RfSurveyProfileDto
         {
             SiteLabel = string.IsNullOrWhiteSpace(request.SiteLabel)
-                ? selectedSystemNames.Count == 1 ? selectedSystemNames[0] : selectedSystemNames.Count > 1 ? string.Join(", ", selectedSystemNames) : "Radio Setup"
+                ? profileSystemNames.Count == 1 ? profileSystemNames[0] : profileSystemNames.Count > 1 ? string.Join(", ", profileSystemNames) : "Site Setup"
                 : request.SiteLabel.Trim(),
-            SystemShortName = selectedSystem?.ShortName ?? request.SystemShortName?.Trim() ?? string.Empty,
-            SystemShortNames = selectedSystemNames.Count > 0
-                ? selectedSystemNames
+            RadioReferenceSid = string.IsNullOrWhiteSpace(request.RadioReferenceSid) ? string.Empty : request.RadioReferenceSid.Trim(),
+            SystemShortName = selectedSystem?.ShortName ?? profileSystemNames.FirstOrDefault() ?? request.SystemShortName?.Trim() ?? string.Empty,
+            SystemShortNames = profileSystemNames.Count > 0
+                ? profileSystemNames
                 : string.IsNullOrWhiteSpace(request.SystemShortName) ? [] : [request.SystemShortName.Trim()],
             SourcePlanSystemShortNames = sourcePlanSystemNames,
             SourcePlanMode = NormalizeSourcePlanMode(request.SourcePlanMode),
@@ -209,6 +232,7 @@ public sealed class RfSurveyService
             Sources = sources,
             Devices = devices,
             SelectedSourceIndexes = NormalizeSelectedSourceIndexes(request.SelectedSourceIndexes, sources, selectedSystems),
+            SourceAssignments = sourceAssignments,
             SourceOverride = sourceOverride,
             RfPath = request.RfPath ?? new RfSurveyPathProfileDto(),
             CurrentStep = Math.Clamp(request.CurrentStep, 0, 8),
@@ -234,7 +258,9 @@ public sealed class RfSurveyService
             current.SourcePlanSystemShortNames,
             current.SourcePlanMode,
             current.Systems,
-            current.SourceOverride ? current.Sources : null));
+            current.Sources,
+            current.RadioReferenceSid,
+            current.SourceAssignments));
         return rebuilt with
         {
             SiteLabel = string.IsNullOrWhiteSpace(current.SiteLabel) ? rebuilt.SiteLabel : current.SiteLabel,
@@ -244,8 +270,114 @@ public sealed class RfSurveyService
             CurrentStep = current.CurrentStep,
             MeasurementMode = string.IsNullOrWhiteSpace(current.MeasurementMode) ? rebuilt.MeasurementMode : current.MeasurementMode,
             ProbeDurationSeconds = current.ProbeDurationSeconds <= 0 ? rebuilt.ProbeDurationSeconds : current.ProbeDurationSeconds,
-            SelectedSourceIndexes = NormalizeSelectedSourceIndexes(current.SelectedSourceIndexes, rebuilt.Sources, null)
+            SelectedSourceIndexes = NormalizeSelectedSourceIndexes(current.SelectedSourceIndexes, rebuilt.Sources, null),
+            SourceAssignments = NormalizeSourceAssignments(current.SourceAssignments, rebuilt.Systems, rebuilt.Sources)
         };
+    }
+
+    private static List<RfSurveySdrDeviceDto> BuildSdrDevices(IReadOnlyList<RfSurveySourceDto> sources) =>
+        sources.Select(source => new RfSurveySdrDeviceDto(
+            source.Index,
+            source.Serial,
+            string.IsNullOrWhiteSpace(source.Serial) ? $"{source.SdrType} source {source.Index}" : $"{source.SdrType} {source.Serial}",
+            source.SdrType,
+            source.Device,
+            string.IsNullOrWhiteSpace(source.Serial) ? "Serial was not present in the TR source device string." : string.Empty)).ToList();
+
+    private async Task<RfSurveyProfileDto> RecoverProfileSourcesFromSavedTrConfigAsync(RfSurveySessionDto session, RfSurveyProfileDto profile, CancellationToken ct)
+    {
+        if (profile.Sources.Count > 0)
+            return profile;
+
+        var sources = await ReadSavedTrConfigSourcesAsync(Path.Combine(session.ArtifactPath, "tr-config-before.json"), ct);
+        if (sources.Count == 0)
+            return profile;
+
+        return profile with
+        {
+            Sources = sources,
+            Devices = BuildSdrDevices(sources),
+            SourceOverride = true,
+            SelectedSourceIndexes = NormalizeSelectedSourceIndexes(profile.SelectedSourceIndexes.Count > 0 ? profile.SelectedSourceIndexes : null, sources, null)
+        };
+    }
+
+    private static async Task<IReadOnlyList<RfSurveySourceDto>> ReadSavedTrConfigSourcesAsync(string path, CancellationToken ct)
+    {
+        if (!File.Exists(path))
+            return [];
+        try
+        {
+            using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(path, ct));
+            if (!doc.RootElement.TryGetProperty("sources", out var sourcesElement) || sourcesElement.ValueKind != JsonValueKind.Array)
+                return [];
+
+            var sources = new List<RfSurveySourceDto>();
+            var ordinal = 0;
+            foreach (var source in sourcesElement.EnumerateArray())
+            {
+                if (source.ValueKind != JsonValueKind.Object)
+                    continue;
+                var device = JsonString(source, "device").Trim();
+                var serial = FirstNonEmpty(JsonString(source, "serial"), ExtractAirspySerial(device), ExtractRtlSerial(device));
+                var index = JsonInt(source, "index");
+                var sampleRate = (int)JsonLong(source, "rate");
+                var gain = ReadTrSourceGain(source);
+                if (index < 0 || sources.Any(existing => existing.Index == index))
+                    index = ordinal;
+                sources.Add(new RfSurveySourceDto(
+                    index,
+                    device,
+                    serial,
+                    InferSdrType(device, serial),
+                    JsonLong(source, "center"),
+                    sampleRate > 0 ? sampleRate : 2_400_000,
+                    JsonInt(source, "error"),
+                    string.IsNullOrWhiteSpace(gain) ? "auto" : gain.Trim()));
+                ordinal++;
+            }
+            return sources.OrderBy(source => source.Index).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static string ReadTrSourceGain(JsonElement source)
+    {
+        var gain = JsonString(source, "gain");
+        if (!string.IsNullOrWhiteSpace(gain))
+            return gain.Trim();
+        var lna = JsonInt(source, "lnaGain");
+        var mix = JsonInt(source, "mixGain");
+        var ifGain = JsonInt(source, "ifGain");
+        if (lna <= 0 && mix <= 0 && ifGain <= 0)
+            return string.Empty;
+        if (lna >= 15 && mix >= 12 && ifGain >= 8)
+            return "21";
+        if (lna >= 12 && mix >= 10 && ifGain >= 6)
+            return "19";
+        if (lna >= 8 && mix >= 6 && ifGain >= 4)
+            return "13";
+        if (lna >= 4 && mix >= 4 && ifGain >= 2)
+            return "7";
+        return "0";
+    }
+
+    private static RfSurveyProfileDto NormalizeStoredProfileForWorkflow(RfSurveyProfileDto profile)
+    {
+        if (profile.Warnings.Count == 0)
+            return profile;
+        var hasSavedRadioFacts = profile.Systems.Count > 0 || profile.ControlChannelsHz.Count > 0 || !string.IsNullOrWhiteSpace(profile.RadioReferenceSid);
+        if (!hasSavedRadioFacts)
+            return profile;
+        var warnings = profile.Warnings
+            .Where(warning => !warning.Contains("No TR system was available", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return warnings.Count == profile.Warnings.Count
+            ? profile
+            : profile with { Warnings = warnings };
     }
 
     private async Task<(RfSurveySessionDto Session, RfSurveyProfileDto Profile, string ProfileJson)> RefreshProfileFactsAsync(
@@ -264,7 +396,7 @@ public sealed class RfSurveyService
         {
             SiteLabel = rebuilt.SiteLabel,
             SystemShortName = rebuilt.SystemShortName,
-            SdrSummary = SummarizeSdrs(rebuilt.Sources.Where(source => rebuilt.SelectedSourceIndexes.Count == 0 || rebuilt.SelectedSourceIndexes.Contains(source.Index)).ToList()),
+            SdrSummary = SummarizeSelectedSdrs(rebuilt),
             UpdatedAtUtc = DateTime.UtcNow
         };
         var profileJson = JsonSerializer.Serialize(rebuilt, EngineConfig.JsonOptions());
@@ -276,44 +408,10 @@ public sealed class RfSurveyService
         return (refreshedSession, rebuilt, profileJson);
     }
 
-    private async Task<(RfSurveySessionDto Session, RfSurveyProfileDto Profile, string ProfileJson)> RefreshProfileSdrSourcesFromDetectionAsync(
-        RfSurveySessionDto session,
-        RfSurveyProfileDto current,
-        string toolPrepJson,
-        SetupSdrDetectionDto detection,
-        CancellationToken ct)
-    {
-        var detectedSources = BuildRfSurveySourcesFromDetectedDevices(detection.Devices, current);
-        if (detectedSources.Count == 0)
-            return (session, current, JsonSerializer.Serialize(current, EngineConfig.JsonOptions()));
-
-        var detectedDevices = BuildRfSurveyDevicesFromDetectedDevices(detection.Devices, detectedSources);
-        var sameHardware = SameSourceHardware(current.Sources, detectedSources);
-        if (sameHardware && current.Devices.SequenceEqual(detectedDevices))
-            return (session, current, JsonSerializer.Serialize(current, EngineConfig.JsonOptions()));
-
-        var profile = current with
-        {
-            Sources = sameHardware ? current.Sources : detectedSources,
-            Devices = detectedDevices,
-            SelectedSourceIndexes = sameHardware ? current.SelectedSourceIndexes : detectedSources.Select(source => source.Index).ToList(),
-            SourceOverride = true
-        };
-        var refreshedSession = session with
-        {
-            SdrSummary = SummarizeSdrs(profile.Sources),
-            UpdatedAtUtc = DateTime.UtcNow
-        };
-        var profileJson = JsonSerializer.Serialize(profile, EngineConfig.JsonOptions());
-        await WriteArtifactAsync(refreshedSession.ArtifactPath, "survey.json", refreshedSession, ct);
-        await WriteArtifactAsync(refreshedSession.ArtifactPath, "input-profile.json", profile, ct);
-        await _database.UpdateRfSurveySessionAsync(refreshedSession, profileJson, toolPrepJson, ct);
-        return (refreshedSession, profile, profileJson);
-    }
-
     private static bool SameProfileRadioFacts(RfSurveyProfileDto left, RfSurveyProfileDto right)
     {
         return left.SystemShortName == right.SystemShortName
+            && left.RadioReferenceSid == right.RadioReferenceSid
             && left.SystemShortNames.SequenceEqual(right.SystemShortNames)
             && left.SourcePlanSystemShortNames.SequenceEqual(right.SourcePlanSystemShortNames)
             && left.SourcePlanMode == right.SourcePlanMode
@@ -323,6 +421,7 @@ public sealed class RfSurveyService
             && left.Sources.SequenceEqual(right.Sources)
             && left.Devices.SequenceEqual(right.Devices)
             && left.SelectedSourceIndexes.SequenceEqual(right.SelectedSourceIndexes)
+            && SameSourceAssignments(left.SourceAssignments, right.SourceAssignments)
             && left.SourceOverride == right.SourceOverride
             && left.Warnings.SequenceEqual(right.Warnings);
     }
@@ -365,27 +464,230 @@ public sealed class RfSurveyService
         return new RfSurveyDetailDto(session, profile, [], [], toolPrep, PlanNextExperiments(session, profile, toolPrep, []));
     }
 
-    public async Task<RfSurveyDetailDto?> GetAsync(string id, CancellationToken ct)
+    public async Task<RfSurveyDetailDto> UpsertSiteSetupAsync(SiteSetupConfig desired, CancellationToken ct)
+    {
+        const string id = "site-setup";
+        Directory.CreateDirectory(ArtifactRoot);
+        var artifactPath = Path.Combine(ArtifactRoot, id);
+        Directory.CreateDirectory(artifactPath);
+
+        var request = BuildSiteSetupRequest(desired);
+        var row = await _database.GetRfSurveySessionAsync(id, ct);
+        if (row != null)
+            return await UpdateDraftAsync(id, ToDraftUpdate(request), ct);
+
+        var now = DateTime.UtcNow;
+        var profile = BuildProfile(request);
+        var session = new RfSurveySessionDto
+        {
+            Id = id,
+            Status = "draft",
+            Mode = profile.Mode,
+            SiteLabel = profile.SiteLabel,
+            SystemShortName = profile.SystemShortName,
+            SdrSummary = SummarizeSdrs(profile.Sources),
+            RfPathSummary = SummarizeRfPath(profile.RfPath),
+            ArtifactPath = artifactPath,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        var toolPrep = EmptyToolPrep(desired.LastAppliedConfigHash);
+        await WriteArtifactAsync(artifactPath, "survey.json", session, ct);
+        await WriteArtifactAsync(artifactPath, "input-profile.json", profile, ct);
+        await WriteArtifactAsync(artifactPath, "tool-prep.json", toolPrep, ct);
+        await TryCopyTrConfigAsync(artifactPath, ct);
+
+        await _database.AddRfSurveySessionAsync(
+            session,
+            JsonSerializer.Serialize(profile, EngineConfig.JsonOptions()),
+            JsonSerializer.Serialize(toolPrep, EngineConfig.JsonOptions()),
+            ct);
+
+        return new RfSurveyDetailDto(session, profile, [], [], toolPrep, PlanNextExperiments(session, profile, toolPrep, []));
+    }
+
+    private static RfSurveyCreateRequest BuildSiteSetupRequest(SiteSetupConfig desired)
+    {
+        var systemNames = desired.Systems.Count > 0
+            ? desired.Systems.Select(system => system.ShortName).Where(name => !string.IsNullOrWhiteSpace(name)).ToList()
+            : desired.SystemShortNames;
+        var radioReferenceSids = desired.Systems
+            .Select(system => system.RadioReferenceSid?.Trim())
+            .Where(sid => !string.IsNullOrWhiteSpace(sid))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var systems = OrderControlChannelsByRfSelections(desired.Systems, desired.RfSelections);
+        return new RfSurveyCreateRequest(
+            SystemShortName: systemNames.FirstOrDefault(),
+            SiteLabel: string.IsNullOrWhiteSpace(desired.SiteLabel) ? "Site Setup" : desired.SiteLabel,
+            Mode: "guided",
+            RadioReferenceSid: radioReferenceSids.Count == 0 ? null : string.Join(",", radioReferenceSids),
+            SystemShortNames: systemNames,
+            SourcePlanSystemShortNames: desired.SourcePlanSystemShortNames.Count > 0 ? desired.SourcePlanSystemShortNames : systemNames,
+            SourcePlanMode: string.IsNullOrWhiteSpace(desired.SourcePlanMode) ? "full" : desired.SourcePlanMode,
+            RfPath: desired.RfPath,
+            SelectedSourceIndexes: desired.SelectedSourceIndexes,
+            CurrentStep: 2,
+            MeasurementMode: "guided",
+            ProbeDurationSeconds: 45,
+            GroundTruthSource: "site-setup",
+            SystemDefinitions: systems,
+            SdrSources: desired.Sources,
+            SourceAssignments: desired.SourceAssignments);
+    }
+
+    private static IReadOnlyList<RfSurveySystemDto> OrderControlChannelsByRfSelections(
+        IReadOnlyList<RfSurveySystemDto> systems,
+        IReadOnlyList<SiteSetupRfSelection> selections)
+    {
+        var selected = selections
+            .Select(selection => selection.FrequencyHz)
+            .Where(frequency => frequency > 0)
+            .ToHashSet();
+        if (selected.Count == 0)
+            return systems;
+
+        return systems.Select(system =>
+        {
+            var orderedControlChannels = system.ControlChannelsHz
+                .Where(frequency => frequency > 0)
+                .Distinct()
+                .OrderBy(frequency => selected.Contains(frequency) ? 0 : 1)
+                .ThenBy(frequency => frequency)
+                .ToList();
+            return system with { ControlChannelsHz = orderedControlChannels };
+        }).ToList();
+    }
+
+    private static RfSurveyDraftUpdateRequest ToDraftUpdate(RfSurveyCreateRequest request) => new(
+        SystemShortName: request.SystemShortName,
+        SiteLabel: request.SiteLabel,
+        Mode: request.Mode,
+        RadioReferenceSid: request.RadioReferenceSid,
+        SystemShortNames: request.SystemShortNames,
+        SourcePlanSystemShortNames: request.SourcePlanSystemShortNames,
+        SourcePlanMode: request.SourcePlanMode,
+        RfPath: request.RfPath,
+        SelectedSourceIndexes: request.SelectedSourceIndexes,
+        CurrentStep: request.CurrentStep,
+        MeasurementMode: request.MeasurementMode,
+        ProbeDurationSeconds: request.ProbeDurationSeconds,
+        GroundTruthSource: request.GroundTruthSource,
+        SystemDefinitions: request.SystemDefinitions,
+        SdrSources: request.SdrSources,
+        SourceAssignments: request.SourceAssignments);
+
+    public async Task<RfSurveyDetailDto?> GetAsync(string id, CancellationToken ct, bool compactExperiments = false, string appliedConfigHash = "")
     {
         var row = await _database.GetRfSurveySessionAsync(id, ct);
         if (row == null)
             return null;
 
-        var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.Value.ProfileJson) ?? new RfSurveyProfileDto();
-        var recoveredSession = await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
-        var toolPrepState = await EnsureReusableToolPrepAsync(recoveredSession, row.Value.ProfileJson, row.Value.ToolPrepJson, ct);
-        var refreshed = await RefreshProfileFactsAsync(recoveredSession, profile, row.Value.ProfileJson, toolPrepState.Json, invalidateExperiments: false, ct);
-        var session = NormalizeAppliedSourcePlanSession(refreshed.Session);
-        profile = refreshed.Profile;
+        var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
+            row.Value.Session,
+            NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.Value.ProfileJson) ?? new RfSurveyProfileDto()),
+            ct);
+        var recoveredSession = await RecoverAppliedSourcePlanSessionAsync(row.Value.Session, row.Value.ProfileJson, row.Value.ToolPrepJson, persist: false, ct);
+        var toolPrepState = string.Equals(id, "site-setup", StringComparison.OrdinalIgnoreCase)
+            ? (Prep: DeserializeOrDefault<RfSurveyToolPrepDto>(row.Value.ToolPrepJson), Json: row.Value.ToolPrepJson)
+            : await ResolveToolPrepForReadAsync(recoveredSession.Id, row.Value.ToolPrepJson, ct);
+        var session = NormalizeAppliedSourcePlanSession(recoveredSession) with { SdrSummary = SummarizeSelectedSdrs(profile) };
         var toolPrep = toolPrepState.Prep;
+        if (string.Equals(id, "site-setup", StringComparison.OrdinalIgnoreCase) &&
+            !ToolPrepMatchesAppliedConfig(toolPrep, appliedConfigHash))
+            toolPrep = EmptyToolPrep(appliedConfigHash);
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);
+        if (compactExperiments)
+            experiments = experiments.Select(CompactExperimentForWorkspaceOpen).ToList();
         var notes = await _database.ListRfSurveyNotesAsync(id, ct);
         return new RfSurveyDetailDto(session, profile, experiments, notes, toolPrep, PlanNextExperiments(session, profile, toolPrep, experiments));
     }
 
+    private static RfSurveyExperimentDto CompactExperimentForWorkspaceOpen(RfSurveyExperimentDto experiment)
+    {
+        const int MaxInlineJsonLength = 16_000;
+        return experiment with
+        {
+            EvidenceJson = experiment.EvidenceJson.Length > MaxInlineJsonLength ? CompactExperimentEvidenceJson(experiment) : experiment.EvidenceJson,
+            InterpretationJson = experiment.InterpretationJson.Length > MaxInlineJsonLength ? "{}" : experiment.InterpretationJson
+        };
+    }
+
+    private static string CompactExperimentEvidenceJson(RfSurveyExperimentDto experiment)
+    {
+        if (!string.Equals(experiment.Type, "rf_validation_sweep", StringComparison.OrdinalIgnoreCase))
+            return "{}";
+
+        try
+        {
+            if (JsonNode.Parse(experiment.EvidenceJson) is not JsonObject root)
+                return "{}";
+
+            var compact = new JsonObject();
+            CopyNode(root, compact, "systemShortName");
+            CopyNode(root, compact, "selectedControlChannelHz");
+            CopyNode(root, compact, "selectedSourceIndex");
+            CopyNode(root, compact, "selectedGain");
+            CopyNode(root, compact, "selectedErrorHz");
+            CopyNode(root, compact, "technicalBlocker");
+            CopyNode(root, compact, "parameters");
+            CopyNode(root, compact, "liveCandidateId");
+            CopyNode(root, compact, "p25ProbedCandidateIds");
+            CopyNode(root, compact, "voiceTestedCandidateIds");
+            CopyNode(root, compact, "siteReadiness");
+
+            if (root["power"] is JsonObject power)
+            {
+                var compactPower = new JsonObject();
+                CopyNode(power, compactPower, "controlChannelHz");
+                CopyNode(power, compactPower, "controlChannelsHz");
+                CopyNode(power, compactPower, "rows");
+                compact["power"] = compactPower;
+            }
+
+            if (root["candidates"] is JsonArray candidates)
+            {
+                var compactCandidates = new JsonArray();
+                foreach (var item in candidates.OfType<JsonObject>())
+                    compactCandidates.Add(CompactRfValidationCandidate(item));
+                compact["candidates"] = compactCandidates;
+            }
+
+            return compact.ToJsonString(EngineConfig.JsonOptions());
+        }
+        catch
+        {
+            return "{}";
+        }
+    }
+
+    private static JsonObject CompactRfValidationCandidate(JsonObject candidate)
+    {
+        var compact = new JsonObject();
+        foreach (var name in new[]
+                 {
+                     "id", "systemShortName", "siteLabel", "sourceIndex", "sdrType", "serial", "device",
+                     "centerHz", "sampleRate", "errorHz", "errorOffsetHz", "gain", "controlChannelHz",
+                     "rfStatus", "snrDb", "peakFrequencyHz", "peakOffsetHz", "peakDb", "noiseFloorDb",
+                     "overload", "score", "p25Status", "p25Summary", "p25Frames", "p25Demod", "p25EvidenceMarker",
+                     "p25ExitCode", "metricsStatus", "metricsSummary", "metricsRow", "voiceStatus",
+                     "voiceSummary", "voiceTotalCalls", "voiceRealCalls"
+                 })
+            CopyNode(candidate, compact, name);
+        return compact;
+    }
+
+    private static void CopyNode(JsonObject source, JsonObject target, string name)
+    {
+        if (source.TryGetPropertyValue(name, out var value) && value != null)
+            target[name] = JsonNode.Parse(value.ToJsonString());
+    }
+
     public async Task<RfSurveySweepProgressDto> GetSweepProgressAsync(string id, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var root = Path.Combine(row.Session.ArtifactPath, "rf-power-scans");
         if (!Directory.Exists(root))
             return new RfSurveySweepProgressDto(_activeExperimentCancellations.ContainsKey(id), string.Empty, []);
@@ -441,9 +743,14 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyDetailDto> UpdateDraftAsync(string id, RfSurveyDraftUpdateRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
-        var current = DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto();
-        var toolPrepState = await EnsureReusableToolPrepAsync(row.Session, row.ProfileJson, row.ToolPrepJson, ct);
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
+        var current = await RecoverProfileSourcesFromSavedTrConfigAsync(
+            row.Session,
+            NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
+            ct);
+        var toolPrepState = string.Equals(id, "site-setup", StringComparison.OrdinalIgnoreCase)
+            ? (Prep: DeserializeOrDefault<RfSurveyToolPrepDto>(row.ToolPrepJson), Json: row.ToolPrepJson)
+            : await EnsureReusableToolPrepAsync(row.Session, row.ProfileJson, row.ToolPrepJson, ct);
         var toolPrep = toolPrepState.Prep ?? EmptyToolPrep();
         var requestedSystems = NormalizeRequestedSystemNames(request.SystemShortNames, request.SystemShortName);
         var effectiveSystems = requestedSystems.Count > 0
@@ -457,9 +764,11 @@ public sealed class RfSurveyService
             : current.SourcePlanSystemShortNames.Count > 0 ? current.SourcePlanSystemShortNames : effectiveSystems;
         var effectiveSourcePlanMode = NormalizeSourcePlanMode(request.SourcePlanMode ?? current.SourcePlanMode);
         var incomingDefinitions = request.SystemDefinitions ?? current.Systems;
-        var incomingSources = request.SdrSources ?? (current.SourceOverride ? current.Sources : null);
-        var definitionsChanged = request.SystemDefinitions != null && !NormalizeSystemDefinitions(request.SystemDefinitions).SequenceEqual(current.Systems);
+        var incomingSources = request.SdrSources ?? current.Sources;
+        var incomingSourceAssignments = request.SourceAssignments ?? current.SourceAssignments;
+        var definitionsChanged = request.SystemDefinitions != null && !SameSystemDefinitions(request.SystemDefinitions, current.Systems);
         var sourcesChanged = request.SdrSources != null && !NormalizeRfSurveySources(request.SdrSources).SequenceEqual(current.Sources);
+        var sourceAssignmentsChanged = request.SourceAssignments != null && !SameSourceAssignments(NormalizeSourceAssignments(request.SourceAssignments, incomingDefinitions, incomingSources), current.SourceAssignments);
         var sourcePlanAppliedBeforeDraft = HasAppliedSourcePlan(row.Session);
         var staleAppliedEmptySelectionAutosave = sourcePlanAppliedBeforeDraft &&
             (request.CurrentStep ?? current.CurrentStep) >= 3 &&
@@ -477,6 +786,7 @@ public sealed class RfSurveyService
             current.SourcePlanSystemShortNames.All(name => sourcePlanSystems.Any(incoming => string.Equals(incoming, name, StringComparison.OrdinalIgnoreCase))) &&
             sourcePlanSystems.Count > current.SourcePlanSystemShortNames.Count &&
             !sourcesChanged &&
+            !sourceAssignmentsChanged &&
             SameIntSet(effectiveSelectedSourceIndexes ?? current.SelectedSourceIndexes, current.SelectedSourceIndexes);
         if (staleStepFourSupersetAutosave)
         {
@@ -487,20 +797,21 @@ public sealed class RfSurveyService
         var sourcePlanModeChanged = !string.Equals(effectiveSourcePlanMode, NormalizeSourcePlanMode(current.SourcePlanMode), StringComparison.OrdinalIgnoreCase);
         var staleAppliedSamePlanAutosave = sourcePlanAppliedBeforeDraft &&
             !sourcesChanged &&
+            !sourceAssignmentsChanged &&
             !sourcePlanChanged &&
             !sourcePlanModeChanged &&
             SameStringSet(effectiveSystems, currentSystems) &&
             SameIntSet(effectiveSelectedSourceIndexes ?? current.SelectedSourceIndexes, current.SelectedSourceIndexes);
-        var effectiveDefinitionsChanged = staleStepFourSupersetAutosave || staleAppliedEmptySelectionAutosave || staleAppliedSamePlanAutosave ? false : definitionsChanged;
-        var systemChanged = !SameStringSet(effectiveSystems, currentSystems) || sourcePlanChanged || sourcePlanModeChanged || effectiveDefinitionsChanged || sourcesChanged;
-        var currentLiveFacts = RebuildProfileFacts(current);
-        var radioFactsChanged = !staleStepFourSupersetAutosave &&
-            !staleAppliedEmptySelectionAutosave &&
-            !staleAppliedSamePlanAutosave &&
-            !SameProfileRadioFacts(current, currentLiveFacts);
+        var authoritativeSiteSetupDefinitionsChanged =
+            string.Equals(id, "site-setup", StringComparison.OrdinalIgnoreCase) && definitionsChanged;
+        var effectiveDefinitionsChanged = authoritativeSiteSetupDefinitionsChanged ||
+            (!(staleStepFourSupersetAutosave || staleAppliedEmptySelectionAutosave || staleAppliedSamePlanAutosave) && definitionsChanged);
+        var systemChanged = !SameStringSet(effectiveSystems, currentSystems) || sourcePlanChanged || sourcePlanModeChanged || effectiveDefinitionsChanged || sourcesChanged || sourceAssignmentsChanged;
+        var radioFactsChanged = false;
+        var effectiveRadioReferenceSid = string.IsNullOrWhiteSpace(request.RadioReferenceSid) ? current.RadioReferenceSid : request.RadioReferenceSid.Trim();
         var rebuilt = systemChanged
-            ? BuildProfile(new RfSurveyCreateRequest(systemShortName, request.SiteLabel ?? string.Join(", ", effectiveSystems), request.Mode ?? current.Mode, request.GroundTruthSource ?? current.GroundTruthSource, request.RfPath ?? current.RfPath, effectiveSelectedSourceIndexes ?? current.SelectedSourceIndexes, request.CurrentStep ?? current.CurrentStep, request.MeasurementMode ?? current.MeasurementMode, request.ProbeDurationSeconds ?? current.ProbeDurationSeconds, effectiveSystems, effectiveSourcePlanSystems, effectiveSourcePlanMode, incomingDefinitions, incomingSources))
-            : radioFactsChanged ? currentLiveFacts : current;
+            ? BuildProfile(new RfSurveyCreateRequest(systemShortName, request.SiteLabel ?? string.Join(", ", effectiveSystems), request.Mode ?? current.Mode, request.GroundTruthSource ?? current.GroundTruthSource, request.RfPath ?? current.RfPath, effectiveSelectedSourceIndexes ?? current.SelectedSourceIndexes, request.CurrentStep ?? current.CurrentStep, request.MeasurementMode ?? current.MeasurementMode, request.ProbeDurationSeconds ?? current.ProbeDurationSeconds, effectiveSystems, effectiveSourcePlanSystems, effectiveSourcePlanMode, incomingDefinitions, incomingSources, effectiveRadioReferenceSid, incomingSourceAssignments))
+            : current;
 
         var sources = rebuilt.Sources;
         var selected = effectiveSelectedSourceIndexes == null
@@ -514,10 +825,12 @@ public sealed class RfSurveyService
         var profile = rebuilt with
         {
             SiteLabel = string.IsNullOrWhiteSpace(request.SiteLabel) ? rebuilt.SiteLabel : request.SiteLabel.Trim(),
+            RadioReferenceSid = effectiveRadioReferenceSid,
             Mode = NormalizeMode(request.Mode ?? rebuilt.Mode),
             GroundTruthSource = string.IsNullOrWhiteSpace(request.GroundTruthSource) ? rebuilt.GroundTruthSource : request.GroundTruthSource.Trim(),
             RfPath = rfPath,
             SelectedSourceIndexes = selected,
+            SourceAssignments = NormalizeSourceAssignments(incomingSourceAssignments, rebuilt.Systems, sources),
             CurrentStep = Math.Clamp(request.CurrentStep ?? rebuilt.CurrentStep, 0, 8),
             MeasurementMode = NormalizeMode(request.MeasurementMode ?? rebuilt.MeasurementMode),
             ProbeDurationSeconds = Math.Clamp(request.ProbeDurationSeconds ?? rebuilt.ProbeDurationSeconds, 5, 3600),
@@ -530,6 +843,7 @@ public sealed class RfSurveyService
             !definitionsChanged &&
             !sourcePlanChanged &&
             !sourcePlanModeChanged &&
+            !sourceAssignmentsChanged &&
             SameStringSet(effectiveSystems, currentSystems) &&
             !radioFactsChanged &&
             SameIntSet(selected, current.SelectedSourceIndexes);
@@ -540,7 +854,7 @@ public sealed class RfSurveyService
             SiteLabel = profile.SiteLabel,
             SystemShortName = profile.SystemShortName,
             Mode = profile.Mode,
-            SdrSummary = SummarizeSdrs(profile.Sources.Where(source => profile.SelectedSourceIndexes.Count == 0 || profile.SelectedSourceIndexes.Contains(source.Index)).ToList()),
+            SdrSummary = SummarizeSelectedSdrs(profile),
             RfPathSummary = SummarizeRfPath(profile.RfPath),
             Status = effectiveScopeInvalidated ? "draft" : baseSession.Status,
             Verdict = effectiveScopeInvalidated ? "not_started" : baseSession.Verdict,
@@ -561,8 +875,11 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyDetailDto> CompleteAsync(string id, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
-        var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto();
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
+        var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
+            row.Session,
+            NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
+            ct);
         var toolPrep = DeserializeOrDefault<RfSurveyToolPrepDto>(row.ToolPrepJson) ?? EmptyToolPrep();
         var completedAt = DateTime.UtcNow;
         var session = row.Session with
@@ -594,22 +911,23 @@ public sealed class RfSurveyService
 
     public async Task<IReadOnlyList<RfSurveyExperimentPlanDto>> GetNextExperimentsAsync(string id, CancellationToken ct)
     {
-        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         return detail.NextExperiments;
     }
 
     public async Task<RfSurveyP25ProbePreviewDto> PreviewP25ProbeAsync(string id, long? controlChannelHz, int? durationSeconds, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
-        var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto();
-        var refreshed = await RefreshProfileFactsAsync(row.Session, profile, row.ProfileJson, row.ToolPrepJson, invalidateExperiments: false, ct);
-        profile = refreshed.Profile;
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
+        var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
+            row.Session,
+            NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
+            ct);
         return BuildP25ProbePreview(profile, row.Session.ArtifactPath, controlChannelHz, durationSeconds);
     }
 
     public async Task<RfSurveyExportPlanDto> ExportPlanAsync(string id, CancellationToken ct)
     {
-        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var (recommendations, blockers) = BuildExportContent(detail);
         var planPath = Path.Combine(detail.Session.ArtifactPath, "export-plan.json");
         var markdownPath = Path.Combine(detail.Session.ArtifactPath, "export-plan.md");
@@ -629,7 +947,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyExportDocumentDto> ExportPlanDocumentAsync(string id, CancellationToken ct)
     {
-        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var detail = await GetAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         var (recommendations, blockers) = BuildExportContent(detail);
         var label = string.IsNullOrWhiteSpace(detail.Session.SiteLabel) ? detail.Session.Id : detail.Session.SiteLabel;
         var fileName = $"radio-setup-{SanitizeFileToken(label)}-{DateTime.UtcNow:yyyyMMddHHmmss}.md";
@@ -638,19 +956,19 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyTrActionResultDto> StopTrForSurveyAsync(string id, RfSurveyTrActionRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         if (!request.Confirmed)
             throw new InvalidOperationException("Stopping trunk-recorder requires explicit confirmation.");
         var stopOutput = await RunServiceHelperAsync("stop-tr", ct);
         var startOutput = await RunServiceHelperAsync("start-tr", ct);
         var output = stopOutput + Environment.NewLine + startOutput;
         await WriteArtifactAsync(row.Session.ArtifactPath, $"tr-stop-{DateTime.UtcNow:yyyyMMddHHmmss}.json", new { stopOutput, startOutput, service = TrUnitName() }, ct);
-        return new RfSurveyTrActionResultDto(true, "stop-tr", "trunk-recorder was briefly paused and restarted. Radio Setup experiments now manage TR pauses automatically.", "", "", "", output);
+        return new RfSurveyTrActionResultDto(true, "stop-tr", "trunk-recorder was briefly paused and restarted. Setup RF validation jobs now manage TR pauses automatically.", "", "", "", output);
     }
 
     public async Task<RfSurveyTrActionResultDto> ApplyTempTrConfigAsync(string id, RfSurveyTrActionRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         if (!request.Confirmed)
             throw new InvalidOperationException("Applying a temporary TR config requires explicit confirmation.");
         var livePath = _config.TrunkRecorder.ConfigPath;
@@ -663,29 +981,35 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(row.Session.ArtifactPath, "tr-config-restore-pointer.json", new { backupPath, livePath, createdAtUtc = DateTime.UtcNow }, ct);
 
         await InstallTrFileAsync(candidatePath, livePath, ct);
+        await _talkgroups.GenerateTrCsvAsync(ct);
         var serviceOutput = request.RestartTr ? await RunServiceHelperAsync("restart-tr", ct) : "Restart TR manually before capture trials.";
         return new RfSurveyTrActionResultDto(true, "apply-temp-config", "Temporary TR config was installed. TR restart is required before measuring this candidate.", candidatePath, backupPath, backupPath, serviceOutput);
     }
 
     public async Task<RfSurveyTrActionResultDto> ApplySourceDraftAsync(string id, RfSurveyApplySourceDraftRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
-        var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto();
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
+        var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
+            row.Session,
+            NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
+            ct);
         var livePath = _config.TrunkRecorder.ConfigPath;
         if (string.IsNullOrWhiteSpace(livePath) || !File.Exists(livePath))
             throw new InvalidOperationException("Live trunk-recorder config was not found.");
-        if (string.IsNullOrWhiteSpace(request.ConfigJson))
-            throw new InvalidOperationException("No candidate TR config JSON was supplied.");
+        var serverDraft = await BuildConfigDraftAsync(id, ct, request.ExpectedVersion);
+        if (string.IsNullOrWhiteSpace(request.DraftHash) ||
+            !string.Equals(request.DraftHash, serverDraft.DraftHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Config Draft changed after it was reviewed. Refresh the draft before applying.");
 
         var selected = profile.SelectedSourceIndexes.Count > 0
             ? profile.SelectedSourceIndexes
             : profile.Sources.Select(source => source.Index).ToList();
         if (selected.Count == 0)
-            throw new InvalidOperationException("Select at least one source before applying the Radio Setup config draft.");
+            throw new InvalidOperationException("Select at least one source before applying the Setup config draft.");
 
         var liveRoot = JsonNode.Parse(await File.ReadAllTextAsync(livePath, ct)) as JsonObject
             ?? throw new JsonException("Live TR config root must be a JSON object.");
-        var draftRoot = JsonNode.Parse(request.ConfigJson) as JsonObject
+        var draftRoot = JsonNode.Parse(serverDraft.ConfigJson) as JsonObject
             ?? throw new JsonException("Candidate TR config root must be a JSON object.");
         var liveSources = liveRoot["sources"] as JsonArray
             ?? throw new JsonException("Live TR config does not contain a sources array.");
@@ -707,12 +1031,15 @@ public sealed class RfSurveyService
         if (draftRoot["plugins"] is JsonArray draftPlugins)
             PatchLiveCallstreamFromDraft(liveRoot, draftPlugins);
         var configChanges = new List<string>();
-        NormalizeRadioSetupTrConfig(liveRoot, configChanges);
+        NormalizeRadioSetupTrConfig(liveRoot, configChanges, _config.TrunkRecorder.TalkgroupsPath);
 
         var candidateJson = liveRoot.ToJsonString(EngineConfig.JsonOptions()) + Environment.NewLine;
         var coverage = TrConfigSourceCoverageValidator.Validate(candidateJson);
         if (!coverage.Ok)
             throw new InvalidOperationException("Candidate TR config still cannot start with the selected source plan: " + string.Join(" ", coverage.Blockers));
+
+        await _talkgroups.GenerateTrCsvAsync(ct);
+        ValidateReferencedTalkgroupFiles(liveRoot);
 
         var candidatePath = Path.Combine(row.Session.ArtifactPath, $"tr-config-source-apply-{DateTime.UtcNow:yyyyMMddHHmmss}.json");
         Directory.CreateDirectory(row.Session.ArtifactPath);
@@ -751,13 +1078,38 @@ public sealed class RfSurveyService
             await _database.UpdateRfSurveySessionAsync(appliedSession, refreshed.ProfileJson, row.ToolPrepJson, ct);
             await WriteArtifactAsync(appliedSession.ArtifactPath, "survey.json", appliedSession, ct);
         }
-        return new RfSurveyTrActionResultDto(true, "apply-source-draft", $"{sourcePlanSummary} Workspace TR system list applied.", candidatePath, backupPath, backupPath, serviceOutput);
+        return new RfSurveyTrActionResultDto(true, "apply-source-draft", $"{sourcePlanSummary} Setup TR system list applied.", candidatePath, backupPath, backupPath, serviceOutput);
     }
 
-    public async Task<RfSurveyConfigDraftDto> BuildConfigDraftAsync(string id, CancellationToken ct)
+    public static void EnsureCallAndTranscriptionProof(RfSurveyDetailDto detail)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
-        var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto();
+        static RfSurveyExperimentDto? Latest(RfSurveyDetailDto value, string type) => value.Experiments
+            .Where(experiment => string.Equals(experiment.Type, type, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(experiment => experiment.CreatedAtUtc)
+            .FirstOrDefault();
+
+        var blockers = new List<string>();
+        if (!string.Equals(Latest(detail, "voice_capture_trial")?.Status, "passed", StringComparison.OrdinalIgnoreCase))
+            blockers.Add("Call capture proof must pass in RF Validation Step 5.");
+        if (!string.Equals(Latest(detail, "transcription_gate")?.Status, "passed", StringComparison.OrdinalIgnoreCase))
+            blockers.Add("Transcription proof must pass in RF Validation Step 5.");
+        if (blockers.Count > 0)
+            throw new InvalidOperationException("Apply & Resume is blocked. " + string.Join(" ", blockers));
+    }
+
+    public static long SelectDraftSourceCenter(long configuredCenterHz, int sampleRate, long plannedLowHz, long plannedHighHz, long fallbackCenterHz) =>
+        SourceWindowCovers(configuredCenterHz, sampleRate, plannedLowHz) &&
+        SourceWindowCovers(configuredCenterHz, sampleRate, plannedHighHz)
+            ? configuredCenterHz
+            : fallbackCenterHz;
+
+    public async Task<RfSurveyConfigDraftDto> BuildConfigDraftAsync(string id, CancellationToken ct, long desiredVersion = 0)
+    {
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
+        var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
+            row.Session,
+            NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
+            ct);
         var livePath = _config.TrunkRecorder.ConfigPath;
         if (string.IsNullOrWhiteSpace(livePath) || !File.Exists(livePath))
             throw new InvalidOperationException("Live trunk-recorder config was not found.");
@@ -768,11 +1120,16 @@ public sealed class RfSurveyService
             ? profile.SelectedSourceIndexes.Distinct().Order().ToList()
             : profile.Sources.Select(source => source.Index).Distinct().Order().ToList();
         if (selected.Count == 0)
-            throw new InvalidOperationException("Select at least one source before reviewing the Radio Setup config draft.");
+            throw new InvalidOperationException("Select at least one source before reviewing the Setup config draft.");
         var liveJson = await File.ReadAllTextAsync(livePath, ct);
         var sourcePlanSystemNames = SourcePlanSystemNames(profile);
         var experiments = await _database.ListRfSurveyExperimentsAsync(id, ct);
-        var plannedSystems = BuildSourcePlanSystems(profile, sourcePlanSystemNames, experiments, warnings);
+        var rfSourceCandidates = BuildRfValidationSourceCandidates(profile, experiments);
+        var observedFrequencies = await BuildObservedVoiceFrequenciesBySystemAsync(ct);
+        var plannedSystems = AddObservedVoiceFrequencies(
+            BuildSourcePlanSystems(profile, sourcePlanSystemNames, experiments, warnings),
+            observedFrequencies,
+            warnings);
         var controlOnlyPlan = string.Equals(profile.SourcePlanMode, "control", StringComparison.OrdinalIgnoreCase);
         var draftSystems = controlOnlyPlan
             ? plannedSystems.Select(system => system with { VoiceFrequenciesHz = [] }).ToList()
@@ -781,7 +1138,7 @@ public sealed class RfSurveyService
         var draftRoot = BuildCleanRadioSetupTrConfigRoot();
         var keptSystems = EnsureDraftWorkspaceSystems(draftRoot, draftSystems, draftSystemNames, [], changes, warnings);
         var draftSources = draftRoot["sources"] as JsonArray
-            ?? throw new JsonException("Radio Setup draft root does not contain a sources array.");
+            ?? throw new JsonException("Setup config draft root does not contain a sources array.");
 
         var frequencies = plannedSystems
             .SelectMany(system => controlOnlyPlan
@@ -801,34 +1158,52 @@ public sealed class RfSurveyService
             .Where(rate => rate > 0)
             .DefaultIfEmpty(2_400_000)
             .Max();
-        var windows = BuildSourceWindows(frequencies, defaultRate);
+        var priorityFrequencies = controlOnlyPlan
+            ? plannedSystems
+                .SelectMany(system => system.ControlChannelsHz)
+                .Where(value => value > 0)
+                .Distinct()
+                .Order()
+                .ToList()
+            : [];
+        var windows = BuildSourceWindows(frequencies, defaultRate, priorityFrequencies);
+        var assignedWindows = BuildAssignedSourceWindows(profile, draftSystems, selected, controlOnlyPlan, defaultRate, warnings);
         if (windows.Count > selected.Count)
-            warnings.Add($"The selected site needs {windows.Count} source window(s) at {defaultRate} sps, but only {selected.Count} source(s) are selected.");
+            warnings.Add($"The selected systems need {windows.Count} source window(s) at {defaultRate} sps, but only {selected.Count} source(s) are selected.");
 
         for (var planIndex = 0; planIndex < selected.Count; planIndex++)
         {
             var sourceIndex = selected[planIndex];
             var source = EnsureSourceObject(draftRoot, sourceIndex);
             var profileSource = profile.Sources.FirstOrDefault(row => row.Index == sourceIndex);
+            rfSourceCandidates.TryGetValue(sourceIndex, out var rfCandidate);
             SourceWindow? window = windows.Count == 0
                 ? null
                 : windows[Math.Min(planIndex, windows.Count - 1)];
+            if (assignedWindows.Count > 0)
+                window = assignedWindows.TryGetValue(sourceIndex, out var assigned) ? assigned : null;
 
-            PatchSourceField(source, "device", profileSource?.Device, changes, sourceIndex);
+            PatchSourceField(source, "device", NormalizeTrSourceDeviceArgs(profile, profileSource), changes, sourceIndex);
             var plannedRate = profileSource?.SampleRate > 0 ? profileSource.SampleRate : defaultRate;
             var runtimeRate = TrRuntimeSampleRate(profile, profileSource, plannedRate);
             PatchSourceField(source, "rate", runtimeRate, changes, sourceIndex);
             if (window != null)
-                PatchSourceField(source, "center", window.Value.CenterHz, changes, sourceIndex);
-            if (profileSource?.ErrorHz is int error)
-                PatchSourceField(source, "error", error, changes, sourceIndex);
-            if (!string.IsNullOrWhiteSpace(profileSource?.Gain))
-                PatchSourceField(source, "gain", ParseJsonValue(profileSource.Gain), changes, sourceIndex);
+            {
+                var configuredCenter = profileSource?.CenterHz ?? 0;
+                var plannedCenter = SelectDraftSourceCenter(configuredCenter, runtimeRate, window.Value.LowHz, window.Value.HighHz, window.Value.CenterHz);
+                PatchSourceField(source, "center", plannedCenter, changes, sourceIndex);
+            }
+            var error = rfCandidate?.ErrorHz ?? profileSource?.ErrorHz;
+            if (error is int errorHz)
+                PatchSourceField(source, "error", errorHz, changes, sourceIndex);
+            var gain = FirstNonEmpty(profileSource?.Gain, rfCandidate?.Gain);
+            PatchSourceGainFields(source, profileSource, gain, changes, sourceIndex);
         }
         PatchCallstreamStreams(draftRoot, keptSystems, changes);
-        NormalizeRadioSetupTrConfig(draftRoot, changes);
+        NormalizeRadioSetupTrConfig(draftRoot, changes, _config.TrunkRecorder.TalkgroupsPath);
 
         var draftJson = NormalizeJson(draftRoot);
+        var draftHash = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(draftJson))).ToLowerInvariant();
         var draftPath = Path.Combine(row.Session.ArtifactPath, "config-draft.json");
         Directory.CreateDirectory(row.Session.ArtifactPath);
         await File.WriteAllTextAsync(draftPath, draftJson, ct);
@@ -838,6 +1213,8 @@ public sealed class RfSurveyService
             changes,
             warnings,
             draftPath,
+            desiredVersion,
+            draftHash,
             createdAtUtc = DateTime.UtcNow
         }, ct);
 
@@ -846,13 +1223,18 @@ public sealed class RfSurveyService
             draftPath,
             draftJson,
             liveJson,
+            desiredVersion,
+            draftHash,
             new RfSurveyConfigDraftSummaryDto(selected, changes, warnings, draftPath));
     }
 
     public async Task<RfSurveyCandidateDto> GenerateCandidateTrConfigAsync(string id, RfSurveyCandidateRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
-        var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto();
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
+        var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
+            row.Session,
+            NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
+            ct);
         var livePath = _config.TrunkRecorder.ConfigPath;
         if (string.IsNullOrWhiteSpace(livePath) || !File.Exists(livePath))
             throw new InvalidOperationException("Live trunk-recorder config was not found.");
@@ -888,58 +1270,71 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyTrActionResultDto> RestoreTrConfigAsync(string id, RfSurveyTrActionRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         if (!request.Confirmed)
             throw new InvalidOperationException("Restoring TR config requires explicit confirmation.");
         var pointerPath = Path.Combine(row.Session.ArtifactPath, "tr-config-restore-pointer.json");
         if (!File.Exists(pointerPath))
-            throw new InvalidOperationException("No Radio Setup TR restore pointer was found.");
+            throw new InvalidOperationException("No Setup TR restore pointer was found.");
         using var pointerDoc = JsonDocument.Parse(await File.ReadAllTextAsync(pointerPath, ct));
         var backupPath = pointerDoc.RootElement.TryGetProperty("backupPath", out var backup) ? backup.GetString() ?? string.Empty : string.Empty;
         var livePath = pointerDoc.RootElement.TryGetProperty("livePath", out var live) ? live.GetString() ?? _config.TrunkRecorder.ConfigPath : _config.TrunkRecorder.ConfigPath;
         if (string.IsNullOrWhiteSpace(backupPath) || !File.Exists(backupPath))
-            throw new InvalidOperationException("Radio Setup TR backup file was not found.");
+            throw new InvalidOperationException("Setup TR backup file was not found.");
         await InstallTrFileAsync(backupPath, livePath, ct);
         var serviceOutput = request.RestartTr ? await RunServiceHelperAsync("restart-tr", ct) : "Restart TR manually before resuming coverage.";
-        return new RfSurveyTrActionResultDto(true, "restore-config", "Original TR config was restored from the Radio Setup backup.", "", backupPath, backupPath, serviceOutput);
+        return new RfSurveyTrActionResultDto(true, "restore-config", "Original TR config was restored from the Setup backup.", "", backupPath, backupPath, serviceOutput);
     }
 
-    public async Task<RfSurveyToolPrepDto> RunToolPrepAsync(string id, CancellationToken ct)
+    public async Task<RfSurveyToolPrepDto> RunToolPrepAsync(string id, string appliedConfigHash, bool force, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
-        var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto();
-        var generatedP25Template = await EnsureP25ProbeTemplateAsync(ct);
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
+        var existing = DeserializeOrDefault<RfSurveyToolPrepDto>(row.ToolPrepJson);
+        if (!force && ToolPrepMatchesAppliedConfig(existing, appliedConfigHash))
+            return existing!;
+        var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
+            row.Session,
+            NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
+            ct);
         var tools = new List<RfSurveyToolStatusDto>
         {
-            await ToolAsync("rtl-sdr", "RTL-SDR tools", "sdr", profile.Sources.Any(s => s.SdrType == "RTL-SDR"), "rtl_test", "rtl_test -t", "Enumerates and smoke-tests RTL-SDR devices.", "Run SDR prep/install from setup."),
-            await ToolAsync("rtl-sdr-capture", "RTL-SDR capture", "sdr", profile.Sources.Any(s => s.SdrType == "RTL-SDR"), "rtl_sdr", "rtl_sdr 2>&1 | head -20", "Captures short IQ windows for RF power/noise scans.", "Install rtl-sdr."),
-            await ToolAsync("airspy", "Airspy tools", "sdr", profile.Sources.Any(s => s.SdrType == "Airspy"), "airspy_info", "airspy_info", "Enumerates and validates Airspy devices.", "Install airspy host tools for this platform."),
-            await ToolAsync("airspy-capture", "Airspy capture", "sdr", profile.Sources.Any(s => s.SdrType == "Airspy"), "airspy_rx", "airspy_rx -h", "Captures short IQ windows for RF power/noise scans.", "Install airspy host tools for this platform."),
-            await P25ToolAsync(),
-            await ToolAsync("trunk-recorder", "trunk-recorder", "capture", true, "trunk-recorder", "trunk-recorder --version", "Runs temporary candidate configs and voice capture trials.", "Complete trunk-recorder setup first."),
-            await ToolAsync("ffprobe", "ffprobe", "audio", true, "ffprobe", "ffprobe -version", "Inspects captured audio duration and levels.", "Install ffmpeg/ffprobe."),
+            await SoftwareToolAsync("rtl-sdr", "RTL-SDR tools", "sdr", profile.Sources.Any(IsRtlSource), "rtl_test", "Supports explicit RTL-SDR hardware inventory.", "Install rtl-sdr.", ct),
+            await SoftwareToolAsync("rtl-sdr-capture", "RTL-SDR capture", "sdr", profile.Sources.Any(IsRtlSource), "rtl_sdr", "Captures bounded IQ windows for RF measurements.", "Install rtl-sdr.", ct),
+            await SoftwareToolAsync("airspy", "Airspy tools", "sdr", profile.Sources.Any(IsAirspySource), "airspy_info", "Supports explicit Airspy hardware inventory.", "Install Airspy host tools for this platform.", ct),
+            await SoftwareToolAsync("airspy-capture", "Airspy capture", "sdr", profile.Sources.Any(IsAirspySource), "airspy_rx", "Captures bounded IQ windows for RF measurements.", "Install Airspy host tools for this platform.", ct),
+            await P25SoftwareToolAsync(ct),
+            await SoftwareToolAsync("trunk-recorder", "trunk-recorder", "capture", true, "trunk-recorder", "Runs temporary candidate configurations and voice-capture trials.", "Complete trunk-recorder setup first.", ct),
+            await SoftwareToolAsync("ffprobe", "ffprobe", "audio", true, "ffprobe", "Inspects captured audio duration and levels.", "Install ffmpeg/ffprobe.", ct),
             TranscriptionTool()
         };
         var warnings = new List<string>();
         if (profile.Mode == "guided" && !_config.AiInsights.Enabled)
-            warnings.Add("AI Insights is disabled. Guided Radio Setup requires AI; switch to manual mode or enable AI Insights.");
+            warnings.Add("AI Insights is disabled. Guided RF validation requires AI; switch to manual mode or enable AI Insights.");
         if (string.Equals(_config.Transcription.Provider, "none", StringComparison.OrdinalIgnoreCase))
-            warnings.Add("Transcription provider is disabled. A survey cannot pass without usable captured-call transcription.");
+            warnings.Add("Transcription provider is disabled. RF validation cannot pass without usable captured-call transcription.");
         if (!tools.Any(t => t.Category == "p25" && t.Installed))
             warnings.Add("No validated P25 control-channel tool was found. Control-channel experiments are blocked until P25 tooling is installed.");
-        if (generatedP25Template)
-            warnings.Add("Generated the default OP25 rx.py P25 probe command template. Review it if this host uses a nonstandard OP25 install.");
+        else if (string.IsNullOrWhiteSpace(_config.RfSurvey.P25ProbeCommandTemplate))
+            warnings.Add("P25 software is available, but the Setup P25 probe command is not configured. Configure it explicitly before control-channel proof.");
+
+        var requiredSoftwareReady = tools.Where(t => t.Required).All(t => t.Installed);
+        var requiredSdrSoftware = tools.Where(t => t.Category == "sdr" && t.Required).ToList();
+        var sdrSoftwareReady = requiredSdrSoftware.Count > 0 && requiredSdrSoftware.All(t => t.Installed);
+        var p25Ready = tools.Any(t => t.Category == "p25" && t.Installed) && !string.IsNullOrWhiteSpace(_config.RfSurvey.P25ProbeCommandTemplate);
 
         var prep = new RfSurveyToolPrepDto(
             DateTime.UtcNow,
-            (profile.Mode != "guided" || _config.AiInsights.Enabled) && tools.Where(t => t.Required).All(t => t.Installed),
-            tools.Any(t => t.Category == "p25" && t.Installed) && tools.Any(t => t.Category == "sdr" && t.Installed),
+            (profile.Mode != "guided" || _config.AiInsights.Enabled) && requiredSoftwareReady,
+            p25Ready && sdrSoftwareReady,
             tools.First(t => t.Id == "trunk-recorder").Installed,
             !string.Equals(_config.Transcription.Provider, "none", StringComparison.OrdinalIgnoreCase),
             tools,
-            warnings);
+            warnings)
+        {
+            AppliedConfigHash = appliedConfigHash?.Trim() ?? string.Empty
+        };
 
-        var session = row.Session with { Status = "tool_prep", UpdatedAtUtc = DateTime.UtcNow };
+        var session = row.Session with { UpdatedAtUtc = DateTime.UtcNow };
         await WriteArtifactAsync(session.ArtifactPath, "tool-prep.json", prep, ct);
         await _database.UpdateRfSurveySessionAsync(
             session,
@@ -951,7 +1346,7 @@ public sealed class RfSurveyService
 
     public async Task<RfSurveyNoteDto> AddNoteAsync(string id, string text, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
         text = (text ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("Note text is required.");
@@ -962,17 +1357,266 @@ public sealed class RfSurveyService
         return note;
     }
 
+    public async Task<RfSurveyWaterfallStatusDto> StartWaterfallAsync(string id, RfSurveyWaterfallStartRequest request, CancellationToken ct)
+    {
+        await StopWaterfallAsync(id, CancellationToken.None);
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
+        var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
+            row.Session,
+            NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
+            ct);
+        var source = SelectWaterfallSource(profile, request);
+        if (source == null)
+            throw new InvalidOperationException("Waterfall requires a configured SDR source.");
+        var isAirspy = IsAirspySource(source);
+        var commandName = isAirspy ? "airspy_rx" : "rtl_sdr";
+        if (!await CommandExistsAsync(commandName, ct))
+            throw new InvalidOperationException($"{commandName} was not found on this host.");
+
+        var requestedSampleRate = Math.Clamp(request.SampleRateHz ?? (isAirspy ? 6_000_000 : source.SampleRate), 240_000, 10_000_000);
+        var sampleRate = isAirspy ? TrRuntimeSampleRate(profile, source, requestedSampleRate) : requestedSampleRate;
+        var centerHz = request.FrequencyHz is > 0 ? request.FrequencyHz.Value : profile.ControlChannelsHz.FirstOrDefault();
+        if (centerHz <= 0)
+            centerHz = source.CenterHz > 0 ? source.CenterHz : 0;
+        if (centerHz <= 0)
+            throw new InvalidOperationException("Waterfall requires a frequency or known control channel.");
+        var requestedGain = string.IsNullOrWhiteSpace(request.Gain) ? source.Gain : request.Gain!.Trim();
+        if (isAirspy && string.IsNullOrWhiteSpace(requestedGain))
+            requestedGain = "15";
+        if (isAirspy && !IsValidAirspyLinearityGain(requestedGain))
+            throw new InvalidOperationException("Airspy waterfall uses linearity gain 0-21.");
+        var gain = NormalizeAirspyRxGain(isAirspy, requestedGain);
+        var binCount = NormalizeWaterfallBinCount(request.BinCount <= 0 ? 1024 : request.BinCount);
+        var captureMs = Math.Clamp(request.CaptureMilliseconds <= 0 ? 60 : request.CaptureMilliseconds, 40, 1000);
+        var refreshMs = Math.Clamp(request.RefreshMilliseconds <= 0 ? 300 : request.RefreshMilliseconds, 100, 5000);
+
+        var trState = await QueryTrActiveAsync(ct);
+        var trWasActive = trState.Active;
+        var trStopOutput = string.Empty;
+        if (trState.Active)
+        {
+            trStopOutput = await RunServiceHelperAsync("stop-tr", ct);
+            trState = await QueryTrActiveAsync(ct);
+            if (trState.Active)
+                throw new InvalidOperationException("Waterfall needs exclusive SDR access, but trunk-recorder remained active after the stop request.");
+            if (isAirspy)
+                await Task.Delay(TimeSpan.FromSeconds(6), ct);
+        }
+
+        var runtime = new WaterfallRuntime(
+            id,
+            profile,
+            source with { Gain = gain },
+            centerHz,
+            sampleRate,
+            binCount,
+            captureMs,
+            refreshMs,
+            trWasActive,
+            trStopOutput);
+        _activeWaterfalls[id] = runtime;
+        runtime.Task = Task.Run(() => RunWaterfallLoopAsync(runtime), CancellationToken.None);
+        RememberWaterfall(runtime, active: true);
+        return runtime.ToDto(true);
+    }
+
+    public async Task<RfSurveyWaterfallStatusDto> GetWaterfallAsync(string id, bool includeHistory, CancellationToken ct)
+    {
+        if (_activeWaterfalls.TryGetValue(id, out var runtime))
+        {
+            runtime.MarkConsumed();
+            return CompactWaterfallHistory(runtime.ToDto(!runtime.Cancellation.IsCancellationRequested && runtime.Task?.IsCompleted != true, includeHistory));
+        }
+        if (_lastWaterfalls.TryGetValue(id, out var last))
+            return includeHistory ? CompactWaterfallHistory(last) : last with { Frames = null };
+        if (includeHistory)
+        {
+            var persisted = await LoadPersistedWaterfallAsync(id, ct);
+            if (persisted != null)
+            {
+                persisted = CompactWaterfallHistory(persisted);
+                _lastWaterfalls[id] = persisted;
+                return persisted;
+            }
+        }
+        return new RfSurveyWaterfallStatusDto(false, "stopped", "Waterfall is stopped.", 0, "", 0, 0, "", 0, null, null, null, false);
+    }
+
+    public async Task<string> StopActiveWaterfallsBeforeTrStartAsync(CancellationToken ct)
+    {
+        var active = _activeWaterfalls.Keys.ToArray();
+        if (active.Length == 0)
+            return string.Empty;
+
+        var lines = new List<string>();
+        foreach (var waterfallId in active)
+        {
+            if (!_activeWaterfalls.ContainsKey(waterfallId))
+                continue;
+            var result = await StopWaterfallAsync(waterfallId, ct);
+            lines.Add($"Stopped active waterfall {waterfallId} before starting trunk-recorder: {result.Status}.");
+        }
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    public async Task<RfSurveyWaterfallStatusDto> StopWaterfallAsync(string id, CancellationToken ct)
+    {
+        if (!_activeWaterfalls.TryRemove(id, out var runtime))
+        {
+            if (_lastWaterfalls.TryGetValue(id, out var last))
+                return last with { Frames = null };
+            return new RfSurveyWaterfallStatusDto(false, "stopped", "Waterfall is stopped.", 0, "", 0, 0, "", 0, null, null, null, false);
+        }
+
+        runtime.Cancellation.Cancel();
+        if (runtime.Task != null)
+        {
+            var completed = await Task.WhenAny(runtime.Task, Task.Delay(TimeSpan.FromSeconds(8), ct));
+            if (completed == runtime.Task)
+            {
+                try { await runtime.Task; } catch { }
+            }
+        }
+        runtime.Cancellation.Dispose();
+        var stopped = CompactWaterfallHistory(runtime.ToDto(false, true) with { Status = "stopped", Message = "Waterfall stopped." });
+        _lastWaterfalls[id] = stopped;
+        await PersistWaterfallAsync(id, stopped, ct);
+        return stopped;
+    }
+
+    private async Task RunWaterfallLoopAsync(WaterfallRuntime runtime)
+    {
+        try
+        {
+            var source = runtime.Source;
+            var isAirspy = IsAirspySource(source);
+            var pinAirspySerial = runtime.Profile.Sources.Count(IsAirspySource) > 1;
+            var rtlIndexesBySerial = isAirspy
+                ? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+                : await ReadRtlIndexesBySerialAsync(runtime.Cancellation.Token);
+            var rtlSelector = isAirspy ? new RtlDeviceSelector("", "") : ResolveRtlDeviceSelector(source, rtlIndexesBySerial);
+            if (!string.IsNullOrWhiteSpace(rtlSelector.Issue))
+            {
+                runtime.SetMessage("blocked", rtlSelector.Issue);
+                return;
+            }
+
+            await RunWaterfallStreamAsync(runtime, isAirspy, rtlSelector, pinAirspySerial);
+        }
+        catch (OperationCanceledException)
+        {
+            runtime.SetMessage("stopping", "Stopping waterfall.");
+        }
+        catch (Exception ex)
+        {
+            runtime.SetMessage("failed", ex.Message);
+            _logger.LogError(ex, "Waterfall loop failed for survey {SurveyId}.", runtime.SurveyId);
+        }
+        finally
+        {
+            if (runtime.TrWasActive)
+            {
+                try
+                {
+                    runtime.TrRestartOutput = await RunServiceHelperAsync("start-tr", CancellationToken.None, stopWaterfallsFirst: false);
+                }
+                catch (Exception ex)
+                {
+                    runtime.TrRestartError = ex.Message;
+                    _logger.LogError(ex, "Waterfall failed to restart trunk-recorder for survey {SurveyId}.", runtime.SurveyId);
+                }
+            }
+            if (_activeWaterfalls.TryGetValue(runtime.SurveyId, out var current) && ReferenceEquals(current, runtime))
+                _activeWaterfalls.TryRemove(runtime.SurveyId, out _);
+            await RememberWaterfallAsync(runtime, active: false, CancellationToken.None);
+        }
+    }
+
+    private void RememberWaterfall(WaterfallRuntime runtime, bool active)
+    {
+        _lastWaterfalls[runtime.SurveyId] = CompactWaterfallHistory(runtime.ToDto(active, includeHistory: true));
+    }
+
+    private async Task RememberWaterfallAsync(WaterfallRuntime runtime, bool active, CancellationToken ct)
+    {
+        var dto = CompactWaterfallHistory(runtime.ToDto(active, includeHistory: true));
+        _lastWaterfalls[runtime.SurveyId] = dto;
+        await PersistWaterfallAsync(runtime.SurveyId, dto, ct);
+    }
+
+    private async Task PersistWaterfallAsync(string id, RfSurveyWaterfallStatusDto status, CancellationToken ct)
+    {
+        if (status.Frame == null && status.Frames?.Count is not > 0)
+            return;
+        try
+        {
+            var row = await _database.GetRfSurveySessionAsync(id, ct);
+            if (row == null)
+                return;
+            await WriteArtifactAsync(row.Value.Session.ArtifactPath, "waterfall-last.json", status, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unable to persist waterfall snapshot for survey {SurveyId}.", id);
+        }
+    }
+
+    private async Task<RfSurveyWaterfallStatusDto?> LoadPersistedWaterfallAsync(string id, CancellationToken ct)
+    {
+        try
+        {
+            var row = await _database.GetRfSurveySessionAsync(id, ct);
+            if (row == null)
+                return null;
+            var path = Path.Combine(row.Value.Session.ArtifactPath, "waterfall-last.json");
+            if (!File.Exists(path))
+                return null;
+            var status = JsonSerializer.Deserialize<RfSurveyWaterfallStatusDto>(
+                await File.ReadAllTextAsync(path, ct),
+                EngineConfig.JsonOptions());
+            var loaded = status?.Frame == null && status?.Frames?.Count is not > 0
+                ? null
+                : status with { Active = false, Status = "stopped" };
+            return loaded == null ? null : CompactWaterfallHistory(loaded);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Unable to load persisted waterfall snapshot for survey {SurveyId}.", id);
+            return null;
+        }
+    }
+
+    private static RfSurveyWaterfallStatusDto CompactWaterfallHistory(RfSurveyWaterfallStatusDto status)
+    {
+        if (status.Frames is not { Count: > WaterfallHistoryFrameLimit } frames)
+            return status;
+
+        var compactFrames = frames
+            .Skip(Math.Max(0, frames.Count - WaterfallHistoryFrameLimit))
+            .ToArray();
+        return status with
+        {
+            Frame = status.Frame ?? compactFrames.LastOrDefault(),
+            Frames = compactFrames
+        };
+    }
+
     public async Task<RfSurveyExperimentDto> RunExperimentAsync(string id, RfSurveyRunExperimentRequest request, CancellationToken ct)
     {
-        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Radio setup workspace was not found.");
-        var profile = DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto();
-        var refreshed = await RefreshProfileFactsAsync(row.Session, profile, row.ProfileJson, row.ToolPrepJson, invalidateExperiments: false, ct);
-        var sessionForRun = refreshed.Session;
-        profile = refreshed.Profile;
-        var profileJson = refreshed.ProfileJson;
+        var row = await _database.GetRfSurveySessionAsync(id, ct) ?? throw new KeyNotFoundException("Setup RF session was not found.");
+        var profile = await RecoverProfileSourcesFromSavedTrConfigAsync(
+            row.Session,
+            NormalizeStoredProfileForWorkflow(DeserializeOrDefault<RfSurveyProfileDto>(row.ProfileJson) ?? new RfSurveyProfileDto()),
+            ct);
+        var sessionForRun = NormalizeAppliedSourcePlanSession(row.Session);
+        var profileJson = JsonSerializer.Serialize(profile, EngineConfig.JsonOptions());
         var toolPrep = DeserializeOrDefault<RfSurveyToolPrepDto>(row.ToolPrepJson) ?? EmptyToolPrep();
         var started = DateTime.UtcNow;
         var type = NormalizeExperimentType(request.Type);
+        var experimentId = $"rfx-{started:yyyyMMddHHmmss}-{Guid.NewGuid():N}"[..30];
+        var experimentName = string.IsNullOrWhiteSpace(request.Name) ? DefaultExperimentName(type, request) : request.Name.Trim();
+        var terminalActivityWritten = false;
+        await AddExperimentActivityAsync(sessionForRun, experimentId, experimentName, type, "started", "RF experiment started.", request, [], ct);
         SetupSdrDetectionDto? sdrDetection = null;
         var cancellable = type is "rf_power_scan" or "rf_validation_sweep" or "control_channel_p25_probe" or "voice_capture_trial";
         CancellationTokenSource? linkedRunCancellation = null;
@@ -996,10 +1640,6 @@ public sealed class RfSurveyService
                 if (type == "sdr_inventory")
                 {
                     sdrDetection = await _jobs.DetectSdrsAsync(runCt);
-                    var sourceRefresh = await RefreshProfileSdrSourcesFromDetectionAsync(sessionForRun, profile, row.ToolPrepJson, sdrDetection, runCt);
-                    sessionForRun = sourceRefresh.Session;
-                    profile = sourceRefresh.Profile;
-                    profileJson = sourceRefresh.ProfileJson;
                 }
 
                 outcome = type switch
@@ -1017,7 +1657,7 @@ public sealed class RfSurveyService
                     "voice_capture_trial" => await RunVoiceCaptureTrialAsync(sessionForRun, profile, request, runCt),
                     "transcription_gate" => await RunTranscriptionGateAsync(sessionForRun, profile, request, runCt),
                     "stability_verdict" => await RunStabilityVerdictAsync(sessionForRun, profile, request, runCt),
-                    _ => throw new InvalidOperationException("Unsupported Radio Setup experiment type.")
+                    _ => throw new InvalidOperationException("Unsupported Setup RF validation job type.")
                 };
             }
             catch (OperationCanceledException) when (cancellable && runCt.IsCancellationRequested)
@@ -1026,7 +1666,7 @@ public sealed class RfSurveyService
                 outcome = new ExperimentOutcome(
                     "canceled",
                     $"{displayType} was canceled before all planned checks completed.",
-                    "Cancellation requested from Radio Setup.",
+                    "Cancellation requested from Setup RF validation.",
                     $"{displayType} was canceled.",
                     "",
                     new { canceled = true, type, artifactPath = sessionForRun.ArtifactPath },
@@ -1035,15 +1675,17 @@ public sealed class RfSurveyService
 
             var experiment = new RfSurveyExperimentDto
             {
-                Id = $"rfx-{started:yyyyMMddHHmmss}-{Guid.NewGuid():N}"[..30],
+                Id = experimentId,
+                Name = experimentName,
                 Type = type,
                 Status = outcome.Status,
-                Hypothesis = outcome.Hypothesis,
+                Hypothesis = string.IsNullOrWhiteSpace(request.Hypothesis) ? outcome.Hypothesis : request.Hypothesis.Trim(),
                 RequiredSetup = outcome.RequiredSetup,
                 ResultSummary = outcome.ResultSummary,
                 BlockingIssue = outcome.BlockingIssue,
                 EvidenceJson = JsonSerializer.Serialize(outcome.Evidence, EngineConfig.JsonOptions()),
                 InterpretationJson = JsonSerializer.Serialize(outcome.Interpretation, EngineConfig.JsonOptions()),
+                PhysicalChange = request.PhysicalChange?.Trim() ?? string.Empty,
                 CreatedAtUtc = started,
                 StartedAtUtc = started,
                 FinishedAtUtc = outcome.Status == "running" ? null : DateTime.UtcNow
@@ -1051,14 +1693,24 @@ public sealed class RfSurveyService
 
             var persistCt = ct.IsCancellationRequested ? CancellationToken.None : ct;
             await _database.AddRfSurveyExperimentAsync(id, experiment, experiment.EvidenceJson, experiment.InterpretationJson, persistCt);
+            var experimentArtifactPath = Path.Combine(sessionForRun.ArtifactPath, $"experiment-{experiment.Id}.json");
             await WriteArtifactAsync(sessionForRun.ArtifactPath, $"experiment-{experiment.Id}.json", experiment, persistCt);
+            var evidence = await RegisterExperimentEvidenceAsync(sessionForRun, profile, experiment, experimentArtifactPath, persistCt);
             var experiments = await _database.ListRfSurveyExperimentsAsync(id, persistCt);
             await WriteArtifactAsync(sessionForRun.ArtifactPath, "experiments.json", experiments, persistCt);
 
-            var session = UpdateSessionFromExperiment(sessionForRun, experiment);
+            var session = UpdateSessionFromExperiment(sessionForRun, experiment) with { SdrSummary = SummarizeSelectedSdrs(profile) };
             await _database.UpdateRfSurveySessionAsync(session, profileJson, row.ToolPrepJson, persistCt);
             await WriteArtifactAsync(sessionForRun.ArtifactPath, "survey.json", session, persistCt);
+            await AddExperimentActivityAsync(sessionForRun, experiment.Id, experiment.Name, experiment.Type, experiment.Status, experiment.ResultSummary, request, evidence, persistCt);
+            terminalActivityWritten = true;
             return experiment;
+        }
+        catch (Exception ex)
+        {
+            if (!terminalActivityWritten)
+                await AddExperimentActivityAsync(sessionForRun, experimentId, experimentName, type, "failed", ex.Message, request, [], CancellationToken.None);
+            throw;
         }
         finally
         {
@@ -1080,8 +1732,8 @@ public sealed class RfSurveyService
         }
         var cleanup = await CleanupStaleP25ProcessesAsync(ct);
         var message = canceled
-            ? "Cancel requested for the active Radio Setup experiment."
-            : "No active cancellable Radio Setup experiment was registered; stale P25 cleanup was still checked.";
+            ? "Cancel requested for the active Setup RF validation job."
+            : "No active cancellable Setup RF validation job was registered; stale P25 cleanup was still checked.";
         if (!string.IsNullOrWhiteSpace(cleanup.BlockingIssue))
             message += " " + cleanup.BlockingIssue;
         return new RfSurveyCancelExperimentResultDto(canceled, message, cleanup.Output);
@@ -1105,30 +1757,30 @@ public sealed class RfSurveyService
         var trCoverageReady = trCoverage?.Ok != false;
         var combinedSweepReady = p25ProbeConfigured && trCoverageReady;
         var combinedSweepBlocker = !p25ProbeConfigured
-            ? "RF Sweep is blocked until the Radio Setup P25 probe command template is configured."
+            ? "RF Sweep is blocked until the Setup P25 probe command template is configured."
             : !trCoverageReady
                 ? "RF Sweep is blocked until the TR config source plan can cover the selected control channels: " + string.Join(" ", trCoverage?.Blockers ?? [])
                 : "";
         var plans = new List<RfSurveyExperimentPlanDto>();
         if (toolPrep == null || toolPrep.Tools.Count == 0)
-            plans.Add(new("tool_prep", "Run tool prep", "Detect required SDR, P25, capture, audio, and transcription tooling.", true, "", "Run Tool Prep."));
+            plans.Add(new("tool_prep", "Check required software", "Check required SDR, P25, capture, audio, and transcription software without accessing SDR hardware or changing configuration.", true, "", "Open Preparation to run the software check."));
         if (!completed.Contains("ground_truth_review"))
-            plans.Add(new("ground_truth_review", "Review ground truth", "Verify the setup-derived control channels, voice frequencies, SDR sources, and RF path facts before RF tests.", true, "", "Completed setup wizard or imported TR/RR data."));
+            plans.Add(new("ground_truth_review", "Review ground truth", "Verify the setup-derived control channels, voice frequencies, SDR sources, and RF path facts before RF tests.", true, "", "Completed Setup or imported TR/RR data."));
         if (!completed.Contains("tr_stopped_check"))
-            plans.Add(new("tr_stopped_check", "Check TR service state", "Radio Setup needs to know whether trunk-recorder is active before bounded SDR/P25 measurements.", true, "", "Radio Setup will pause and restart trunk-recorder automatically when exclusive SDR access is required."));
+            plans.Add(new("tr_stopped_check", "Check TR service state", "Setup needs to know whether trunk-recorder is active before bounded SDR/P25 measurements.", true, "", "Setup will pause and restart trunk-recorder automatically when exclusive SDR access is required."));
         if (!completed.Contains("sdr_inventory"))
-            plans.Add(new("sdr_inventory", "Inventory SDRs", "Run the installed Airspy/RTL-SDR inventory tools and capture factual device output.", voiceReady || toolPrep?.Tools.Any(t => t.Category == "sdr" && t.Installed) == true, voiceReady ? "" : "Install SDR tools so the SDR can be claimed during a bounded TR pause.", "Radio Setup pauses TR if needed, runs rtl_test and/or airspy_info, then restarts TR."));
+            plans.Add(new("sdr_inventory", "Inventory SDRs", "Run the installed Airspy/RTL-SDR inventory tools and capture factual device output.", voiceReady || toolPrep?.Tools.Any(t => t.Category == "sdr" && t.Installed) == true, voiceReady ? "" : "Install SDR tools so the SDR can be claimed during a bounded TR pause.", "Setup pauses TR if needed, runs rtl_test and/or airspy_info, then restarts TR."));
         var combinedRfPassed = completed.Contains("rf_validation_sweep");
         if (!combinedRfPassed && !completed.Contains("rf_power_scan"))
-            plans.Add(new("rf_power_scan", "Measure RF power", "Capture a short IQ window at the selected control channel and estimate peak power, noise floor, SNR, overload risk, and frequency offset.", true, "", "Radio Setup pauses TR if needed, runs rtl_sdr or airspy_rx, then restarts TR."));
+            plans.Add(new("rf_power_scan", "Measure RF power", "Capture a short IQ window at the selected control channel and estimate peak power, noise floor, signal-to-noise ratio, overload risk, and measured signal offset.", true, "", "Setup pauses Trunk Recorder if needed, runs the SDR capture tool, then restarts Trunk Recorder."));
         if (!completed.Contains("rf_validation_sweep"))
-            plans.Add(new("rf_validation_sweep", "Run RF validation sweep", "Rank control-channel/source/gain/error candidates with a short RF screen, P25 probe, and TR CC metrics on only the best candidates.", combinedSweepReady, combinedSweepBlocker, "Known control channels, selected SDR source, configured P25 probe command, valid TR source coverage, and trunk-recorder service control."));
+            plans.Add(new("rf_validation_sweep", "Run RF validation sweep", "Rank control-channel, source, gain, and frequency-correction candidates with a short RF screen, P25 probe, and Trunk Recorder control-channel metrics on only the best candidates.", combinedSweepReady, combinedSweepBlocker, "Known control channels, selected SDR source, configured P25 probe command, valid Trunk Recorder source coverage, and service control."));
         if (!combinedRfPassed && !completed.Contains("control_channel_quality"))
             plans.Add(new("control_channel_quality", "Measure CC quality", "Measure per-control-channel decode rate, zero-decode, continuity, retunes, and call events from a fresh TR journal window.", trCoverageReady, trCoverageReady ? "" : "TR CC Metrics are blocked until the TR config source plan can cover the selected control channels: " + string.Join(" ", trCoverage?.Blockers ?? []), "trunk-recorder running on the current TR config; known control channel list."));
         if (!combinedRfPassed && !completed.Contains("control_channel_p25_probe"))
-            plans.Add(new("control_channel_p25_probe", "Probe P25 control channel", "Capture control-channel evidence with validated P25 tooling before voice-call trials.", p25Ready, p25Ready ? "" : "P25 probe is blocked until P25 and SDR tooling are installed.", "Radio Setup pauses TR if needed, runs the validated OP25/P25 command, then restarts TR."));
+            plans.Add(new("control_channel_p25_probe", "Probe P25 control channel", "Capture control-channel evidence with validated P25 tooling before voice-call trials.", p25Ready, p25Ready ? "" : "P25 probe is blocked until P25 and SDR tooling are installed.", "Setup pauses TR if needed, runs the validated OP25/P25 command, then restarts TR."));
         if (!completed.Contains("error_gain_sweep"))
-            plans.Add(new("error_gain_sweep", "Run error/gain sweep", "Run controlled tr_tune measurements through the Radio Setup experiment API.", true, "", "The sweep runner manages temporary TR configs and restarts TR after cleanup."));
+            plans.Add(new("error_gain_sweep", "Run frequency-correction and gain sweep", "Run controlled Trunk Recorder tuning measurements through Setup RF Validation.", true, "", "The sweep runner manages temporary configurations and restarts Trunk Recorder after cleanup."));
         var latestP25 = experiments
             .Where(e => e.Type == "control_channel_p25_probe")
             .OrderBy(e => e.CreatedAtUtc)
@@ -1171,7 +1823,7 @@ public sealed class RfSurveyService
         return new ExperimentOutcome(
             status,
             "Setup-derived ground truth should identify the system, control channels, voice frequencies, and configured SDR sources.",
-            "Completed setup wizard, TR config, and preferably RR/imported source data.",
+            "Completed Setup, TR config, and preferably RR/imported source data.",
             issues.Count == 0 ? $"Ground truth looks usable: {profile.ControlChannelsHz.Count} control channel(s), {profile.VoiceFrequenciesHz.Count} voice frequenc(ies), {profile.Sources.Count} SDR source(s)." : string.Join(" ", issues),
             issues.Count == 0 ? "" : string.Join(" ", issues),
             new
@@ -1187,7 +1839,7 @@ public sealed class RfSurveyService
             {
                 recommendation = issues.Count == 0
                     ? "Proceed to TR service state check and SDR inventory."
-                    : "Fix setup/RR ground truth before treating Radio Setup measurements as conclusive.",
+                    : "Fix setup/RR ground truth before treating RF validation measurements as conclusive.",
                 followUps = issues
             });
     }
@@ -1204,14 +1856,14 @@ public sealed class RfSurveyService
         var blocking = unknown ? "Unable to query trunk-recorder service state on this host." : string.Empty;
         return new ExperimentOutcome(
             status,
-            "Radio Setup should know whether trunk-recorder is active before scoped SDR/P25 measurements.",
+            "Setup should know whether trunk-recorder is active before scoped SDR/P25 measurements.",
             $"Check systemd unit {service}.",
             unknown ? blocking : active ? "trunk-recorder is active; SDR/P25 experiments will pause and restart it automatically." : $"trunk-recorder is not active ({result.Stdout.Trim()}).",
             blocking,
             new { service, result.ExitCode, output = TrimOutput(result.Stdout) },
             new
             {
-                recommendation = unknown ? "Run this survey on the target Linux host or use expert mode with external evidence." : "Proceed to SDR inventory; Radio Setup will manage short TR pauses.",
+                recommendation = unknown ? "Run this RF validation on the target Linux host or use expert mode with external evidence." : "Proceed to SDR inventory; Setup will manage short TR pauses.",
                 trMustRemainStopped = false
             });
     }
@@ -1232,7 +1884,7 @@ public sealed class RfSurveyService
                 return BlockedOutcome(
                     "sdr_inventory",
                     "SDR inventory needs exclusive access to the configured Airspy/RTL-SDR devices.",
-                    "Radio Setup can pause trunk-recorder through the service helper.",
+                    "Setup can pause trunk-recorder through the service helper.",
                     "trunk-recorder remained active after the stop request.",
                     new { trState, trStopOutput });
             }
@@ -1241,7 +1893,7 @@ public sealed class RfSurveyService
         var outputs = new List<object>();
         try
         {
-            if (profile.Sources.Any(s => s.SdrType == "RTL-SDR"))
+            if (profile.Sources.Any(IsRtlSource))
             {
                 if (!await CommandExistsAsync("rtl_test", ct))
                     outputs.Add(new { tool = "rtl_test", status = "missing", output = "" });
@@ -1251,7 +1903,7 @@ public sealed class RfSurveyService
                     outputs.Add(new { tool = "rtl_test", status = result.ExitCode == 0 ? "ran" : "error", output = TrimOutput(result.Stdout) });
                 }
             }
-            if (profile.Sources.Any(s => s.SdrType == "Airspy"))
+            if (profile.Sources.Any(IsAirspySource))
             {
                 if (!await CommandExistsAsync("airspy_info", ct))
                     outputs.Add(new { tool = "airspy_info", status = "missing", output = "" });
@@ -1279,24 +1931,52 @@ public sealed class RfSurveyService
         }
 
         if (outputs.Count == 0)
-            return BlockedOutcome("sdr_inventory", "The survey needs at least one configured SDR source.", "Complete setup/TR source configuration.", "No SDR sources are configured.", new { sourceCount = profile.Sources.Count });
+            return BlockedOutcome("sdr_inventory", "Setup RF validation needs at least one configured SDR source.", "Complete setup/TR source configuration.", "No SDR sources are configured.", new { sourceCount = profile.Sources.Count });
 
-        var missing = JsonSerializer.Serialize(outputs).Contains("\"missing\"", StringComparison.OrdinalIgnoreCase);
-        var visible = outputs.Any(OutputShowsVisibleSdr);
+        var outputText = JsonSerializer.Serialize(outputs, EngineConfig.JsonOptions());
+        var missing = outputText.Contains("\"missing\"", StringComparison.OrdinalIgnoreCase);
+        var visible = !missing && ConfiguredSdrClassVisible(profile.Sources, outputText);
         var restartFailed = !string.IsNullOrWhiteSpace(trRestartError);
+        var serialNotes = BuildSdrInventorySerialNotes(profile.Sources, outputText);
         return new ExperimentOutcome(
             restartFailed ? "failed" : missing ? "blocked" : visible ? "passed" : "failed",
             "Configured SDR devices should be visible to host tools while TR is stopped.",
-            "Radio Setup temporarily paused TR if needed; configured SDR host tools installed.",
-            restartFailed ? "SDR inventory ran, but trunk-recorder did not restart afterward." : missing ? "One or more configured SDR toolchains are missing." : visible ? "SDR inventory found configured hardware." : "SDR inventory did not find the configured hardware.",
+            "Setup temporarily paused TR if needed; configured SDR host tools installed.",
+            restartFailed ? "SDR inventory ran, but trunk-recorder did not restart afterward." : missing ? "One or more configured SDR toolchains are missing." : visible ? "SDR inventory found compatible hardware." : "SDR inventory did not find compatible hardware.",
             restartFailed ? $"trunk-recorder did not restart after SDR inventory: {trRestartError}" : missing ? "Install the missing SDR host tools before RF measurements." : "",
-            new { trState, trWasActive, trStopOutput, trRestartOutput, trRestartError, configuredSources = profile.Sources, detection, outputs },
+            new { trState, trWasActive, trStopOutput, trRestartOutput, trRestartError, configuredSources = profile.Sources, serialNotes, detection, outputs },
             new
             {
-                recommendation = restartFailed ? "Restart trunk-recorder before continuing Radio Setup." : missing ? "Run tool prep/install for missing SDR host tools." : visible ? "Proceed to RF power scan before P25 probing." : "Check USB, permissions, drivers, and whether another process is using the SDR.",
-                followUps = missing ? new[] { "Install missing SDR toolchain.", "Re-run Tool Prep.", "Re-run SDR inventory." } : Array.Empty<string>()
+                recommendation = restartFailed ? "Restart trunk-recorder before continuing Setup RF validation." : missing ? "Install the missing SDR software, then recheck required software." : visible ? "Proceed to RF power scan before P25 probing." : "Check USB, permissions, drivers, and whether another process is using the SDR.",
+                followUps = missing ? new[] { "Install missing SDR software.", "Recheck required software.", "Rerun SDR inventory." } : Array.Empty<string>()
             });
     }
+
+    private static bool ConfiguredSdrClassVisible(IReadOnlyList<RfSurveySourceDto> sources, string outputText)
+    {
+        if (sources.Count == 0)
+            return false;
+        var needsAirspy = sources.Any(IsAirspySource);
+        var needsRtl = sources.Any(IsRtlSource);
+        var airspyOk = !needsAirspy || outputText.Contains("AirSpy", StringComparison.OrdinalIgnoreCase) || outputText.Contains("Airspy", StringComparison.OrdinalIgnoreCase);
+        var rtlOk = !needsRtl || outputText.Contains("RTL", StringComparison.OrdinalIgnoreCase) || outputText.Contains("Found ", StringComparison.OrdinalIgnoreCase);
+        return airspyOk && rtlOk;
+    }
+
+    private static IReadOnlyList<string> BuildSdrInventorySerialNotes(IReadOnlyList<RfSurveySourceDto> sources, string outputText)
+    {
+        var normalizedOutput = NormalizeInventorySerialText(outputText);
+        return sources
+            .Select(source => FirstNonEmpty(source.Serial, ExtractAirspySerial(source.Device), ExtractRtlSerial(source.Device)))
+            .Where(serial => !string.IsNullOrWhiteSpace(serial) && !normalizedOutput.Contains(NormalizeInventorySerialText(serial), StringComparison.OrdinalIgnoreCase))
+            .Select(serial => $"Saved source serial {serial} was not reported by inventory; Setup will bind by SDR type for single-device workflows.")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string NormalizeInventorySerialText(string value) =>
+        Regex.Replace(value ?? string.Empty, @"[^0-9a-fA-F]", string.Empty)
+            .TrimStart('0');
 
     private static bool OutputShowsVisibleSdr(object output)
     {
@@ -1310,7 +1990,10 @@ public sealed class RfSurveyService
 
     private async Task<ExperimentOutcome> RunRfPowerScanAsync(string artifactPath, RfSurveyProfileDto profile, RfSurveyRunExperimentRequest request, CancellationToken ct)
     {
-        var controlChannels = ReadPowerScanControlChannels(request.Parameters, request.ControlChannelHz, profile.ControlChannelsHz);
+        var sourceMeasurements = ReadPowerScanSourceMeasurements(request.Parameters);
+        var controlChannels = sourceMeasurements.Count > 0
+            ? sourceMeasurements.Select(measurement => measurement.ControlChannelHz).Distinct().ToList()
+            : ReadPowerScanControlChannels(request.Parameters, request.ControlChannelHz, profile.ControlChannelsHz);
         var firstControlChannel = controlChannels.FirstOrDefault();
         if (firstControlChannel <= 0)
             return new ExperimentOutcome(
@@ -1322,7 +2005,9 @@ public sealed class RfSurveyService
                 new { profile.ControlChannelsHz },
                 new { recommendation = "Select or import site ground truth before running RF Sweep.", followUps = new[] { "Select the site again.", "Refresh TR/RR ground truth.", "Confirm the active TR config has control_channels." } });
 
-        var selectedSourceIndexes = request.SourceIndex.HasValue
+        var selectedSourceIndexes = sourceMeasurements.Count > 0
+            ? sourceMeasurements.Select(measurement => measurement.SourceIndex).Distinct().ToList()
+            : request.SourceIndex.HasValue
             ? new[] { request.SourceIndex.Value }
             : profile.SelectedSourceIndexes.Count > 0 ? profile.SelectedSourceIndexes : profile.Sources.Select(s => s.Index).ToList();
         var sources = profile.Sources
@@ -1340,6 +2025,37 @@ public sealed class RfSurveyService
                 "No SDR source is available.",
                 new { profile.Sources },
                 new { recommendation = "Select or add an SDR source before running RF Sweep.", followUps = new[] { "Return to Scope and select SDRs.", "Review the active TR source list.", "Run SDR inventory after sources are selected." } });
+
+        foreach (var measurement in sourceMeasurements)
+        {
+            var source = profile.Sources.FirstOrDefault(candidate => candidate.Index == measurement.SourceIndex);
+            if (source == null || (!string.IsNullOrWhiteSpace(measurement.SourceSerial) &&
+                                   !string.Equals(source.Serial, measurement.SourceSerial, StringComparison.OrdinalIgnoreCase)))
+            {
+                return new ExperimentOutcome(
+                    "failed",
+                    "Each Waterfall result must remain attached to the SDR that measured it.",
+                    "The selected SDR index and hardware serial must still match the current Setup source.",
+                    $"Source {measurement.SourceIndex} for {measurement.ControlChannelHz} Hz no longer matches the saved Waterfall result.",
+                    "The source-bound Waterfall handoff is stale.",
+                    new { sourceMeasurements, profile.Sources },
+                    new { recommendation = "Return to Waterfall, choose the intended SDR, and select Use again for this control channel.", followUps = new[] { "Review the selected source serial.", "Clear the stale Waterfall result.", "Run RF Sweep again after selecting Use on the intended SDR." } });
+            }
+        }
+
+        var correctionPlan = ReconcilePowerScanSourceMeasurements(profile, sourceMeasurements);
+        if (correctionPlan.Issues.Count > 0)
+        {
+            return new ExperimentOutcome(
+                "failed",
+                "RF Sweep requires one defensible crystal correction per SDR.",
+                "Waterfall offsets must agree for the same SDR or the saved source correction must remain the fallback.",
+                "Source correction observations conflict.",
+                string.Join(" ", correctionPlan.Issues),
+                new { requestedSourceMeasurements = sourceMeasurements, correctionPlan.Corrections, correctionPlan.Issues },
+                new { recommendation = "Review the conflicting Waterfall measurements and retain only stable control-channel evidence before rerunning RF Sweep.", followUps = correctionPlan.Issues });
+        }
+        sourceMeasurements = correctionPlan.Measurements;
 
         var duration = Math.Clamp(request.DurationSeconds <= 0 ? 5 : request.DurationSeconds, 2, 15);
         var outputDir = Path.Combine(artifactPath, "rf-power-scans", DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
@@ -1361,7 +2077,7 @@ public sealed class RfSurveyService
                 return new ExperimentOutcome(
                     "failed",
                     "RF Sweep should automatically pause trunk-recorder before claiming SDR hardware.",
-                    "Radio Setup can pause trunk-recorder through the service helper.",
+                    "Setup can pause trunk-recorder through the service helper.",
                     "trunk-recorder remained active after the stop request.",
                     "trunk-recorder remained active after the stop request.",
                     new { trState, trStopOutput },
@@ -1372,18 +2088,37 @@ public sealed class RfSurveyService
 
         try
         {
-            var rtlIndexesBySerial = sources.Any(source => string.Equals(source.SdrType, "RTL-SDR", StringComparison.OrdinalIgnoreCase))
+            var pinAirspySerial = sources.Count(IsAirspySource) > 1;
+            var rtlIndexesBySerial = sources.Any(source => !IsAirspySource(source))
                 ? await ReadRtlIndexesBySerialAsync(ct)
                 : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var controlChannel in controlChannels)
+            var scanTargets = sourceMeasurements.Count > 0
+                ? sourceMeasurements.Select(measurement => new RfPowerScanTarget(
+                    measurement.ControlChannelHz,
+                    sources.First(source => source.Index == measurement.SourceIndex),
+                    measurement)).ToList()
+                : controlChannels.SelectMany(controlChannel => sources.Select(source => new RfPowerScanTarget(controlChannel, source, null))).ToList();
+            foreach (var target in scanTargets)
             {
-                foreach (var source in sources)
+                var controlChannel = target.ControlChannelHz;
+                var source = target.Source;
+                var measurement = target.Measurement;
+                var measuredSource = measurement == null
+                    ? source
+                    : source with
+                    {
+                        Gain = string.IsNullOrWhiteSpace(measurement.Gain) ? source.Gain : measurement.Gain,
+                        SampleRate = measurement.SampleRateHz is > 0 ? measurement.SampleRateHz.Value : source.SampleRate,
+                        ErrorHz = measurement.ErrorHz ?? source.ErrorHz
+                    };
                 {
-                    var sourceGainSequence = PowerScanGainSequenceForSource(source, gainSequence, gainOverrides);
+                    var sourceGainSequence = measurement != null && !string.IsNullOrWhiteSpace(measurement.Gain)
+                        ? new[] { measuredSource.Gain }
+                        : PowerScanGainSequenceForSource(measuredSource, gainSequence, gainOverrides);
                     foreach (var gain in sourceGainSequence)
                     {
-                        var scanSource = source with { Gain = gain };
-                        var isAirspy = string.Equals(scanSource.SdrType, "Airspy", StringComparison.OrdinalIgnoreCase);
+                        var scanSource = measuredSource with { Gain = gain };
+                        var isAirspy = IsAirspySource(scanSource);
                         var commandName = isAirspy ? "airspy_rx" : "rtl_sdr";
                         if (!await CommandExistsAsync(commandName, ct))
                         {
@@ -1402,7 +2137,7 @@ public sealed class RfSurveyService
                             rows.Add(new RfPowerScanRow(scanSource.Index, scanSource.SdrType, scanSource.Serial, scanSource.Device, scanSource.CenterHz, scanSource.SampleRate, scanSource.SampleRate, scanSource.ErrorHz, scanSource.Gain, controlChannel, duration, commandName, -1, "", "", 0, "unavailable", rtlSelector.Issue, null, null, null, null, 0, false, "", null, null));
                             continue;
                         }
-                        var command = BuildRfPowerScanCommand(scanSource, controlChannel, sampleRate, sampleCount, rawPath, isAirspy, rtlSelector.Argument);
+                        var command = BuildRfPowerScanCommandWithSerialPinning(scanSource, controlChannel, sampleRate, sampleCount, rawPath, isAirspy, rtlSelector.Argument, pinAirspySerial);
                         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
                         linked.CancelAfter(TimeSpan.FromSeconds(duration + 12));
                         var result = OperatingSystem.IsWindows()
@@ -1420,6 +2155,10 @@ public sealed class RfSurveyService
                                 : await RunCaptureAsync("bash", "-lc " + Quote(command), retryLinked.Token);
                         }
                         var analysis = AnalyzeIqFile(rawPath, sampleRate, isAirspy);
+                        var captureBytes = File.Exists(rawPath) ? new FileInfo(rawPath).Length : 0;
+                        if (captureBytes > 0)
+                            DeleteRawRfCapture(rawPath);
+                        var retainedRawPath = File.Exists(rawPath) ? rawPath : string.Empty;
                         rows.Add(new RfPowerScanRow(
                             scanSource.Index,
                             scanSource.SdrType,
@@ -1435,8 +2174,8 @@ public sealed class RfSurveyService
                             command,
                             result.ExitCode,
                             TrimOutput(result.Stdout),
-                            rawPath,
-                            File.Exists(rawPath) ? new FileInfo(rawPath).Length : 0,
+                            retainedRawPath,
+                            captureBytes,
                             analysis.Completed ? "measured" : "failed",
                             analysis.Issue,
                             analysis.PeakDb,
@@ -1494,7 +2233,7 @@ public sealed class RfSurveyService
         var status = !string.IsNullOrWhiteSpace(trRestartError) ? "failed" : measured.Count == 0 ? "failed" : good ? "passed" : "failed";
         var summary = best == null
             ? "RF sweep did not produce an analyzable IQ capture."
-            : $"Best RF sweep: source {best.Index}, CC {best.ControlChannelHz}, gain {best.Gain}, control-channel SNR {best.SnrDb:F1} dB, CC peak {best.PeakDb:F1} dB, noise floor {best.NoiseFloorDb:F1} dB, CC offset {best.PeakOffsetHz:F0} Hz.";
+            : $"Best RF sweep: source {best.Index}, control channel {best.ControlChannelHz}, gain {best.Gain}, control-channel SNR {best.SnrDb:F1} dB, control peak {best.PeakDb:F1} dB, noise floor {best.NoiseFloorDb:F1} dB, measured signal offset {best.PeakOffsetHz:F0} Hz.";
         var blocker = !string.IsNullOrWhiteSpace(trRestartError) ? $"trunk-recorder did not restart after RF power scan: {trRestartError}" :
             status == "passed" ? "" :
             best == null ? string.Join(" ", blockers) :
@@ -1507,6 +2246,8 @@ public sealed class RfSurveyService
             profile.SystemShortName,
             controlChannelHz = firstControlChannel,
             controlChannelsHz = controlChannels,
+            sourceMeasurements,
+            sourceCorrections = correctionPlan.Corrections,
             gainSequence,
             durationSeconds = duration,
             outputDir,
@@ -1521,7 +2262,7 @@ public sealed class RfSurveyService
         return new ExperimentOutcome(
             status,
             "A usable control channel should stand above the local noise floor without SDR overload before P25 decoding is expected to work.",
-            "Radio Setup paused TR if needed; selected SDR available; known control channels; rtl_sdr or airspy_rx installed.",
+            "Setup paused TR if needed; selected SDR available; known control channels; rtl_sdr or airspy_rx installed.",
             summary,
             blocker,
             evidence,
@@ -1538,7 +2279,7 @@ public sealed class RfSurveyService
                 selectedGain = best?.Gain ?? "",
                 best,
                 followUps = status == "passed"
-                    ? new[] { "Run P25 probe on the same control channel.", "If P25 fails despite good SNR, inspect error/gain and modulation settings." }
+                    ? new[] { "Run P25 probe on the same control channel.", "If P25 fails despite good signal-to-noise ratio, inspect frequency correction, gain, and modulation settings." }
                     : new[] { "Try alternate control channel.", "Change gain sequence and rerun RF sweep.", "Bypass suspect RF path components and rerun.", "Verify antenna aim/polarization." }
             });
     }
@@ -1605,7 +2346,7 @@ public sealed class RfSurveyService
     {
         var artifactPath = session.ArtifactPath;
         var rfDuration = ReadIntParameter(request.Parameters, "rfDurationSeconds", 2, 2, 5);
-        var p25Duration = ReadIntParameter(request.Parameters, "p25DurationSeconds", 10, 10, 20);
+        var p25Duration = ReadIntParameter(request.Parameters, "p25DurationSeconds", 10, 10, 45);
         var metricsDuration = ReadIntParameter(request.Parameters, "metricsDurationSeconds", 15, 15, 30);
         var rfCandidateLimit = ReadIntParameter(request.Parameters, "rfCandidateLimit", 3, 1, 5);
         var p25CandidateLimit = ReadIntParameter(request.Parameters, "p25CandidateLimit", 3, 1, 3);
@@ -1614,6 +2355,7 @@ public sealed class RfSurveyService
         var voiceDuration = ReadIntParameter(request.Parameters, "voiceDurationSeconds", 45, 20, 90);
         var errorDiscovery = ReadBoolParameter(request.Parameters, "errorDiscovery", true);
         var errorOffsets = ReadIntSequenceParameter(request.Parameters, "errorOffsetsHz", errorDiscovery ? [0, -300, 300] : [-300, 0, 300], 7);
+        var p25Demods = ReadP25DemodSequence(request.Parameters);
         var sampleRateOverride = ReadIntParameter(request.Parameters, "sampleRateHz", 0, 0, 10_000_000);
         var baseProfile = sampleRateOverride > 0 ? ProfileWithSampleRateOverride(profile, sampleRateOverride) : profile;
         var targetSystemShortName = ReadStringParameter(request.Parameters, "targetSystemShortName");
@@ -1636,13 +2378,13 @@ public sealed class RfSurveyService
             return BlockedOutcome(
                 "rf_validation_sweep",
                 "RF Sweep requires a configured P25 probe before RF candidates can be ranked for decode.",
-                "Configure Radio Setup P25 probe command template.",
+                "Configure the Setup P25 probe command template.",
                 p25Preview.BlockingIssue,
                 new
                 {
                     sweepProfile.SystemShortName,
                     p25Preview,
-                    parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets }
+                    parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets, p25Demods }
                 });
 
         var trCoverage = CurrentTrSourceCoverageValidation();
@@ -1656,7 +2398,7 @@ public sealed class RfSurveyService
                 {
                     sweepProfile.SystemShortName,
                     trCoverage,
-                    parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets }
+                    parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets, p25Demods }
                 });
 
         var powerRequest = request with
@@ -1693,7 +2435,7 @@ public sealed class RfSurveyService
                 {
                     sweepProfile.SystemShortName,
                     power = powerOutcome.Evidence,
-                    parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorOffsets }
+                    parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorOffsets, p25Demods }
                 },
                 new
                 {
@@ -1705,8 +2447,7 @@ public sealed class RfSurveyService
         var candidates = new List<RfValidationCandidate>();
         foreach (var seed in powerCandidates)
         {
-            var source = profile.Sources.FirstOrDefault(row => row.Index == seed.SourceIndex);
-            var baseError = source?.ErrorHz ?? seed.ErrorHz;
+            var baseError = seed.ErrorHz;
             foreach (var offset in BuildValidationErrorOffsets(errorDiscovery, errorOffsets, seed.PeakOffsetHz))
             {
                 var errorHz = baseError + offset;
@@ -1733,12 +2474,12 @@ public sealed class RfSurveyService
         {
             return new ExperimentOutcome(
                 "failed",
-                "A combined RF validation sweep should produce at least one source/control-channel/gain/error candidate before decode checks run.",
-                "Known control channels, selected SDR source, and candidate error offsets.",
+                "A combined RF validation sweep should produce at least one source, control-channel, gain, and frequency-correction candidate before decode checks run.",
+                "Known control channels, selected SDR source, and candidate correction changes.",
                 "RF validation sweep produced RF measurements but no decode candidates.",
-                "No candidate error-offset combinations were generated.",
-                new { sweepProfile.SystemShortName, power = powerOutcome.Evidence, parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets } },
-                new { recommendation = "Reset the RF sweep error offsets or rerun with error discovery enabled.", candidates = Array.Empty<RfValidationCandidate>() });
+                "No candidate frequency-correction combinations were generated.",
+                new { sweepProfile.SystemShortName, power = powerOutcome.Evidence, parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets, p25Demods } },
+                new { recommendation = "Reset the RF sweep correction changes or rerun with automatic correction discovery enabled.", candidates = Array.Empty<RfValidationCandidate>() });
         }
         await WriteRfValidationProgressAsync(powerOutcome.Evidence, candidates, ct);
 
@@ -1760,20 +2501,20 @@ public sealed class RfSurveyService
                 sweepProfile.SystemShortName,
                 p25Preview,
                 power = powerOutcome.Evidence,
-                parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets },
+                parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets, p25Demods },
                 candidates
             };
             await WriteArtifactAsync(artifactPath, $"rf-validation-sweep-{DateTime.UtcNow:yyyyMMddHHmmss}.json", p25BlockedEvidence, ct);
             return new ExperimentOutcome(
                 "blocked",
-                "A usable RF path should rank one or more control-channel/source/gain/error candidates with RF margin, P25 frame evidence, and live TR decode metrics.",
+                "A usable RF path should rank one or more control-channel, source, gain, and frequency-correction candidates with RF margin, P25 frame evidence, and live Trunk Recorder decode metrics.",
                 "Known control channels, selected SDR source, P25 probe command, SDR tools, and trunk-recorder service control.",
                 $"RF screen found {candidates.Count} candidate condition(s), but P25 probing is not configured.",
                 p25Preview.BlockingIssue,
                 p25BlockedEvidence,
                 new
                 {
-                    recommendation = "Configure the Radio Setup P25 probe command template, then rerun the combined RF sweep. Do not change antenna or gain based only on this blocked decode step.",
+                    recommendation = "Configure the Setup P25 probe command template, then rerun the combined RF sweep. Do not change antenna or gain based only on this blocked decode step.",
                     candidates,
                     followUps = new[] { "Configure P25 probe command template.", "Rerun combined RF sweep.", "Review the RF-ranked candidates only as preliminary signal evidence." }
                 });
@@ -1841,28 +2582,59 @@ public sealed class RfSurveyService
             candidates[i] = candidate with { P25Status = "running", P25Summary = $"Running P25 probe for {p25Duration} second(s)." };
             await WriteRfValidationProgressAsync(powerOutcome.Evidence, candidates, ct);
             candidate = candidates[i];
-            var candidateProfile = ProfileWithCandidateSource(sweepProfile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.ControlChannelHz);
-            var probe = await RunControlChannelProbeAsync(
-                artifactPath,
-                candidateProfile,
-                toolPrep,
-                request with
-                {
-                    DurationSeconds = p25Duration,
-                    ControlChannelHz = candidate.ControlChannelHz,
-                    SourceIndex = candidate.SourceIndex,
-                    Parameters = null
-                },
-                ct);
-            var p25Evidence = JsonSerializer.SerializeToNode(probe.Evidence, EngineConfig.JsonOptions()) as JsonObject;
+            var candidateProfile = ProfileWithCandidateSource(sweepProfile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.SampleRateHz, candidate.ControlChannelHz);
+            ExperimentOutcome? probe = null;
+            JsonObject? p25Evidence = null;
+            var triedDemods = new List<string>();
+            var p25Attempts = new List<RfValidationP25Attempt>();
+            foreach (var demod in p25Demods)
+            {
+                triedDemods.Add(demod);
+                probe = await RunControlChannelProbeAsync(
+                    artifactPath,
+                    candidateProfile,
+                    toolPrep,
+                    request with
+                    {
+                        DurationSeconds = p25Duration,
+                        ControlChannelHz = candidate.ControlChannelHz,
+                        SourceIndex = candidate.SourceIndex,
+                        Parameters = BuildP25DemodParameters(demod)
+                    },
+                    ct);
+                p25Evidence = JsonSerializer.SerializeToNode(probe.Evidence, EngineConfig.JsonOptions()) as JsonObject;
+                p25Attempts.Add(new RfValidationP25Attempt(
+                    demod,
+                    probe.Status,
+                    p25Evidence?["command"]?.GetValue<string>() ?? string.Empty,
+                    p25Evidence?["exitCode"]?.GetValue<int>(),
+                    TrimOutput(p25Evidence?["output"]?.GetValue<string>() ?? string.Empty, 2000),
+                    probe.BlockingIssue.Length > 0 ? probe.BlockingIssue : probe.ResultSummary));
+                if (string.Equals(probe.Status, "passed", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(probe.Status, "blocked", StringComparison.OrdinalIgnoreCase))
+                    break;
+            }
+            probe ??= new ExperimentOutcome(
+                "blocked",
+                "P25 probing requires at least one demodulator mode.",
+                "RF Sweep should provide a P25 demodulator list.",
+                "No P25 demodulator modes were configured.",
+                "No P25 demodulator modes were configured.",
+                new { p25Demods },
+                new { recommendation = "Configure p25Demods, then rerun RF Sweep." });
+            p25Evidence ??= JsonSerializer.SerializeToNode(probe.Evidence, EngineConfig.JsonOptions()) as JsonObject;
             candidates[i] = candidate with
             {
                 P25Status = probe.Status,
                 P25Frames = string.Equals(probe.Status, "passed", StringComparison.OrdinalIgnoreCase),
-                P25Summary = probe.BlockingIssue.Length > 0 ? probe.BlockingIssue : probe.ResultSummary,
+                P25Summary = (probe.BlockingIssue.Length > 0 ? probe.BlockingIssue : probe.ResultSummary) +
+                    (triedDemods.Count > 1 ? $" Tried demods: {string.Join(", ", triedDemods)}." : ""),
+                P25Demod = p25Evidence?["demod"]?.GetValue<string>() ?? triedDemods.LastOrDefault() ?? string.Empty,
+                P25EvidenceMarker = p25Evidence?["frameEvidence"]?.GetValue<string>() ?? string.Empty,
                 P25Command = p25Evidence?["command"]?.GetValue<string>() ?? string.Empty,
                 P25ExitCode = p25Evidence?["exitCode"]?.GetValue<int>(),
                 P25Output = TrimOutput(p25Evidence?["output"]?.GetValue<string>() ?? string.Empty, 2000),
+                P25Attempts = p25Attempts,
                 Score = ScoreRfValidationCandidate(candidate with { P25Status = probe.Status, P25Frames = string.Equals(probe.Status, "passed", StringComparison.OrdinalIgnoreCase) })
             };
             await WriteRfValidationProgressAsync(powerOutcome.Evidence, candidates, ct);
@@ -1874,7 +2646,7 @@ public sealed class RfSurveyService
             var metricIndexes = SelectRfValidationFollowUpIndexesBySite(
                 sweepProfile,
                 candidates,
-                candidates.Select((candidate, index) => new { candidate, index }).Where(row => row.candidate.P25Frames).Select(row => row.index),
+                candidates.Select((candidate, index) => new { candidate, index }).Where(row => IsEligibleForNativeTrProof(row.candidate)).Select(row => row.index),
                 metricsCandidateLimit);
             metricsCandidateLimit = Math.Max(metricsCandidateLimit, metricIndexes.Count);
 
@@ -1917,7 +2689,7 @@ public sealed class RfSurveyService
             var voiceIndexes = SelectRfValidationFollowUpIndexesBySite(
                 sweepProfile,
                 candidates,
-                candidates.Select((candidate, index) => new { candidate, index }).Where(row => row.candidate.P25Frames).Select(row => row.index),
+                candidates.Select((candidate, index) => new { candidate, index }).Where(row => IsEligibleForNativeTrProof(row.candidate)).Select(row => row.index),
                 voiceCandidateLimit,
                 preferMetricsPassed: runStandaloneMetrics);
             voiceCandidateLimit = Math.Max(voiceCandidateLimit, voiceIndexes.Count);
@@ -2002,7 +2774,7 @@ public sealed class RfSurveyService
             ? $"Validated {monitorableSites.Count}/{siteReadiness.Count} selected site(s): {string.Join("; ", siteReadiness.Select(site => site.Monitorable && site.BestControlChannelHz.HasValue ? $"{site.Label} {FormatHz(site.BestControlChannelHz.Value)} passed" : $"{site.Label} not proven"))}."
             : best == null
             ? "RF validation sweep produced no ranked candidates."
-            : $"Best candidate: source {best.SourceIndex}, CC {FormatHz(best.ControlChannelHz)}, gain {best.Gain}, error {best.ErrorHz} Hz, RF SNR {best.SnrDb:F1} dB, P25 {best.P25Status}, TR metrics {(string.IsNullOrWhiteSpace(best.MetricsStatus) ? "not run" : best.MetricsStatus)}, voice {(string.IsNullOrWhiteSpace(best.VoiceStatus) ? "not run" : best.VoiceStatus)}.";
+            : $"Best candidate: source {best.SourceIndex}, control channel {FormatHz(best.ControlChannelHz)}, gain {best.Gain}, frequency correction {best.ErrorHz:+0;-0;0} Hz, RF SNR {best.SnrDb:F1} dB, P25 {best.P25Status}, Trunk Recorder metrics {(string.IsNullOrWhiteSpace(best.MetricsStatus) ? "not run" : best.MetricsStatus)}, voice {(string.IsNullOrWhiteSpace(best.VoiceStatus) ? "not run" : best.VoiceStatus)}.";
         var technicalBlocker = BuildRfValidationTechnicalBlocker(candidates);
         var blocker = pass ? "" :
             !string.IsNullOrWhiteSpace(technicalBlocker) ? technicalBlocker :
@@ -2024,7 +2796,7 @@ public sealed class RfSurveyService
             appliedCandidateToLiveTr = false,
             appliedCandidate = (object?)null,
             persistenceIssue = "",
-            parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, p25CandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets },
+            parameters = new { rfDuration, p25Duration, metricsDuration, voiceDuration, rfCandidateLimit, p25CandidateLimit, metricsCandidateLimit, voiceCandidateLimit, errorDiscovery, errorOffsets, p25Demods },
             liveCandidateId,
             p25ProbedCandidateIds,
             voiceTestedCandidateIds = candidates
@@ -2038,7 +2810,7 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(artifactPath, $"rf-validation-sweep-{DateTime.UtcNow:yyyyMMddHHmmss}.json", evidence, ct);
         return new ExperimentOutcome(
             status,
-            "A usable RF path should rank one or more control-channel/source/gain/error candidates with RF margin, P25 frame evidence, and live TR decode metrics.",
+            "A usable RF path should rank one or more control-channel, source, gain, and frequency-correction candidates with RF margin, P25 frame evidence, and live Trunk Recorder decode metrics.",
             "Known control channels, selected SDR source, P25 probe command, SDR tools, and trunk-recorder service control.",
             summary,
             blocker,
@@ -2063,7 +2835,7 @@ public sealed class RfSurveyService
                     ? p25Only
                         ? new[] { "Rerun RF Sweep.", "Run final Call Quality verification only after TR metrics pass." }
                         : new[] { "Open Config Draft.", "Use the site-readiness rows when assigning SDR source windows." }
-                    : new[] { "Review ranked candidate TR scan clues.", "Try a narrower gain/error set around the strongest P25 candidate.", "Verify antenna aim and selected control channels.", "Use more SDR bandwidth or a different source center if no-source grants dominate." }
+                    : new[] { "Review ranked candidate Trunk Recorder scan clues.", "Try a narrower frequency-correction and gain set around the strongest P25 candidate.", "Verify antenna aim and selected control channels.", "Use more SDR bandwidth or a different source center if no-source grants dominate." }
             });
     }
 
@@ -2122,6 +2894,158 @@ public sealed class RfSurveyService
         return profileControlChannels.Where(hz => hz > 0).Take(1).ToList();
     }
 
+    private static IReadOnlyList<RfPowerSourceMeasurement> ReadPowerScanSourceMeasurements(JsonElement? parameters)
+    {
+        if (parameters is not { ValueKind: JsonValueKind.Object } root ||
+            !root.TryGetProperty("sourceMeasurements", out var values) ||
+            values.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var measurements = new List<RfPowerSourceMeasurement>();
+        foreach (var row in values.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object ||
+                !row.TryGetProperty("sourceIndex", out var sourceIndexElement) ||
+                !TryReadInt(sourceIndexElement, out var sourceIndex) || sourceIndex < 0)
+                continue;
+            var controlChannelHz = JsonLong(row, "controlChannelHz");
+            if (controlChannelHz <= 0)
+                continue;
+            var sampleRateHz = row.TryGetProperty("sampleRateHz", out var sampleRateElement) &&
+                               TryReadInt(sampleRateElement, out var parsedSampleRate) && parsedSampleRate > 0
+                ? parsedSampleRate
+                : (int?)null;
+            var measuredSignalOffsetHz = row.TryGetProperty("measuredSignalOffsetHz", out var measuredOffsetElement) && TryReadInt(measuredOffsetElement, out var parsedMeasuredOffset)
+                ? parsedMeasuredOffset
+                : row.TryGetProperty("errorHz", out var errorElement) && TryReadInt(errorElement, out var parsedLegacyOffset)
+                    ? parsedLegacyOffset
+                    : (int?)null;
+            var errorHz = row.TryGetProperty("frequencyCorrectionHz", out var correctionElement) && TryReadInt(correctionElement, out var parsedError)
+                ? parsedError
+                : (int?)null;
+            measurements.Add(new RfPowerSourceMeasurement(
+                sourceIndex,
+                JsonString(row, "sourceSerial").Trim(),
+                controlChannelHz,
+                JsonString(row, "gain").Trim(),
+                sampleRateHz,
+                measuredSignalOffsetHz,
+                errorHz,
+                JsonNullableDouble(row, "snrDb"),
+                JsonNullableDouble(row, "confidence")));
+        }
+
+        return measurements
+            .GroupBy(value => new { value.SourceIndex, Serial = value.SourceSerial.ToUpperInvariant(), value.ControlChannelHz })
+            .Select(group => group.Last())
+            .OrderBy(value => value.SourceIndex)
+            .ThenBy(value => value.ControlChannelHz)
+            .ToList();
+    }
+
+    private static RfPowerMeasurementPlan ReconcilePowerScanSourceMeasurements(
+        RfSurveyProfileDto profile,
+        IReadOnlyList<RfPowerSourceMeasurement> measurements)
+    {
+        if (measurements.Count == 0)
+            return new RfPowerMeasurementPlan([], [], []);
+
+        const double minimumCalibrationSnrDb = 10;
+        const double minimumCalibrationConfidence = 0.8;
+        const double maximumObservationSpreadPpm = 1.5;
+        const double maximumSavedCorrectionDisagreementPpm = 2.5;
+        var resolved = new List<RfPowerSourceMeasurement>();
+        var corrections = new List<RfPowerSourceCorrection>();
+        var issues = new List<string>();
+
+        foreach (var group in measurements.GroupBy(measurement => measurement.SourceIndex).OrderBy(group => group.Key))
+        {
+            var source = profile.Sources.FirstOrDefault(candidate => candidate.Index == group.Key);
+            if (source == null)
+                continue;
+            var rows = group.OrderBy(row => row.ControlChannelHz).ToList();
+            var referenceHz = source.CenterHz > 0 ? source.CenterHz : rows[0].ControlChannelHz;
+            var savedPpm = referenceHz > 0 ? source.ErrorHz * 1_000_000d / referenceHz : 0;
+            var observations = rows
+                .Where(row => row.MeasuredSignalOffsetHz.HasValue && row.ControlChannelHz > 0)
+                .Select(row => new RfCorrectionObservation(
+                    row.ControlChannelHz,
+                    row.MeasuredSignalOffsetHz!.Value,
+                    row.MeasuredSignalOffsetHz.Value * 1_000_000d / row.ControlChannelHz,
+                    row.SnrDb ?? 0,
+                    row.Confidence ?? 0))
+                .ToList();
+            var reliable = observations
+                .Where(row => row.SnrDb >= minimumCalibrationSnrDb && row.Confidence >= minimumCalibrationConfidence)
+                .OrderBy(row => row.CorrectionPpm)
+                .ToList();
+            var correctionPpm = savedPpm;
+            var basis = "saved source correction; Waterfall observations were below the calibration-confidence threshold";
+
+            if (reliable.Count > 0)
+            {
+                var spreadPpm = reliable[^1].CorrectionPpm - reliable[0].CorrectionPpm;
+                if (spreadPpm > maximumObservationSpreadPpm)
+                {
+                    issues.Add($"Source {source.Index} has reliable Waterfall offsets spanning {spreadPpm:F2} PPM; one SDR crystal cannot use conflicting corrections.");
+                    continue;
+                }
+                var observedCorrectionPpm = WeightedMedianCorrectionPpm(reliable);
+                var savedDifference = Math.Abs(observedCorrectionPpm - savedPpm);
+                if (source.ErrorHz != 0 && savedDifference > maximumSavedCorrectionDisagreementPpm)
+                {
+                    issues.Add($"Source {source.Index} Waterfall correction {observedCorrectionPpm:+0.00;-0.00;0.00} PPM conflicts with its saved correction {savedPpm:+0.00;-0.00;0.00} PPM.");
+                    continue;
+                }
+                if (source.ErrorHz == 0)
+                {
+                    correctionPpm = observedCorrectionPpm;
+                    basis = reliable.Count == 1
+                        ? "one strong Waterfall observation; no saved source correction"
+                        : $"{reliable.Count} agreeing strong Waterfall observations; no saved source correction";
+                }
+                else
+                {
+                    basis = $"saved source correction; {reliable.Count} strong Waterfall observation(s) retained as signal-offset evidence";
+                }
+            }
+
+            foreach (var row in rows)
+            {
+                var correctionHz = source.ErrorHz != 0
+                    ? source.ErrorHz
+                    : (int)Math.Round(correctionPpm * row.ControlChannelHz / 1_000_000d, MidpointRounding.AwayFromZero);
+                resolved.Add(row with { ErrorHz = correctionHz });
+            }
+            corrections.Add(new RfPowerSourceCorrection(
+                source.Index,
+                FirstNonEmpty(source.Serial, ExtractAirspySerial(source.Device), ExtractRtlSerial(source.Device)),
+                correctionPpm,
+                (int)Math.Round(correctionPpm * referenceHz / 1_000_000d, MidpointRounding.AwayFromZero),
+                basis,
+                observations));
+        }
+
+        return new RfPowerMeasurementPlan(resolved, corrections, issues);
+    }
+
+    private static double WeightedMedianCorrectionPpm(IReadOnlyList<RfCorrectionObservation> observations)
+    {
+        var weighted = observations
+            .Select(row => new { row.CorrectionPpm, Weight = Math.Max(0.1, row.Confidence) * Math.Max(1, row.SnrDb) })
+            .OrderBy(row => row.CorrectionPpm)
+            .ToList();
+        var midpoint = weighted.Sum(row => row.Weight) / 2;
+        var total = 0d;
+        foreach (var row in weighted)
+        {
+            total += row.Weight;
+            if (total >= midpoint)
+                return row.CorrectionPpm;
+        }
+        return weighted[^1].CorrectionPpm;
+    }
+
     private static string ReadStringParameter(JsonElement? parameters, string name)
     {
         if (parameters is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(name, out var element))
@@ -2129,6 +3053,61 @@ public sealed class RfSurveyService
         return element.ValueKind == JsonValueKind.String
             ? element.GetString()?.Trim() ?? string.Empty
             : string.Empty;
+    }
+
+    private static IReadOnlyList<string> ReadStringSequenceParameter(JsonElement? parameters, string name, IReadOnlyList<string> fallback, int maxCount)
+    {
+        if (parameters is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty(name, out var element))
+            return fallback.Distinct(StringComparer.OrdinalIgnoreCase).Take(maxCount).ToList();
+        var values = new List<string>();
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            values.AddRange(element.EnumerateArray().Select(JsonElementText));
+        }
+        else if (element.ValueKind == JsonValueKind.String)
+        {
+            values.AddRange((element.GetString() ?? string.Empty)
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+        }
+        else
+        {
+            values.Add(JsonElementText(element));
+        }
+
+        var normalized = values
+            .Select(value => value.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(maxCount)
+            .ToList();
+        return normalized.Count == 0
+            ? fallback.Distinct(StringComparer.OrdinalIgnoreCase).Take(maxCount).ToList()
+            : normalized;
+    }
+
+    private static IReadOnlyList<string> ReadP25DemodSequence(JsonElement? parameters)
+    {
+        var requested = ReadStringSequenceParameter(parameters, "p25Demods", ["fsk4", "cqpsk"], 2);
+        var demods = requested
+            .Select(NormalizeP25Demod)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return demods.Count == 0 ? ["fsk4", "cqpsk"] : demods;
+    }
+
+    private static JsonElement BuildP25DemodParameters(string demod) =>
+        JsonSerializer.SerializeToElement(new { p25Demod = NormalizeP25Demod(demod) }, EngineConfig.JsonOptions());
+
+    private static string NormalizeP25Demod(string? demod)
+    {
+        var normalized = (demod ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "fsk4" => "fsk4",
+            "cqpsk" or "qpsk" => "cqpsk",
+            _ => string.Empty
+        };
     }
 
     private static IReadOnlyList<string> ReadPowerScanGainSequence(JsonElement? parameters)
@@ -2172,7 +3151,7 @@ public sealed class RfSurveyService
                 ? new[] { gainOverride }
                 : new[] { source.Gain };
 
-        if (!string.Equals(source.SdrType, "Airspy", StringComparison.OrdinalIgnoreCase))
+        if (!IsAirspySource(source))
             return sequence;
 
         var valid = sequence
@@ -2197,7 +3176,7 @@ public sealed class RfSurveyService
         if (!root.ContainsKey("scanAllControlChannels"))
             root["scanAllControlChannels"] = true;
         if (!root.ContainsKey("gainSequence"))
-            root["gainSequence"] = new JsonArray("0", "8", "14", "20", "21", "28");
+            root["gainSequence"] = new JsonArray("0", "8", "14", "20", "21");
         return JsonSerializer.SerializeToElement(root, EngineConfig.JsonOptions());
     }
 
@@ -2208,6 +3187,15 @@ public sealed class RfSurveyService
             TryReadInt(element, out var value))
             return Math.Clamp(value, min, max);
         return Math.Clamp(fallback, min, max);
+    }
+
+    private static int? ReadNullableIntParameter(JsonElement? parameters, string name)
+    {
+        if (parameters is { ValueKind: JsonValueKind.Object } root &&
+            root.TryGetProperty(name, out var element) &&
+            TryReadInt(element, out var value))
+            return value;
+        return null;
     }
 
     private static bool ReadBoolParameter(JsonElement? parameters, string name, bool fallback)
@@ -2299,6 +3287,7 @@ public sealed class RfSurveyService
                 Device = JsonString(row, "device"),
                 ControlChannelHz = controlChannel,
                 Gain = gain,
+                SampleRateHz = JsonInt(row, "sampleRate"),
                 ErrorHz = JsonInt(row, "errorHz"),
                 RfStatus = JsonString(row, "status"),
                 RfIssue = JsonString(row, "issue"),
@@ -2317,6 +3306,17 @@ public sealed class RfSurveyService
     {
         var selected = new List<RfValidationCandidate>();
         var selectedSeeds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var target in PreferredP25ProbeSeedTargets(profile))
+        {
+            var preferred = OrderRfValidationCandidates(allPowerCandidates
+                    .Where(candidate => candidate.SourceIndex == target.SourceIndex &&
+                                        candidate.ControlChannelHz == target.ControlChannelHz &&
+                                        GainMatches(target.Gain, candidate.Gain)))
+                .FirstOrDefault();
+            if (preferred != null)
+                AddPowerSeed(preferred);
+        }
 
         foreach (var channel in OrderedValidationControlChannels(profile))
         {
@@ -2366,6 +3366,20 @@ public sealed class RfSurveyService
         var selected = new List<RfValidationSeedKey>();
         var selectedSet = new HashSet<RfValidationSeedKey>();
 
+        foreach (var target in PreferredP25ProbeSeedTargets(profile))
+        {
+            var preferred = seedRows
+                .Where(row => row.Key.SourceIndex == target.SourceIndex &&
+                              row.Key.ControlChannelHz == target.ControlChannelHz &&
+                              GainMatches(target.Gain, row.Key.Gain))
+                .OrderBy(row => row.Best.Overload)
+                .ThenByDescending(row => row.Best.SnrDb ?? double.NegativeInfinity)
+                .ThenBy(row => Math.Abs(row.Best.PeakOffsetHz ?? 0))
+                .FirstOrDefault();
+            if (preferred != null && selectedSet.Add(preferred.Key))
+                selected.Add(preferred.Key);
+        }
+
         foreach (var channel in OrderedValidationControlChannels(profile))
         {
             var best = seedRows
@@ -2404,6 +3418,44 @@ public sealed class RfSurveyService
         }
 
         return selected;
+    }
+
+    private static IEnumerable<(int SourceIndex, long ControlChannelHz, string Gain)> PreferredP25ProbeSeedTargets(RfSurveyProfileDto profile)
+    {
+        var selectedSourceIndexes = profile.SelectedSourceIndexes.Count > 0
+            ? profile.SelectedSourceIndexes.ToHashSet()
+            : profile.Sources.Select(source => source.Index).ToHashSet();
+        var channels = profile.Systems
+            .Select(system => system.ControlChannelsHz.FirstOrDefault())
+            .Concat(profile.ControlChannelsHz.Take(1))
+            .Where(channel => channel > 0)
+            .Distinct()
+            .ToList();
+        foreach (var source in profile.Sources.Where(source => selectedSourceIndexes.Count == 0 || selectedSourceIndexes.Contains(source.Index)))
+        {
+            foreach (var gain in PreferredP25ProbeGains(source))
+            {
+                foreach (var channel in channels)
+                    yield return (source.Index, channel, gain);
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> PreferredP25ProbeGains(RfSurveySourceDto source)
+    {
+        var gains = new List<string>();
+        Add(source.Gain);
+        if (IsAirspySource(source))
+            Add("20");
+        return gains;
+
+        void Add(string? gain)
+        {
+            var normalized = NormalizeP25ProbeGain(gain);
+            if (!string.IsNullOrWhiteSpace(normalized) &&
+                !gains.Any(existing => GainMatches(existing, normalized)))
+                gains.Add(normalized);
+        }
     }
 
     private static string PowerSeedKey(RfValidationCandidate candidate) =>
@@ -2460,7 +3512,7 @@ public sealed class RfSurveyService
         return channels.Where(channel => channel > 0).Distinct().ToList();
     }
 
-    private static RfSurveyProfileDto ProfileWithCandidateSource(RfSurveyProfileDto profile, int sourceIndex, string gain, int errorHz, long? controlChannelHz = null)
+    private static RfSurveyProfileDto ProfileWithCandidateSource(RfSurveyProfileDto profile, int sourceIndex, string gain, int errorHz, int? sampleRateHz = null, long? controlChannelHz = null)
     {
         var scoped = profile;
         var candidateSystem = controlChannelHz.HasValue ? SystemForControlChannel(profile, controlChannelHz.Value) : null;
@@ -2470,14 +3522,18 @@ public sealed class RfSurveyService
             {
                 SystemShortName = candidateSystem.ShortName,
                 SystemShortNames = [candidateSystem.ShortName],
-                ControlChannelsHz = candidateSystem.ControlChannelsHz,
+                ControlChannelsHz = controlChannelHz.HasValue && controlChannelHz.Value > 0
+                    ? [controlChannelHz.Value]
+                    : candidateSystem.ControlChannelsHz,
                 VoiceFrequenciesHz = candidateSystem.VoiceFrequenciesHz
             };
         }
 
-        var candidateControlChannels = candidateSystem?.ControlChannelsHz is { Count: > 0 }
-            ? candidateSystem.ControlChannelsHz
-            : controlChannelHz.HasValue && controlChannelHz.Value > 0 ? [controlChannelHz.Value] : scoped.ControlChannelsHz;
+        var candidateControlChannels = controlChannelHz.HasValue && controlChannelHz.Value > 0
+            ? [controlChannelHz.Value]
+            : candidateSystem?.ControlChannelsHz is { Count: > 0 }
+                ? candidateSystem.ControlChannelsHz
+                : scoped.ControlChannelsHz;
 
         return scoped with
         {
@@ -2486,16 +3542,59 @@ public sealed class RfSurveyService
                 {
                     if (source.Index != sourceIndex)
                         return source;
-                    var centerHz = CenterForCandidateControlChannels(candidateControlChannels, source.SampleRate);
+                    var candidateSampleRate = sampleRateHz is > 0 ? sampleRateHz.Value : source.SampleRate;
+                    var centerHz = CenterForCandidateControlChannels(candidateControlChannels, candidateSampleRate);
                     return source with
                     {
                         CenterHz = centerHz > 0 ? centerHz : source.CenterHz,
+                        SampleRate = candidateSampleRate,
                         Gain = gain,
                         ErrorHz = errorHz
                     };
                 })
                 .ToList()
         };
+    }
+
+    private static RfSurveyProfileDto ProfileWithP25ProbeOverrides(RfSurveyProfileDto profile, RfSurveyRunExperimentRequest request)
+    {
+        if (!request.SourceIndex.HasValue || request.Parameters is not { ValueKind: JsonValueKind.Object })
+            return profile;
+
+        var overrides = ReadP25ProbeOverrides(request);
+        if (string.IsNullOrWhiteSpace(overrides.Gain) &&
+            !overrides.ErrorHz.HasValue &&
+            !overrides.SampleRateHz.HasValue)
+            return profile;
+
+        return profile with
+        {
+            Sources = profile.Sources
+                .Select(source =>
+                {
+                    if (source.Index != request.SourceIndex.Value)
+                        return source;
+                    return source with
+                    {
+                        Gain = string.IsNullOrWhiteSpace(overrides.Gain) ? source.Gain : overrides.Gain,
+                        ErrorHz = overrides.ErrorHz ?? source.ErrorHz,
+                        SampleRate = overrides.SampleRateHz ?? source.SampleRate
+                    };
+                })
+                .ToList()
+        };
+    }
+
+    private static P25ProbeOverrides ReadP25ProbeOverrides(RfSurveyRunExperimentRequest request)
+    {
+        var gain = ReadStringParameter(request.Parameters, "probeGain");
+        if (string.IsNullOrWhiteSpace(gain))
+            gain = ReadStringParameter(request.Parameters, "gain");
+
+        return new P25ProbeOverrides(
+            gain,
+            ReadNullableIntParameter(request.Parameters, "probeErrorHz"),
+            ReadNullableIntParameter(request.Parameters, "probeSampleRateHz"));
     }
 
     private static RfSurveySystemDto? SystemForControlChannel(RfSurveyProfileDto profile, long controlChannelHz) =>
@@ -2527,6 +3626,13 @@ public sealed class RfSurveyService
             if (voicePassed != null)
                 return voicePassed;
         }
+
+        var nativeDecodePassed = candidates
+            .Where(candidate => string.Equals(candidate.MetricsStatus, "passed", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(candidate => candidate.Score)
+            .FirstOrDefault();
+        if (nativeDecodePassed != null)
+            return nativeDecodePassed;
 
         var p25Passed = candidates
             .Where(candidate => candidate.P25Frames)
@@ -2649,8 +3755,12 @@ public sealed class RfSurveyService
 
     private static bool IsMonitorableRfCandidate(RfValidationCandidate candidate) =>
         (string.Equals(candidate.RfStatus, "measured", StringComparison.OrdinalIgnoreCase) || candidate.SnrDb.HasValue) &&
-        (candidate.P25Frames || string.Equals(candidate.P25Status, "passed", StringComparison.OrdinalIgnoreCase)) &&
         string.Equals(candidate.MetricsStatus, "passed", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsEligibleForNativeTrProof(RfValidationCandidate candidate) =>
+        candidate.P25Frames ||
+        string.Equals(candidate.P25Status, "passed", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(candidate.P25Status, "failed", StringComparison.OrdinalIgnoreCase);
 
     private static bool CandidateMatchesLiveSource(RfSurveyProfileDto profile, RfValidationCandidate candidate, long? controlChannelHz = null)
     {
@@ -2826,7 +3936,7 @@ public sealed class RfSurveyService
                 return new ExperimentOutcome(
                     "failed",
                     "CC quality is measured from live trunk-recorder decode summaries.",
-                    "Radio Setup can start trunk-recorder before measuring CC quality.",
+                    "Setup can start trunk-recorder before measuring CC quality.",
                     "trunk-recorder did not become active after the start request.",
                     "trunk-recorder did not become active after the start request.",
                     new { trState, trStartOutput },
@@ -2891,7 +4001,7 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(session.ArtifactPath, $"cc-quality-{DateTime.UtcNow:yyyyMMddHHmmss}.json", evidence, ct);
         return new ExperimentOutcome(
             status,
-            "Known control channels should produce stable periodic TR decode summaries before error/gain sweeps are considered meaningful.",
+            "Known control channels should produce stable periodic Trunk Recorder decode summaries before frequency-correction and gain sweeps are considered meaningful.",
             "trunk-recorder running; selected site has setup/RR control-channel ground truth.",
             strongEnough
                 ? $"CC quality passed. {FormatHz(evaluated!.FrequencyHz)} averaged {evaluated.AvgDecodeRate:F1} msg/sec with {evaluated.ZeroDecodePct:F1}% zero-decode across {evaluated.Samples} sample(s)."
@@ -2902,12 +4012,12 @@ public sealed class RfSurveyService
             {
                 recommendation = strongEnough
                     ? "Proceed to SDR inventory/P25 probe or use this CC as the primary candidate for follow-up sweeps."
-                    : "Do not rank error/gain sweeps as conclusive until a known control channel has stable decode samples.",
+                    : "Do not rank frequency-correction and gain sweeps as conclusive until a known control channel has stable decode samples.",
                 selectedControlChannelHz = selectedCc,
                 evaluatedRow = evaluated,
                 strongest = knownRows.OrderByDescending(row => row.Score).FirstOrDefault(),
                 followUps = strongEnough
-                    ? new[] { "Run P25 probe against the strongest CC.", "Run error/gain sweep only after CC samples are stable." }
+                    ? new[] { "Run P25 probe against the strongest control channel.", "Run frequency-correction and gain refinement only after control-channel samples are stable." }
                     : new[] { "Extend the CC quality window.", "Probe each alternate CC.", "Check antenna aim/RF path and source center coverage.", "Review TR config for off-center source mapping." }
             });
     }
@@ -3032,6 +4142,8 @@ public sealed class RfSurveyService
             new(candidate.SourceIndex, candidate.ControlChannelHz, candidate.Gain ?? string.Empty);
     }
 
+    private sealed record P25ProbeOverrides(string Gain, int? ErrorHz, int? SampleRateHz);
+
     private sealed record RfValidationCandidate
     {
         public string Id { get; init; } = string.Empty;
@@ -3043,6 +4155,7 @@ public sealed class RfSurveyService
         public string SiteLabel { get; init; } = string.Empty;
         public long ControlChannelHz { get; init; }
         public string Gain { get; init; } = string.Empty;
+        public int SampleRateHz { get; init; }
         public int ErrorHz { get; init; }
         public int ErrorOffsetHz { get; init; }
         public string RfStatus { get; init; } = string.Empty;
@@ -3056,9 +4169,12 @@ public sealed class RfSurveyService
         public string P25Status { get; init; } = string.Empty;
         public bool P25Frames { get; init; }
         public string P25Summary { get; init; } = string.Empty;
+        public string P25Demod { get; init; } = string.Empty;
+        public string P25EvidenceMarker { get; init; } = string.Empty;
         public string P25Command { get; init; } = string.Empty;
         public int? P25ExitCode { get; init; }
         public string P25Output { get; init; } = string.Empty;
+        public IReadOnlyList<RfValidationP25Attempt> P25Attempts { get; init; } = [];
         public string MetricsStatus { get; init; } = string.Empty;
         public string MetricsSummary { get; init; } = string.Empty;
         public ControlChannelQualityRow? MetricsRow { get; init; }
@@ -3069,6 +4185,14 @@ public sealed class RfSurveyService
         public CallQualityTrWindowAnalysis? VoiceTrial { get; init; }
         public double Score { get; init; }
     }
+
+    private sealed record RfValidationP25Attempt(
+        string Demod,
+        string Status,
+        string Command,
+        int? ExitCode,
+        string Output,
+        string Summary);
 
     private static string BuildRfValidationTechnicalBlocker(IReadOnlyList<RfValidationCandidate> candidates)
     {
@@ -3131,6 +4255,8 @@ public sealed class RfSurveyService
     {
         public static VoiceCandidateTrialResult Blocked(string summary) => new("blocked", summary, 0, 0, null, "blocked", summary, null);
     }
+
+    private sealed record TrControlChannelReadiness(bool Ready, string Summary, TimeSpan StartupElapsed);
 
     private sealed record CandidateTrMetricsResult(
         string Status,
@@ -3221,6 +4347,42 @@ public sealed class RfSurveyService
         double? StrongestPeakDb,
         double? StrongestPeakOffsetHz);
 
+    private sealed record RfPowerSourceMeasurement(
+        int SourceIndex,
+        string SourceSerial,
+        long ControlChannelHz,
+        string Gain,
+        int? SampleRateHz,
+        int? MeasuredSignalOffsetHz,
+        int? ErrorHz,
+        double? SnrDb,
+        double? Confidence);
+
+    private sealed record RfCorrectionObservation(
+        long ControlChannelHz,
+        int MeasuredSignalOffsetHz,
+        double CorrectionPpm,
+        double SnrDb,
+        double Confidence);
+
+    private sealed record RfPowerSourceCorrection(
+        int SourceIndex,
+        string SourceSerial,
+        double CorrectionPpm,
+        int CorrectionAtReferenceHz,
+        string Basis,
+        IReadOnlyList<RfCorrectionObservation> Observations);
+
+    private sealed record RfPowerMeasurementPlan(
+        IReadOnlyList<RfPowerSourceMeasurement> Measurements,
+        IReadOnlyList<RfPowerSourceCorrection> Corrections,
+        IReadOnlyList<string> Issues);
+
+    private sealed record RfPowerScanTarget(
+        long ControlChannelHz,
+        RfSurveySourceDto Source,
+        RfPowerSourceMeasurement? Measurement);
+
     private static string SummarizeRfPowerBlocker(RfPowerScanRow row)
     {
         var output = TrimOutput(row.Output ?? string.Empty, 220).Replace('\n', ' ').Replace('\r', ' ').Trim();
@@ -3249,19 +4411,252 @@ public sealed class RfSurveyService
         double? StrongestPeakDb,
         double? StrongestPeakOffsetHz);
 
-    private sealed record RtlDeviceSelector(string Argument, string Issue);
+    private void DeleteRawRfCapture(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return;
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to delete temporary RF capture {Path}", path);
+        }
+    }
+
+    private sealed record RtlDeviceSelector(string Argument, string Issue, string DeviceArgument = "");
+
+    private sealed class WaterfallRuntime
+    {
+        private const int MaxFrameHistory = WaterfallHistoryFrameLimit;
+        private readonly object _sync = new();
+        private readonly Queue<RfSurveyWaterfallFrameDto> _frames = new();
+        private DateTime _lastConsumedAtUtc = DateTime.UtcNow;
+        private int _sequence;
+
+        public WaterfallRuntime(
+            string surveyId,
+            RfSurveyProfileDto profile,
+            RfSurveySourceDto source,
+            long centerHz,
+            int sampleRate,
+            int binCount,
+            int captureMilliseconds,
+            int refreshMilliseconds,
+            bool trWasActive,
+            string trStopOutput)
+        {
+            SurveyId = surveyId;
+            Profile = profile;
+            Source = source;
+            CenterHz = centerHz;
+            SampleRate = sampleRate;
+            BinCount = binCount;
+            CaptureMilliseconds = captureMilliseconds;
+            RefreshMilliseconds = refreshMilliseconds;
+            TrWasActive = trWasActive;
+            TrStopOutput = trStopOutput;
+        }
+
+        public string SurveyId { get; }
+        public RfSurveyProfileDto Profile { get; }
+        public RfSurveySourceDto Source { get; }
+        public long CenterHz { get; }
+        public int SampleRate { get; }
+        public int BinCount { get; }
+        public int CaptureMilliseconds { get; }
+        public int RefreshMilliseconds { get; }
+        public bool TrWasActive { get; }
+        public string TrStopOutput { get; }
+        public string TrRestartOutput { get; set; } = "";
+        public string TrRestartError { get; set; } = "";
+        public DateTime StartedAtUtc { get; } = DateTime.UtcNow;
+        public DateTime? UpdatedAtUtc { get; private set; }
+        public CancellationTokenSource Cancellation { get; } = new();
+        public Task? Task { get; set; }
+        public string Status { get; private set; } = "starting";
+        public string Message { get; private set; } = "Starting waterfall.";
+        public RfSurveyWaterfallFrameDto? Frame { get; private set; }
+
+        public int NextSequence() => Interlocked.Increment(ref _sequence);
+
+        public void MarkConsumed()
+        {
+            lock (_sync)
+            {
+                _lastConsumedAtUtc = DateTime.UtcNow;
+            }
+        }
+
+        public bool IsUnconsumedFor(TimeSpan interval)
+        {
+            lock (_sync)
+            {
+                return DateTime.UtcNow - _lastConsumedAtUtc >= interval;
+            }
+        }
+
+        public void SetFrame(RfSurveyWaterfallFrameDto frame)
+        {
+            lock (_sync)
+            {
+                Frame = frame;
+                if (frame.PowersDb.Count > 0)
+                {
+                    _frames.Enqueue(frame);
+                    while (_frames.Count > MaxFrameHistory)
+                        _frames.Dequeue();
+                }
+                UpdatedAtUtc = frame.CapturedAtUtc;
+                var hasPowers = frame.PowersDb.Count > 0;
+                Status = hasPowers ? "running" : "failed";
+                Message = hasPowers ? "Waterfall running." : FirstNonEmpty(frame.Output, "Waterfall capture failed.");
+            }
+        }
+
+        public void SetMessage(string status, string message)
+        {
+            lock (_sync)
+            {
+                Status = status;
+                Message = message;
+                UpdatedAtUtc = DateTime.UtcNow;
+            }
+        }
+
+        public RfSurveyWaterfallStatusDto ToDto(bool active, bool includeHistory = false)
+        {
+            lock (_sync)
+            {
+                var frames = includeHistory ? _frames.ToArray() : null;
+                return new RfSurveyWaterfallStatusDto(
+                    active,
+                    active ? Status : "stopped",
+                    active ? Message : string.IsNullOrWhiteSpace(TrRestartError) ? "Waterfall stopped." : $"Waterfall stopped; TR restart failed: {TrRestartError}",
+                    Source.Index,
+                    Source.SdrType,
+                    CenterHz,
+                    SampleRate,
+                    Source.Gain,
+                    BinCount,
+                    StartedAtUtc,
+                    UpdatedAtUtc,
+                    Frame,
+                    TrWasActive,
+                    TrStopOutput,
+                    TrRestartOutput,
+                    TrRestartError,
+                    frames);
+            }
+        }
+    }
+
+    private sealed class WaterfallByteRing
+    {
+        private readonly object _sync = new();
+        private readonly byte[] _buffer;
+        private int _writeIndex;
+        private int _count;
+
+        public WaterfallByteRing(int capacity)
+        {
+            _buffer = new byte[Math.Max(4096, capacity)];
+        }
+
+        public void Append(byte[] bytes, int count)
+        {
+            if (count <= 0)
+                return;
+            lock (_sync)
+            {
+                if (count >= _buffer.Length)
+                {
+                    Buffer.BlockCopy(bytes, count - _buffer.Length, _buffer, 0, _buffer.Length);
+                    _writeIndex = 0;
+                    _count = _buffer.Length;
+                    return;
+                }
+
+                var first = Math.Min(count, _buffer.Length - _writeIndex);
+                Buffer.BlockCopy(bytes, 0, _buffer, _writeIndex, first);
+                var remaining = count - first;
+                if (remaining > 0)
+                    Buffer.BlockCopy(bytes, first, _buffer, 0, remaining);
+                _writeIndex = (_writeIndex + count) % _buffer.Length;
+                _count = Math.Min(_buffer.Length, _count + count);
+            }
+        }
+
+        public byte[] SnapshotLatest(int requestedBytes)
+        {
+            lock (_sync)
+            {
+                var length = Math.Min(Math.Max(0, requestedBytes), _count);
+                if (length == 0)
+                    return [];
+                length -= length % 4;
+                if (length <= 0)
+                    return [];
+                var result = new byte[length];
+                var start = (_writeIndex - length + _buffer.Length) % _buffer.Length;
+                var first = Math.Min(length, _buffer.Length - start);
+                Buffer.BlockCopy(_buffer, start, result, 0, first);
+                var remaining = length - first;
+                if (remaining > 0)
+                    Buffer.BlockCopy(_buffer, 0, result, first, remaining);
+                return result;
+            }
+        }
+    }
+
+    private sealed class ProcessOutputTail
+    {
+        private readonly object _sync = new();
+        private readonly int _maxChars;
+        private string _text = "";
+
+        public ProcessOutputTail(int maxChars)
+        {
+            _maxChars = Math.Max(256, maxChars);
+        }
+
+        public string Text
+        {
+            get
+            {
+                lock (_sync)
+                    return _text;
+            }
+        }
+
+        public void Append(char[] chars, int count)
+        {
+            if (count <= 0)
+                return;
+            lock (_sync)
+            {
+                _text += new string(chars, 0, count);
+                if (_text.Length > _maxChars)
+                    _text = _text[^_maxChars..];
+            }
+        }
+    }
 
     private static bool IsRfPeakOffTarget(double? peakOffsetHz) =>
         peakOffsetHz.HasValue && Math.Abs(peakOffsetHz.Value) > 25_000;
 
-    private static string BuildRfPowerScanCommand(RfSurveySourceDto source, long frequencyHz, int sampleRate, int sampleCount, string rawPath, bool isAirspy, string rtlDeviceArg)
+    private static string BuildRfPowerScanCommand(RfSurveySourceDto source, long frequencyHz, int sampleRate, int sampleCount, string rawPath, bool isAirspy, string rtlDeviceArg) =>
+        BuildRfPowerScanCommandWithSerialPinning(source, frequencyHz, sampleRate, sampleCount, rawPath, isAirspy, rtlDeviceArg, pinAirspySerial: true);
+
+    private static string BuildRfPowerScanCommandWithSerialPinning(RfSurveySourceDto source, long frequencyHz, int sampleRate, int sampleCount, string rawPath, bool isAirspy, string rtlDeviceArg, bool pinAirspySerial)
     {
         var output = ShellQuote(rawPath);
         if (isAirspy)
         {
-            var gain = NumericText(source.Gain);
+            var gain = NormalizeAirspyRxGain(true, source.Gain);
             var airspyGainArg = string.IsNullOrWhiteSpace(gain) ? "" : $" -g {gain}";
-            var serial = NormalizeAirspyRxSerial(FirstNonEmpty(source.Serial, ExtractAirspySerial(source.Device)));
+            var serial = pinAirspySerial ? NormalizeAirspyRxSerial(FirstNonEmpty(source.Serial, ExtractAirspySerial(source.Device))) : string.Empty;
             var serialArg = string.IsNullOrWhiteSpace(serial) ? "" : $" -s {ShellQuote(serial)}";
             var frequencyMhz = (frequencyHz / 1_000_000d).ToString("0.######", CultureInfo.InvariantCulture);
             return $"airspy_rx{serialArg} -r {output} -f {frequencyMhz} -a {sampleRate}{airspyGainArg} -n {sampleCount}";
@@ -3272,6 +4667,66 @@ public sealed class RfSurveyService
         var ppm = frequencyHz > 0 ? (int)Math.Round(-source.ErrorHz / (frequencyHz / 1_000_000d), MidpointRounding.AwayFromZero) : 0;
         var ppmArg = ppm == 0 ? "" : $" -p {ppm}";
         return $"rtl_sdr{rtlDeviceArg} -f {frequencyHz} -s {sampleRate}{gainArg}{ppmArg} -n {sampleCount} {output}";
+    }
+
+    private static Process? StartWaterfallStream(RfSurveySourceDto source, long frequencyHz, int sampleRate, bool isAirspy, string rtlDeviceArg, bool pinAirspySerial, string? streamOutputPath = null)
+    {
+        var psi = new ProcessStartInfo(isAirspy ? "airspy_rx" : "rtl_sdr")
+        {
+            RedirectStandardOutput = string.IsNullOrWhiteSpace(streamOutputPath),
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        if (isAirspy)
+        {
+            var gain = NormalizeAirspyRxGain(true, source.Gain);
+            var serial = pinAirspySerial ? NormalizeAirspyRxSerial(FirstNonEmpty(source.Serial, ExtractAirspySerial(source.Device))) : string.Empty;
+            var frequencyMhz = (frequencyHz / 1_000_000d).ToString("0.######", CultureInfo.InvariantCulture);
+            if (!string.IsNullOrWhiteSpace(serial))
+            {
+                psi.ArgumentList.Add("-s");
+                psi.ArgumentList.Add(serial);
+            }
+            psi.ArgumentList.Add("-r");
+            psi.ArgumentList.Add(string.IsNullOrWhiteSpace(streamOutputPath) ? "-" : streamOutputPath);
+            psi.ArgumentList.Add("-f");
+            psi.ArgumentList.Add(frequencyMhz);
+            psi.ArgumentList.Add("-a");
+            psi.ArgumentList.Add(sampleRate.ToString(CultureInfo.InvariantCulture));
+            if (!string.IsNullOrWhiteSpace(gain))
+            {
+                psi.ArgumentList.Add("-g");
+                psi.ArgumentList.Add(gain);
+            }
+        }
+        else
+        {
+            var gainText = NumericText(source.Gain);
+            var ppm = frequencyHz > 0 ? (int)Math.Round(-source.ErrorHz / (frequencyHz / 1_000_000d), MidpointRounding.AwayFromZero) : 0;
+            if (!string.IsNullOrWhiteSpace(rtlDeviceArg))
+            {
+                psi.ArgumentList.Add("-d");
+                psi.ArgumentList.Add(rtlDeviceArg);
+            }
+            psi.ArgumentList.Add("-f");
+            psi.ArgumentList.Add(frequencyHz.ToString(CultureInfo.InvariantCulture));
+            psi.ArgumentList.Add("-s");
+            psi.ArgumentList.Add(sampleRate.ToString(CultureInfo.InvariantCulture));
+            if (!string.IsNullOrWhiteSpace(gainText))
+            {
+                psi.ArgumentList.Add("-g");
+                psi.ArgumentList.Add(gainText);
+            }
+            if (ppm != 0)
+            {
+                psi.ArgumentList.Add("-p");
+                psi.ArgumentList.Add(ppm.ToString(CultureInfo.InvariantCulture));
+            }
+            psi.ArgumentList.Add("-");
+        }
+
+        return Process.Start(psi);
     }
 
     private static int AirspyCaptureSampleRate(int requestedSampleRate)
@@ -3304,6 +4759,38 @@ public sealed class RfSurveyService
         return options;
     }
 
+    private static string NormalizeAirspyRxGain(bool isAirspy, string? gain)
+    {
+        var normalized = NumericText(gain);
+        if (!isAirspy || string.IsNullOrWhiteSpace(normalized))
+            return normalized;
+        if (!double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+            return normalized;
+        return Math.Clamp((int)Math.Round(parsed, MidpointRounding.AwayFromZero), 0, 21).ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static string? NormalizeTrSourceDeviceArgs(RfSurveyProfileDto profile, RfSurveySourceDto? source)
+    {
+        if (!IsAirspySource(source))
+            return source?.Device;
+        if (profile.Sources.Count(IsAirspySource) > 1)
+            return source?.Device;
+        return NormalizeAirspyDeviceSelector(source?.Device, pinSerial: false);
+    }
+
+    private static string NormalizeAirspyDeviceSelector(string? device, bool pinSerial)
+    {
+        var trimmed = (device ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return "airspy";
+        var parts = trimmed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        if (parts.Count == 0 || !parts[0].Contains("airspy", StringComparison.OrdinalIgnoreCase))
+            return trimmed;
+        if (!pinSerial)
+            parts[0] = "airspy";
+        return string.Join(',', parts);
+    }
+
     private static int AirspyRuntimeSampleRate(int requestedSampleRate, IReadOnlyList<int>? supportedSampleRates)
     {
         var rates = (supportedSampleRates is { Count: > 0 } ? supportedSampleRates : [2_500_000, 3_000_000, 6_000_000, 10_000_000])
@@ -3327,9 +4814,9 @@ public sealed class RfSurveyService
         if (string.IsNullOrWhiteSpace(serial))
             return new("", "");
         if (indexesBySerial.TryGetValue(serial, out var index))
-            return new($" -d {index}", "");
+            return new($" -d {index}", "", index.ToString(CultureInfo.InvariantCulture));
         if (!Regex.IsMatch(serial, @"^\d+$"))
-            return new($" -d {ShellQuote(serial)}", "");
+            return new($" -d {ShellQuote(serial)}", "", serial);
         return new("", $"RTL-SDR serial {serial} is numeric and could not be mapped to a host device index from rtl_test output. Numeric serials are ambiguous to rtl_sdr, so the RF scan was not run for source {source.Index}.");
     }
 
@@ -3385,26 +4872,199 @@ public sealed class RfSurveyService
             : string.Empty;
     }
 
-    private static RfPowerAnalysis AnalyzeIqFile(string path, int sampleRate, bool isAirspy)
+    private static RfSurveySourceDto? SelectWaterfallSource(RfSurveyProfileDto profile, RfSurveyWaterfallStartRequest request)
+    {
+        if (request.SourceIndex.HasValue)
+        {
+            var selected = profile.Sources.FirstOrDefault(source => source.Index == request.SourceIndex.Value);
+            if (selected != null)
+                return selected;
+        }
+        if (request.FrequencyHz is > 0)
+            return SelectSourceForFrequency(profile, request.FrequencyHz.Value);
+        var selectedIndexes = profile.SelectedSourceIndexes.Count > 0 ? profile.SelectedSourceIndexes : [];
+        return profile.Sources.FirstOrDefault(source => selectedIndexes.Contains(source.Index)) ?? profile.Sources.FirstOrDefault();
+    }
+
+    private async Task RunWaterfallStreamAsync(WaterfallRuntime runtime, bool isAirspy, RtlDeviceSelector rtlSelector, bool pinAirspySerial)
+    {
+        var bytesPerSample = isAirspy ? 4 : 2;
+        var frameBytes = Math.Max(256, runtime.BinCount) * bytesPerSample;
+        var ring = new WaterfallByteRing(Math.Max(frameBytes * 24, runtime.SampleRate * bytesPerSample));
+        var errorTail = new ProcessOutputTail(4096);
+        string? fifoPath = null;
+        if (isAirspy && !OperatingSystem.IsWindows())
+        {
+            var outputDir = Path.Combine(ArtifactRoot, runtime.SurveyId, "waterfall-live");
+            Directory.CreateDirectory(outputDir);
+            fifoPath = Path.Combine(outputDir, $"waterfall-{Guid.NewGuid():N}.pipe");
+            var fifoResult = await RunCaptureAsync("bash", "-lc " + Quote($"rm -f {ShellQuote(fifoPath)} && mkfifo {ShellQuote(fifoPath)}"), runtime.Cancellation.Token);
+            if (fifoResult.ExitCode != 0)
+            {
+                runtime.SetMessage("failed", $"Unable to create waterfall stream pipe: {TrimOutput(fifoResult.Stdout, 240)}");
+                return;
+            }
+        }
+
+        using var process = StartWaterfallStream(runtime.Source, runtime.CenterHz, runtime.SampleRate, isAirspy, rtlSelector.DeviceArgument, pinAirspySerial, fifoPath);
+        if (process == null)
+        {
+            runtime.SetMessage("failed", "Unable to start waterfall capture process.");
+            return;
+        }
+
+        var readTask = Task.Run(async () =>
+        {
+            var buffer = new byte[64 * 1024];
+            await using var fifoStream = string.IsNullOrWhiteSpace(fifoPath)
+                ? null
+                : new FileStream(fifoPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, buffer.Length, FileOptions.Asynchronous);
+            var stream = fifoStream ?? process.StandardOutput.BaseStream;
+            while (!runtime.Cancellation.IsCancellationRequested)
+            {
+                var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), runtime.Cancellation.Token);
+                if (read <= 0)
+                    break;
+                ring.Append(buffer, read);
+            }
+        }, CancellationToken.None);
+        var errorTask = Task.Run(async () =>
+        {
+            var buffer = new char[1024];
+            while (!runtime.Cancellation.IsCancellationRequested)
+            {
+                var read = await process.StandardError.ReadAsync(buffer.AsMemory(0, buffer.Length), runtime.Cancellation.Token);
+                if (read <= 0)
+                    break;
+                errorTail.Append(buffer, read);
+            }
+        }, CancellationToken.None);
+
+        try
+        {
+            var firstFrameDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (!runtime.Cancellation.IsCancellationRequested)
+            {
+                if (runtime.IsUnconsumedFor(WaterfallConsumeTimeout))
+                {
+                    runtime.SetMessage("stopping", $"Waterfall auto-stopped after {WaterfallConsumeTimeout.TotalMinutes:N0} minutes without UI consumption.");
+                    runtime.Cancellation.Cancel();
+                    return;
+                }
+
+                var snapshot = ring.SnapshotLatest(frameBytes);
+                if (snapshot.Length >= frameBytes)
+                {
+                    var output = TrimOutput(errorTail.Text, 320);
+                    var analysis = AnalyzeWaterfallSamples(runtime.NextSequence(), snapshot, runtime.CenterHz, runtime.SampleRate, runtime.BinCount, isAirspy, output);
+                    runtime.SetFrame(analysis);
+                    firstFrameDeadline = DateTime.UtcNow.AddSeconds(5);
+                    await Task.Delay(TimeSpan.FromMilliseconds(runtime.RefreshMilliseconds), runtime.Cancellation.Token);
+                    continue;
+                }
+
+                if (process.HasExited)
+                {
+                    var output = TrimOutput(errorTail.Text, 420);
+                    runtime.SetMessage("failed", $"Waterfall capture exited {process.ExitCode}. {output}".Trim());
+                    return;
+                }
+                if (DateTime.UtcNow > firstFrameDeadline)
+                {
+                    runtime.SetMessage("failed", "Waterfall capture did not produce IQ samples. Verify that the SDR tool can stream to stdout.");
+                    return;
+                }
+                await Task.Delay(TimeSpan.FromMilliseconds(30), runtime.Cancellation.Token);
+            }
+        }
+        finally
+        {
+            TryKillProcessTree(process);
+            await WaitForProcessExitAfterKillAsync(process);
+            try { await readTask.WaitAsync(TimeSpan.FromSeconds(1)); } catch { }
+            try { await errorTask.WaitAsync(TimeSpan.FromSeconds(1)); } catch { }
+            if (!string.IsNullOrWhiteSpace(fifoPath))
+            {
+                try { File.Delete(fifoPath); } catch { }
+            }
+        }
+    }
+
+    private static int NormalizeWaterfallBinCount(int requested)
+    {
+        var clamped = Math.Clamp(requested, 64, 4096);
+        var size = 64;
+        while (size * 2 <= clamped)
+            size *= 2;
+        return size;
+    }
+
+    private static int HighestPowerOfTwoAtMost(int value)
+    {
+        var size = 1;
+        while (size * 2 <= value)
+            size *= 2;
+        return size;
+    }
+
+    private static void FftInPlace(Complex[] values)
+    {
+        var n = values.Length;
+        for (int i = 1, j = 0; i < n; i++)
+        {
+            var bit = n >> 1;
+            for (; (j & bit) != 0; bit >>= 1)
+                j ^= bit;
+            j ^= bit;
+            if (i < j)
+                (values[i], values[j]) = (values[j], values[i]);
+        }
+
+        for (var length = 2; length <= n; length <<= 1)
+        {
+            var angle = -2 * Math.PI / length;
+            var step = new Complex(Math.Cos(angle), Math.Sin(angle));
+            for (var i = 0; i < n; i += length)
+            {
+                var w = Complex.One;
+                var half = length >> 1;
+                for (var j = 0; j < half; j++)
+                {
+                    var even = values[i + j];
+                    var odd = values[i + j + half] * w;
+                    values[i + j] = even + odd;
+                    values[i + j + half] = even - odd;
+                    w *= step;
+                }
+            }
+        }
+    }
+
+    private static RfSurveyWaterfallFrameDto AnalyzeWaterfallFrame(int sequence, string path, long centerHz, int sampleRate, int binCount, bool isAirspy, string output)
     {
         if (!File.Exists(path))
-            return new(false, "IQ capture file was not created.", null, null, null, null, 0, false, "", null, null);
+            return EmptyWaterfallFrame(sequence, centerHz, sampleRate, binCount, $"IQ capture file was not created. {output}".Trim());
         var file = new FileInfo(path);
         if (file.Length < 4096)
-            return new(false, $"IQ capture file was too small ({file.Length} bytes).", null, null, null, null, 0, false, "", null, null);
+            return EmptyWaterfallFrame(sequence, centerHz, sampleRate, binCount, $"IQ capture file was too small ({file.Length} bytes). {output}".Trim());
 
-        const int n = 1024;
-        var i = new double[n];
-        var q = new double[n];
-        var bytesNeeded = isAirspy ? n * 4 : n * 2;
+        var bytesNeeded = isAirspy ? binCount * 4 : binCount * 2;
         var bytes = new byte[Math.Min(bytesNeeded, file.Length)];
         using (var stream = File.OpenRead(path))
             _ = stream.Read(bytes, 0, bytes.Length);
 
-        var samples = isAirspy ? Math.Min(n, bytes.Length / 4) : Math.Min(n, bytes.Length / 2);
-        if (samples < 256)
-            return new(false, "IQ capture did not contain enough samples for spectrum analysis.", null, null, null, null, 0, false, "", null, null);
+        return AnalyzeWaterfallSamples(sequence, bytes, centerHz, sampleRate, binCount, isAirspy, output, file.Length);
+    }
 
+    private static RfSurveyWaterfallFrameDto AnalyzeWaterfallSamples(int sequence, byte[] bytes, long centerHz, int sampleRate, int binCount, bool isAirspy, string output, long? sourceBytes = null)
+    {
+        var samples = isAirspy ? Math.Min(binCount, bytes.Length / 4) : Math.Min(binCount, bytes.Length / 2);
+        samples = HighestPowerOfTwoAtMost(samples);
+        if (samples < 256)
+            return EmptyWaterfallFrame(sequence, centerHz, sampleRate, binCount, $"IQ capture did not contain enough samples. {output}".Trim());
+
+        var i = new double[samples];
+        var q = new double[samples];
         var clipped = 0;
         for (var s = 0; s < samples; s++)
         {
@@ -3428,23 +5088,115 @@ public sealed class RfSurveyService
 
         var meanI = i.Take(samples).Average();
         var meanQ = q.Take(samples).Average();
-        var bins = new double[samples];
-        for (var k = 0; k < samples; k++)
+        var fft = new Complex[samples];
+        for (var s = 0; s < samples; s++)
         {
-            var real = 0.0;
-            var imag = 0.0;
-            for (var s = 0; s < samples; s++)
+            var window = 0.54 - 0.46 * Math.Cos(2 * Math.PI * s / (samples - 1));
+            fft[s] = new Complex((i[s] - meanI) * window, (q[s] - meanQ) * window);
+        }
+        FftInPlace(fft);
+
+        var powers = new double[samples];
+        for (var b = 0; b < samples; b++)
+        {
+            var index = (b + samples / 2) % samples;
+            var value = fft[index];
+            powers[b] = 10 * Math.Log10((value.Real * value.Real + value.Imaginary * value.Imaginary) / samples + 1e-12);
+        }
+
+        var min = powers.Min();
+        var max = powers.Max();
+        var sorted = powers.OrderBy(value => value).ToArray();
+        var noise = Median(sorted.Take(Math.Max(1, (int)(sorted.Length * 0.80))).ToArray());
+        var peakIndex = Array.IndexOf(powers, max);
+        var startHz = centerHz - sampleRate / 2.0;
+        var binWidth = sampleRate / (double)samples;
+        var peakFrequency = startHz + (peakIndex + 0.5) * binWidth;
+        var clipPct = clipped * 100.0 / samples;
+        var overload = clipPct > 1.0 || max > -3;
+        return new RfSurveyWaterfallFrameDto(
+            sequence,
+            DateTime.UtcNow,
+            centerHz,
+            sampleRate,
+            startHz,
+            binWidth,
+            powers.Select(value => Math.Round(value, 2)).ToArray(),
+            Math.Round(min, 2),
+            Math.Round(max, 2),
+            Math.Round(noise, 2),
+            Math.Round(max, 2),
+            Math.Round(peakFrequency, 0),
+            Math.Round(clipPct, 2),
+            overload,
+            sourceBytes ?? bytes.Length,
+            output);
+    }
+
+    private static RfSurveyWaterfallFrameDto EmptyWaterfallFrame(int sequence, long centerHz, int sampleRate, int binCount, string issue)
+    {
+        var startHz = centerHz - sampleRate / 2.0;
+        var binWidth = sampleRate / (double)Math.Max(1, binCount);
+        return new RfSurveyWaterfallFrameDto(sequence, DateTime.UtcNow, centerHz, sampleRate, startHz, binWidth, [], 0, 0, 0, 0, centerHz, 0, false, 0, issue);
+    }
+
+    private static RfPowerAnalysis AnalyzeIqFile(string path, int sampleRate, bool isAirspy)
+    {
+        if (!File.Exists(path))
+            return new(false, "IQ capture file was not created.", null, null, null, null, 0, false, "", null, null);
+        var file = new FileInfo(path);
+        if (file.Length < 4096)
+            return new(false, $"IQ capture file was too small ({file.Length} bytes).", null, null, null, null, 0, false, "", null, null);
+
+        const int n = 4096;
+        const int requestedWindows = 9;
+        var bytesPerSample = isAirspy ? 4 : 2;
+        var bytesNeeded = isAirspy ? n * 4 : n * 2;
+        var windowCount = (int)Math.Min(requestedWindows, file.Length / bytesNeeded);
+        if (windowCount <= 0)
+            return new(false, "IQ capture did not contain enough samples for spectrum analysis.", null, null, null, null, 0, false, "", null, null);
+
+        var spectra = new List<double[]>(windowCount);
+        var clipped = 0L;
+        var totalSamples = 0L;
+        using (var stream = File.OpenRead(path))
+        {
+            var maxOffset = Math.Max(0, file.Length - bytesNeeded);
+            for (var windowIndex = 0; windowIndex < windowCount; windowIndex++)
             {
-                var window = 0.54 - 0.46 * Math.Cos(2 * Math.PI * s / (samples - 1));
-                var sampleI = (i[s] - meanI) * window;
-                var sampleQ = (q[s] - meanQ) * window;
-                var angle = -2 * Math.PI * k * s / samples;
-                var cos = Math.Cos(angle);
-                var sin = Math.Sin(angle);
-                real += sampleI * cos - sampleQ * sin;
-                imag += sampleI * sin + sampleQ * cos;
+                var windowOffset = windowCount == 1 ? 0 : maxOffset * windowIndex / (windowCount - 1);
+                windowOffset -= windowOffset % bytesPerSample;
+                stream.Position = windowOffset;
+                var bytes = new byte[bytesNeeded];
+                var read = 0;
+                while (read < bytes.Length)
+                {
+                    var count = stream.Read(bytes, read, bytes.Length - read);
+                    if (count <= 0)
+                        break;
+                    read += count;
+                }
+                if (read < bytesNeeded)
+                    continue;
+                var (spectrum, windowClipped) = AnalyzeIqWindow(bytes, isAirspy);
+                spectra.Add(spectrum);
+                clipped += windowClipped;
+                totalSamples += n;
             }
-            bins[k] = 10 * Math.Log10((real * real + imag * imag) / samples + 1e-12);
+        }
+        if (spectra.Count == 0)
+            return new(false, "IQ capture did not contain complete analysis windows.", null, null, null, null, 0, false, "", null, null);
+
+        var bins = new double[n];
+        var binValues = new double[spectra.Count];
+        for (var bin = 0; bin < n; bin++)
+        {
+            for (var window = 0; window < spectra.Count; window++)
+                binValues[window] = spectra[window][bin];
+            Array.Sort(binValues);
+            bins[bin] = binValues.Length % 2 == 0
+                ? (binValues[binValues.Length / 2 - 1] + binValues[binValues.Length / 2]) / 2
+                : binValues[binValues.Length / 2];
         }
 
         var strongestPeakIndex = 0;
@@ -3453,13 +5205,13 @@ public sealed class RfSurveyService
         var targetPeak = double.NegativeInfinity;
         for (var k = 0; k < bins.Length; k++)
         {
-            var binOffset = RfBinOffsetHz(k, samples, sampleRate);
+            var binOffset = RfBinOffsetHz(k, n, sampleRate);
             if (bins[k] > strongestPeak)
             {
                 strongestPeak = bins[k];
                 strongestPeakIndex = k;
             }
-            if (Math.Abs(binOffset) <= 25_000 && bins[k] > targetPeak)
+            if (Math.Abs(binOffset) <= ControlChannelCarrierToleranceHz && bins[k] > targetPeak)
             {
                 targetPeak = bins[k];
                 targetPeakIndex = k;
@@ -3474,11 +5226,46 @@ public sealed class RfSurveyService
         var noiseCount = Math.Max(1, (int)(sorted.Length * 0.80));
         var noise = Median(sorted.Take(noiseCount).ToArray());
         var snr = targetPeak - noise;
-        var offset = RfBinOffsetHz(targetPeakIndex, samples, sampleRate);
-        var strongestOffset = RfBinOffsetHz(strongestPeakIndex, samples, sampleRate);
-        var clipPct = clipped * 100.0 / samples;
+        var offset = RfBinOffsetHz(targetPeakIndex, n, sampleRate);
+        var strongestOffset = RfBinOffsetHz(strongestPeakIndex, n, sampleRate);
+        var clipPct = totalSamples == 0 ? 0 : clipped * 100.0 / totalSamples;
         var overload = clipPct > 1.0 || strongestPeak > -3;
         return new(true, "", targetPeak, noise, snr, offset, clipPct, overload, BuildSparkline(bins), strongestPeak, strongestOffset);
+    }
+
+    private static (double[] Spectrum, int Clipped) AnalyzeIqWindow(byte[] bytes, bool isAirspy)
+    {
+        var sampleCount = isAirspy ? bytes.Length / 4 : bytes.Length / 2;
+        var samples = new Complex[sampleCount];
+        var clipped = 0;
+        for (var index = 0; index < sampleCount; index++)
+        {
+            if (isAirspy)
+            {
+                var i = BitConverter.ToInt16(bytes, index * 4);
+                var q = BitConverter.ToInt16(bytes, index * 4 + 2);
+                samples[index] = new Complex(i / 32768d, q / 32768d);
+                if (Math.Abs(i) > 32200 || Math.Abs(q) > 32200)
+                    clipped++;
+            }
+            else
+            {
+                var i = bytes[index * 2];
+                var q = bytes[index * 2 + 1];
+                samples[index] = new Complex((i - 127.5) / 127.5, (q - 127.5) / 127.5);
+                if (i <= 2 || i >= 253 || q <= 2 || q >= 253)
+                    clipped++;
+            }
+        }
+
+        var mean = samples.Aggregate(Complex.Zero, (sum, value) => sum + value) / sampleCount;
+        for (var index = 0; index < sampleCount; index++)
+        {
+            var window = 0.5 - 0.5 * Math.Cos(2 * Math.PI * index / (sampleCount - 1));
+            samples[index] = (samples[index] - mean) * window;
+        }
+        FftInPlace(samples);
+        return (samples.Select(value => 10 * Math.Log10(value.Magnitude * value.Magnitude / sampleCount + 1e-12)).ToArray(), clipped);
     }
 
     private static double RfBinOffsetHz(int binIndex, int samples, int sampleRate) =>
@@ -3520,7 +5307,7 @@ public sealed class RfSurveyService
             return BlockedOutcome(
                 "control_channel_p25_probe",
                 "P25 probing requires exclusive SDR access and no stale OP25 process may already hold the device.",
-                "Radio Setup should clean up abandoned OP25 probes before starting a new P25 probe.",
+                "Setup should clean up abandoned OP25 probes before starting a new P25 probe.",
                 staleP25Cleanup.BlockingIssue,
                 new { staleP25Cleanup.Before, staleP25Cleanup.After, staleP25Cleanup.Output });
 
@@ -3529,12 +5316,13 @@ public sealed class RfSurveyService
         if (controlChannel <= 0)
             return BlockedOutcome("control_channel_p25_probe", "P25 probing requires a known control channel.", "Import/confirm RR or TR ground truth first.", "No control channel is available.", new { profile.ControlChannelsHz });
 
-        var preview = BuildP25ProbePreview(profile, artifactPath, controlChannel, request.DurationSeconds);
+        var probeProfile = ProfileWithP25ProbeOverrides(profile, request);
+        var preview = BuildP25ProbePreview(probeProfile, artifactPath, controlChannel, request.DurationSeconds);
         if (!preview.Ready)
             return BlockedOutcome(
                 "control_channel_p25_probe",
                 "P25 frames must be measured with a configured command profile.",
-                "Configure Radio Setup P25 probe command template.",
+                "Configure the Setup P25 probe command template.",
                 preview.BlockingIssue,
                 new { preview, toolPrep.Tools });
 
@@ -3550,14 +5338,17 @@ public sealed class RfSurveyService
                 return BlockedOutcome(
                     "control_channel_p25_probe",
                     "P25 probing needs exclusive SDR access.",
-                    "Radio Setup can pause trunk-recorder through the service helper.",
+                    "Setup can pause trunk-recorder through the service helper.",
                     "trunk-recorder remained active after the stop request.",
                     new { trState, trStopOutput });
         }
 
         var outputDir = Path.Combine(artifactPath, "probe-runs", DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
         Directory.CreateDirectory(outputDir);
-        var command = RenderP25ProbeCommand(profile, controlChannel, request.DurationSeconds, outputDir, request.SourceIndex);
+        var demod = NormalizeP25Demod(ReadStringParameter(request.Parameters, "p25Demod"));
+        if (string.IsNullOrWhiteSpace(demod))
+            demod = NormalizeP25Demod(ReadStringParameter(request.Parameters, "demod"));
+        var command = RenderP25ProbeCommand(probeProfile, controlChannel, request.DurationSeconds, outputDir, request.SourceIndex, demod);
         var requestedDuration = Math.Clamp(request.DurationSeconds, 10, 300);
         var timeout = request.DurationSeconds > 0
             ? Math.Clamp(requestedDuration + 15, 20, 90)
@@ -3590,31 +5381,34 @@ public sealed class RfSurveyService
             ? Directory.GetFiles(outputDir, "*", SearchOption.AllDirectories).Select(p => new FileInfo(p)).Select(f => new { path = f.FullName, bytes = f.Length }).ToList()
             : [];
         var output = TrimOutput(result.Stdout);
-        var toolFailure = HasP25ProbeToolFailure(output);
-        var hasFrames = HasP25FrameEvidence(output);
+        var toolFailure = HasP25ProbeToolFailure(result.Stdout);
+        var frameEvidence = FindP25FrameEvidence(result.Stdout);
+        var hasFrames = !string.IsNullOrWhiteSpace(frameEvidence);
+        var syncEvidence = FindP25SynchronizationEvidence(result.Stdout);
+        var hasSync = !string.IsNullOrWhiteSpace(syncEvidence);
         var restartFailed = !string.IsNullOrWhiteSpace(trRestartError);
         var status = restartFailed ? "failed" : hasFrames ? "passed" : toolFailure ? "blocked" : "failed";
         return new ExperimentOutcome(
             status,
             "A known control channel should produce P25 frame/sync evidence when the SDR path is viable.",
-            "Radio Setup temporarily paused TR if needed; configured P25 probe command; SDR available; known control channel.",
-            restartFailed ? "P25 probe ran, but trunk-recorder did not restart afterward." : hasFrames ? "P25 probe output contained frame/sync evidence." : toolFailure ? "P25 probe command failed before RF evidence could be measured." : "P25 probe ran but did not contain recognizable P25 frame/sync evidence.",
-            restartFailed ? $"trunk-recorder did not restart after P25 probe: {trRestartError}" : hasFrames ? "" : toolFailure ? "P25 probe command failed before RF evidence could be measured." : "No recognizable P25 frame/sync evidence was captured.",
-            new { controlChannelHz = controlChannel, sourceIndex = request.SourceIndex, staleP25Cleanup, preview, command, outputDir, result.ExitCode, output, files, trWasActive, trStopOutput, trRestartOutput, trRestartError },
+            "Setup temporarily paused TR if needed; configured P25 probe command; SDR available; known control channel.",
+            restartFailed ? "P25 probe ran, but trunk-recorder did not restart afterward." : hasFrames ? "P25 probe output contained decoded frame evidence." : toolFailure ? "P25 probe command failed before RF evidence could be measured." : hasSync ? "P25 synchronization was detected, but the standalone probe did not decode a valid frame. Native Trunk Recorder proof is still required." : "The standalone P25 probe did not decode recognizable synchronization or frames. Native Trunk Recorder proof is still required.",
+            restartFailed ? $"trunk-recorder did not restart after P25 probe: {trRestartError}" : hasFrames ? "" : toolFailure ? "P25 probe command failed before RF evidence could be measured." : hasSync ? "The standalone probe found P25 synchronization but discarded the frames during error checking." : "The standalone probe did not decode P25 evidence.",
+            new { controlChannelHz = controlChannel, sourceIndex = request.SourceIndex, demod, frameEvidence, syncEvidence, probeOverrides = ReadP25ProbeOverrides(request), staleP25Cleanup, preview, command, outputDir, result.ExitCode, output, files, trWasActive, trStopOutput, trRestartOutput, trRestartError },
             new
             {
                 recommendation = restartFailed
-                    ? "Restart trunk-recorder before continuing Radio Setup."
+                    ? "Restart trunk-recorder before continuing Setup RF validation."
                     : hasFrames
                     ? "Proceed to a longer stability probe or voice capture trial."
                     : toolFailure
                     ? "Fix the P25 probe command/tooling, then re-run the same control-channel probe before changing RF assumptions."
-                    : "Try alternate control channel, gain, antenna aim/polarization, source center, or SDR path checks. Do not proceed to voice capture until P25 frame evidence is present.",
+                    : "Continue to the bounded native Trunk Recorder proof before changing RF assumptions.",
                 followUps = hasFrames
                     ? new[] { "Run a stability-duration control-channel probe.", "Run a voice capture trial." }
                     : toolFailure
                     ? new[] { "Review the P25 probe log.", "Fix the command template or rendered arguments.", "Re-run the same control-channel probe." }
-                    : new[] { "Probe alternate control channel.", "Try a gain sweep.", "Verify antenna aim and polarization.", "Verify source center/rate/error values." }
+                    : new[] { "Run the bounded native Trunk Recorder proof.", "Change RF assumptions only if native decode metrics also fail." }
             });
     }
 
@@ -3623,7 +5417,7 @@ public sealed class RfSurveyService
         if (request.Parameters == null)
             return new ExperimentOutcome(
                 "failed",
-                "Error/gain sweep requires concrete sweep parameters.",
+                "Frequency-correction and gain sweep requires concrete sweep parameters.",
                 "Selected site, control channel, and one or more selected SDR sources.",
                 "Sweep parameters were not supplied.",
                 "Sweep parameters were not supplied.",
@@ -3643,9 +5437,9 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(artifactPath, $"error-gain-sweep-job-{job.Id}.json", evidence, ct);
         return new ExperimentOutcome(
             "running",
-            "Error/gain sweep runs controlled tr_tune measurements for selected SDR source settings.",
+            "Frequency-correction and gain sweep runs controlled Trunk Recorder tuning measurements for selected SDR source settings.",
             "Selected site, selected SDR source(s), control channel, and sweep parameters.",
-            $"Started error/gain sweep job {job.Id}. Results will populate from the job output feed.",
+            $"Started frequency-correction and gain sweep job {job.Id}. Results will populate from the job output feed.",
             "",
             evidence,
             new
@@ -3663,7 +5457,7 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(artifactPath, $"error-gain-sweep-cancel-{job.Id}.json", evidence, ct);
         return new ExperimentOutcome(
             "running",
-            "Cancel active error/gain sweep processes.",
+            "Cancel active frequency-correction and gain sweep processes.",
             "An active or recently active sweep job.",
             $"Requested sweep cancellation with job {job.Id}.",
             "",
@@ -3702,7 +5496,7 @@ public sealed class RfSurveyService
             blockers.Count == 0 ? "passed" : "blocked",
             "Temporary TR config trials should be explicit, backed up, and restart-gated.",
             "Known control channels and configured SDR sources.",
-            blockers.Count == 0 ? "Temporary TR config plan was written to the survey artifact folder." : string.Join(" ", blockers),
+            blockers.Count == 0 ? "Temporary TR config plan was written to the Setup RF evidence folder." : string.Join(" ", blockers),
             string.Join(" ", blockers),
             plan,
             new
@@ -3736,7 +5530,7 @@ public sealed class RfSurveyService
                 },
                 new
                 {
-                    recommendation = "Apply the selected RF recommendation through Radio Setup, restart TR, then rerun Call Quality."
+                    recommendation = "Apply the selected RF recommendation through Setup, restart TR, then rerun Call Quality."
                 });
         }
 
@@ -3847,9 +5641,18 @@ public sealed class RfSurveyService
                     var candidatePath = Path.Combine(session.ArtifactPath, $"tr-config-metrics-candidate-{SanitizeFileToken(candidate.Id)}-{stamp}.json");
                     await File.WriteAllTextAsync(candidatePath, candidateJson, ct);
                     await InstallTrFileAsync(candidatePath, livePath, ct);
+                    var restartStartedAt = DateTimeOffset.UtcNow;
                     await RunServiceHelperAsync("restart-tr", ct);
 
-                    var trialProfile = ProfileWithCandidateSource(profile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.ControlChannelHz);
+                    var trialProfile = ProfileWithCandidateSource(profile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.SampleRateHz, candidate.ControlChannelHz);
+                    var readiness = await WaitForTrControlChannelReadinessAsync(trialProfile, candidate.ControlChannelHz, restartStartedAt, TimeSpan.FromSeconds(90), ct);
+                    if (!readiness.Ready)
+                    {
+                        results[index] = CandidateTrMetricsResult.Blocked(readiness.Summary);
+                        if (onProgress != null)
+                            await onProgress(index, results[index]);
+                        continue;
+                    }
                     var start = DateTimeOffset.UtcNow;
                     await Task.Delay(TimeSpan.FromSeconds(durationSeconds), ct);
                     var end = DateTimeOffset.UtcNow;
@@ -3945,9 +5748,18 @@ public sealed class RfSurveyService
                     var candidatePath = Path.Combine(session.ArtifactPath, $"tr-config-voice-candidate-{SanitizeFileToken(candidate.Id)}-{stamp}.json");
                     await File.WriteAllTextAsync(candidatePath, candidateJson, ct);
                     await InstallTrFileAsync(candidatePath, livePath, ct);
+                    var restartStartedAt = DateTimeOffset.UtcNow;
                     await RunServiceHelperAsync("restart-tr", ct);
 
-                    var trialProfile = ProfileWithCandidateSource(profile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.ControlChannelHz);
+                    var trialProfile = ProfileWithCandidateSource(profile, candidate.SourceIndex, candidate.Gain, candidate.ErrorHz, candidate.SampleRateHz, candidate.ControlChannelHz);
+                    var readiness = await WaitForTrControlChannelReadinessAsync(trialProfile, candidate.ControlChannelHz, restartStartedAt, TimeSpan.FromSeconds(90), ct);
+                    if (!readiness.Ready)
+                    {
+                        results[index] = VoiceCandidateTrialResult.Blocked(readiness.Summary);
+                        if (onProgress != null)
+                            await onProgress(index, results[index]);
+                        continue;
+                    }
                     var start = DateTimeOffset.UtcNow;
                     await Task.Delay(TimeSpan.FromSeconds(durationSeconds), ct);
                     var end = DateTimeOffset.UtcNow;
@@ -3961,7 +5773,7 @@ public sealed class RfSurveyService
                     var voiceInconclusive = realCalls.Count == 0 && metricsStatus == "passed";
                     var status = realCalls.Count > 0 ? "passed" : voiceInconclusive ? "inconclusive" : "failed";
                     var summary = realCalls.Count > 0
-                        ? $"Voice trial captured {realCalls.Count} real call(s) with audio for source {candidate.SourceIndex}, {FormatHz(candidate.ControlChannelHz)}, gain {candidate.Gain}, error {candidate.ErrorHz} Hz."
+                        ? $"Voice trial captured {realCalls.Count} real call(s) with audio for source {candidate.SourceIndex}, {FormatHz(candidate.ControlChannelHz)}, gain {candidate.Gain}, frequency correction {candidate.ErrorHz:+0;-0;0} Hz."
                         : voiceInconclusive
                             ? BuildOptionalVoiceCaveat(metricsRow)
                             : BuildVoiceCaptureFailureSummary(["No real captured calls with audio were found in this candidate voice window."], analysis);
@@ -4039,10 +5851,9 @@ public sealed class RfSurveyService
                 source["rate"] = runtimeRate;
             if (!string.IsNullOrWhiteSpace(profileSource.Device))
                 source["device"] = IsAirspySource(profileSource)
-                    ? NormalizeP25ProbeDeviceArgs(profileSource, useNamedAirspyStageGains: true)
+                    ? NormalizeP25ProbeDeviceArgsWithSerialPinning(profileSource, useNamedAirspyStageGains: true, pinAirspySerial: true)
                     : profileSource.Device;
-            if (string.Equals(profileSource.SdrType, "Airspy", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(profileSource.SdrType, "RTL-SDR", StringComparison.OrdinalIgnoreCase))
+            if (IsAirspySource(profileSource) || IsRtlSource(profileSource))
                 source["driver"] = "osmosdr";
         }
         if (IsAirspySource(profileSource))
@@ -4068,8 +5879,14 @@ public sealed class RfSurveyService
         var candidateControlChannels = candidateSystem?.ControlChannelsHz is { Count: > 0 }
             ? candidateSystem.ControlChannelsHz
             : candidate.ControlChannelHz > 0 ? [candidate.ControlChannelHz] : profile.ControlChannelsHz;
-        if (candidateControlChannels.Count > 0)
-            source["center"] = CenterForCandidateControlChannels(candidateControlChannels, ReadIntNode(source["rate"]));
+        var runtimeSampleRate = ReadIntNode(source["rate"]);
+        var currentCenter = profileSource?.CenterHz > 0 ? profileSource.CenterHz : ReadLongNode(source["center"]);
+        if (candidate.ControlChannelHz > 0 && SourceWindowCovers(currentCenter, runtimeSampleRate, candidate.ControlChannelHz))
+            source["center"] = currentCenter;
+        else if (candidate.ControlChannelHz > 0)
+            source["center"] = candidate.ControlChannelHz;
+        else if (candidateControlChannels.Count > 0)
+            source["center"] = CenterForCandidateControlChannels(candidateControlChannels, runtimeSampleRate);
 
         var systemName = candidateSystem?.ShortName ?? profile.SystemShortName;
         var changes = new List<string>();
@@ -4085,18 +5902,19 @@ public sealed class RfSurveyService
         var controlChannels = system["control_channels"] as JsonArray ?? system["controlChannels"] as JsonArray;
         if (controlChannels != null && candidate.ControlChannelHz > 0)
         {
-            var existing = controlChannels.Select(ReadLongNode).Where(value => value > 0 && value != candidate.ControlChannelHz).ToList();
-            system["control_channels"] = new JsonArray(new[] { candidate.ControlChannelHz }.Concat(existing).Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
+            system["control_channels"] = new JsonArray(JsonValue.Create(candidate.ControlChannelHz));
             system.Remove("controlChannels");
         }
         PatchCallstreamStreams(root, string.IsNullOrWhiteSpace(systemName) ? [] : [systemName], changes);
-        NormalizeRadioSetupTrConfig(root, changes);
+        NormalizeRadioSetupTrConfig(root, changes, _config.TrunkRecorder.TalkgroupsPath);
         if (FindSystemObject(root, systemName) is JsonObject voiceSystem)
         {
             voiceSystem["minDuration"] = 0;
             voiceSystem["minTransmissionDuration"] = 0;
             voiceSystem["callLog"] = true;
             voiceSystem["recordUUVCalls"] = true;
+            voiceSystem["hideUnknownTalkgroups"] = false;
+            voiceSystem["talkgroupsFile"] = _config.TrunkRecorder.TalkgroupsPath;
         }
         if (IsAirspySource(profileSource))
         {
@@ -4121,6 +5939,14 @@ public sealed class RfSurveyService
         if (half > 0 && max - min <= half * 2)
             return (long)Math.Round((min + max) / 2.0, MidpointRounding.AwayFromZero);
         return channels[0];
+    }
+
+    private static bool SourceWindowCovers(long centerHz, int sampleRate, long frequencyHz)
+    {
+        if (centerHz <= 0 || frequencyHz <= 0)
+            return false;
+        var half = TrUsableHalfBandwidthHz(sampleRate);
+        return half > 0 && frequencyHz >= centerHz - half && frequencyHz <= centerHz + half;
     }
 
     private static void PatchPluginStreamShortNames(JsonObject root, string oldShortName, string newShortName)
@@ -4193,6 +6019,42 @@ public sealed class RfSurveyService
             sampleLines);
     }
 
+    private async Task<TrControlChannelReadiness> WaitForTrControlChannelReadinessAsync(
+        RfSurveyProfileDto profile,
+        long controlChannelHz,
+        DateTimeOffset restartStartedAt,
+        TimeSpan timeout,
+        CancellationToken ct)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        var frequencyText = (controlChannelHz / 1_000_000d).ToString("0.000000", CultureInfo.InvariantCulture);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var state = await QueryTrActiveAsync(ct);
+            if (!state.Active)
+                return new TrControlChannelReadiness(false, "Trunk Recorder stopped before the candidate reached control-channel readiness.", DateTimeOffset.UtcNow - restartStartedAt);
+            var now = DateTimeOffset.UtcNow;
+            var log = await ReadTrJournalAsync(restartStartedAt.UtcDateTime, now.UtcDateTime, ct);
+            var readyLine = FindTrControlChannelReadinessLine(log, profile.SystemShortName, frequencyText);
+            if (!string.IsNullOrWhiteSpace(readyLine))
+                return new TrControlChannelReadiness(true, readyLine, now - restartStartedAt);
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);
+        }
+
+        return new TrControlChannelReadiness(
+            false,
+            $"Trunk Recorder did not produce a control-channel measurement for {FormatHz(controlChannelHz)} within {timeout.TotalSeconds:F0} seconds of restart. The RF candidate was left unscored instead of being failed with an empty window.",
+            DateTimeOffset.UtcNow - restartStartedAt);
+    }
+
+    private static string FindTrControlChannelReadinessLine(string log, string systemShortName, string frequencyText) =>
+        log.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line =>
+                (string.IsNullOrWhiteSpace(systemShortName) || line.Contains($"[{systemShortName}]", StringComparison.OrdinalIgnoreCase)) &&
+                line.Contains("Control Channel Message Decode Rate", StringComparison.OrdinalIgnoreCase) &&
+                (string.IsNullOrWhiteSpace(frequencyText) || line.Contains(frequencyText, StringComparison.OrdinalIgnoreCase)))
+        ?? string.Empty;
+
     private static string BuildVoiceCaptureFailureSummary(IReadOnlyList<string> blockers, CallQualityTrWindowAnalysis analysis)
     {
         if (blockers.Count == 0)
@@ -4207,7 +6069,7 @@ public sealed class RfSurveyService
             if (analysis.DecodeLines > 0)
                 parts.Add($"Control-channel decode averaged {analysis.AvgDecodeRate:F1}/sec with {analysis.DecodeZeroPct:F1}% zero-decode.");
             if (analysis.TuningErrSamples > 0)
-                parts.Add($"Voice recorder tuning error averaged {analysis.AvgTuningErrorAbsHz:F0} Hz, max {analysis.MaxTuningErrorAbsHz:F0} Hz.");
+                parts.Add($"Measured voice-recorder tuning offset averaged {analysis.AvgTuningErrorAbsHz:F0} Hz, max {analysis.MaxTuningErrorAbsHz:F0} Hz.");
             return string.Join(" ", parts);
         }
         return blockers[0] + " TR did not show usable recorder starts in this capture window.";
@@ -4243,7 +6105,7 @@ public sealed class RfSurveyService
         if (recordedFrequencies.Count > 0 && noSampleCallEnds > 0)
             recommendations.Add($"Covered voice calls were attempted on {string.Join(", ", recordedFrequencies.Take(5).Select(row => $"{row.Frequency} ({row.Count})"))}, but no audio samples reached callstream.");
         if (avgTuningErrorAbsHz >= 1000)
-            recommendations.Add($"Voice recorder tuning error is high enough to matter for capture ({avgTuningErrorAbsHz:F0} Hz average). The RF work-loop should score error/ppm/gain using voice capture, not only P25 sync.");
+            recommendations.Add($"Measured voice-recorder tuning offset is high enough to matter for capture ({avgTuningErrorAbsHz:F0} Hz average). RF Validation should score frequency correction and gain using voice capture, not only P25 sync. PPM remains a derived technical value.");
         if (health.CallsStarted == 0 && noSourceFrequencies.Count == 0 && health.DecodeLines > 0)
             recommendations.Add("The control channel decoded during the window, but no voice grants were captured. Rerun the gate during busier traffic before changing hardware.");
         if (recommendations.Count == 0)
@@ -4290,9 +6152,9 @@ public sealed class RfSurveyService
                 .Where(name => liveSystems.All(live => !string.Equals(live, name, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
             if (requestedSystems.Count == 0)
-                blockers.Add("Workspace has no selected systems; return to Sites before Call Quality.");
+                blockers.Add("Setup has no selected systems; return to Systems & Sites before Call Quality.");
             if (missingSystems.Count > 0)
-                blockers.Add("Live TR config is not running the applied workspace system list. Missing: " + string.Join(", ", missingSystems) + ".");
+                blockers.Add("Live TR config is not running the applied Setup system list. Missing: " + string.Join(", ", missingSystems) + ".");
 
             var selected = profile.SelectedSourceIndexes.Count > 0
                 ? profile.SelectedSourceIndexes.Distinct().Order().ToList()
@@ -4301,7 +6163,7 @@ public sealed class RfSurveyService
                 .Where(index => coverage.Sources.All(source => source.Index != index))
                 .ToList();
             if (selected.Count == 0)
-                blockers.Add("Workspace has no selected SDR sources; return to Config Draft before Call Quality.");
+                blockers.Add("Setup has no selected SDR sources; return to Apply & Resume before Call Quality.");
             if (missingSources.Count > 0)
                 blockers.Add("Live TR config is not running the selected source indexes: " + string.Join(", ", missingSources) + ".");
 
@@ -4331,7 +6193,19 @@ public sealed class RfSurveyService
             };
         }
 
-        voiceCoverage = BuildVoiceCoverageEvidence(profile, coverage?.Sources);
+        var observedVoiceFrequencies = await BuildObservedVoiceFrequenciesBySystemAsync(ct);
+        var coverageSystems = AddObservedVoiceFrequencies(profile.Systems, observedVoiceFrequencies, warnings);
+        var coverageProfile = profile with
+        {
+            Systems = coverageSystems,
+            VoiceFrequenciesHz = coverageSystems
+                .SelectMany(system => system.VoiceFrequenciesHz)
+                .Where(value => value > 0)
+                .Distinct()
+                .Order()
+                .ToList()
+        };
+        voiceCoverage = BuildVoiceCoverageEvidence(coverageProfile, coverage?.Sources);
         if (voiceCoverage is VoiceCoverageEvidence voiceCoverageEvidence && voiceCoverageEvidence.TotalVoiceFrequencies > 0 && voiceCoverageEvidence.UncoveredVoiceFrequencies.Count > 0)
             warnings.Add($"Current selected source window does not cover {voiceCoverageEvidence.UncoveredVoiceFrequencies.Count} of {voiceCoverageEvidence.TotalVoiceFrequencies} known site voice frequencies. Call Quality may pass only if traffic lands inside the covered window.");
 
@@ -4367,9 +6241,29 @@ public sealed class RfSurveyService
             .Select(system => $"{system.ShortName}|{string.Join(",", system.ControlChannelsHz.Order())}")
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (!liveSystems.SequenceEqual(draftSystems, StringComparer.OrdinalIgnoreCase))
+        if (!liveSystems.SequenceEqual(draftSystems, StringComparer.OrdinalIgnoreCase) &&
+            !DraftOnlyAddsRecoveryControlChannels(live.Systems, draft.Systems))
             drift.Add("Live TR system/control-channel list differs from draft.");
         return drift;
+    }
+
+    private static bool DraftOnlyAddsRecoveryControlChannels(
+        IReadOnlyList<TrConfigSourceCoverageSystem> liveSystems,
+        IReadOnlyList<TrConfigSourceCoverageSystem> draftSystems)
+    {
+        if (liveSystems.Count != draftSystems.Count)
+            return false;
+        foreach (var liveSystem in liveSystems)
+        {
+            var draftSystem = draftSystems.FirstOrDefault(system =>
+                string.Equals(system.ShortName, liveSystem.ShortName, StringComparison.OrdinalIgnoreCase));
+            if (draftSystem == null)
+                return false;
+            var draftChannels = draftSystem.ControlChannelsHz.Where(value => value > 0).ToHashSet();
+            if (!liveSystem.ControlChannelsHz.Where(value => value > 0).All(draftChannels.Contains))
+                return false;
+        }
+        return true;
     }
 
     private static object? BuildVoiceCoverageEvidence(RfSurveyProfileDto profile, IReadOnlyList<TrConfigSourceCoverageSource>? liveSources = null)
@@ -4677,7 +6571,7 @@ public sealed class RfSurveyService
             new
             {
                 recommendation = status == "passed"
-                    ? string.IsNullOrWhiteSpace(noTrafficCaveat) ? "Survey can be marked as a stable RF path candidate. Export or apply the plan." : "Proceed with the no-traffic caveat; rerun Call Quality during busier traffic if call-based stability proof is required."
+                    ? string.IsNullOrWhiteSpace(noTrafficCaveat) ? "RF path can be marked as a stable candidate. Export or apply the plan." : "Proceed with the no-traffic caveat; rerun Call Quality during busier traffic if call-based stability proof is required."
                     : "Continue controlled experiments; include longer capture windows because short pass/fail swings were observed in MS testing."
             });
     }
@@ -4729,7 +6623,7 @@ public sealed class RfSurveyService
         };
     }
 
-    private async Task<RfSurveyToolStatusDto> P25ToolAsync()
+    private async Task<RfSurveyToolStatusDto> P25SoftwareToolAsync(CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(_config.RfSurvey.P25ProbeCommandTemplate))
         {
@@ -4746,63 +6640,161 @@ public sealed class RfSurveyService
         }
         foreach (var candidate in new[] { "rx.py", "multi_rx.py", "op25_rx.py" })
         {
-            var result = await RunCaptureAsync("bash", $"-lc \"command -v {candidate} >/dev/null 2>&1 && {candidate} --help 2>&1 | head -1 || true\"", CancellationToken.None);
-            if (!string.IsNullOrWhiteSpace(result.Stdout))
-                return new RfSurveyToolStatusDto("p25", "P25 control-channel tooling", "p25", true, true, result.Stdout.Trim(), candidate, "Reports P25 frame/sync presence, decode quality, and grant evidence before voice trials.", "Installed.");
+            if (await CommandExistsAsync(candidate, ct))
+                return new RfSurveyToolStatusDto("p25", "P25 control-channel software", "p25", true, true, "Available on PATH", candidate, "Reports P25 frame/sync presence, decode quality, and grant evidence before voice trials.", "Available.");
         }
         return new RfSurveyToolStatusDto("p25", "P25 control-channel tooling", "p25", true, false, "", "rx.py / multi_rx.py / op25_rx.py", "Reports P25 frame/sync presence, decode quality, and grant evidence before voice trials.", "Install a validated OP25/P25 toolchain for this host architecture.");
     }
 
-    private async Task<bool> EnsureP25ProbeTemplateAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<SetupRfEvidenceDto>> RegisterExperimentEvidenceAsync(
+        RfSurveySessionDto session,
+        RfSurveyProfileDto profile,
+        RfSurveyExperimentDto experiment,
+        string experimentArtifactPath,
+        CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(_config.RfSurvey.P25ProbeCommandTemplate))
-            return false;
-        if (!await CommandExistsAsync("rx.py", ct))
-            return false;
-
-        _config.RfSurvey.P25ProbeCommandTemplate =
-            "rx.py --args {device} -f {frequency_hz} -S {sample_rate} -q {error_ppm} -g {gain} -D cqpsk -l 56120 -v 10";
-        if (string.IsNullOrWhiteSpace(_config.RfSurvey.P25ProbeWorkingDirectory))
-            _config.RfSurvey.P25ProbeWorkingDirectory = "/tmp";
-        _config.RfSurvey.P25ProbeDurationSeconds = Math.Clamp(_config.RfSurvey.P25ProbeDurationSeconds <= 0 ? 45 : _config.RfSurvey.P25ProbeDurationSeconds, 10, 300);
-        _config.RfSurvey.P25ProbeTimeoutSeconds = Math.Max(_config.RfSurvey.P25ProbeTimeoutSeconds, _config.RfSurvey.P25ProbeDurationSeconds + 30);
-        await SaveEngineConfigAsync(ct);
-        return true;
-    }
-
-    private async Task SaveEngineConfigAsync(CancellationToken ct)
-    {
-        _config.ApplyDefaults();
-        if (OperatingSystem.IsWindows() || !_config.ConfigPath.StartsWith("/etc/", StringComparison.Ordinal))
-        {
-            _config.Save();
-            return;
-        }
-
-        var stagingRoot = Path.Combine(_config.Storage.AppDataRoot, "protected-config");
-        Directory.CreateDirectory(stagingRoot);
-        var candidatePath = Path.Combine(stagingRoot, $"pizzad-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}.json");
-        await File.WriteAllTextAsync(candidatePath, JsonSerializer.Serialize(_config, EngineConfig.JsonOptions()) + Environment.NewLine, ct);
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { experimentArtifactPath };
         try
         {
-            var helper = FindAdminHelper() ?? throw new FileNotFoundException("pizzawave_setup_admin.sh was not found; protected config writes are unavailable.");
-            var result = await RunAdminHelperAsync(helper, ["install-pizzad-config", candidatePath, _config.ConfigPath], ct);
-            if (result.ExitCode != 0)
-                throw new InvalidOperationException($"install-pizzad-config failed: {result.Output.Trim()}");
+            using var json = JsonDocument.Parse(experiment.EvidenceJson);
+            CollectArtifactPaths(json.RootElement, session.ArtifactPath, paths);
         }
-        finally
+        catch (JsonException)
         {
-            try { File.Delete(candidatePath); } catch { }
+        }
+        var rows = new List<SetupRfEvidenceDto>();
+        foreach (var path in paths.Where(File.Exists))
+        {
+            var fullPath = Path.GetFullPath(path);
+            var artifactRoot = Path.GetFullPath(session.ArtifactPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(artifactRoot, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var file = new FileInfo(fullPath);
+            await using var stream = File.OpenRead(fullPath);
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
+            var row = new SetupRfEvidenceDto(
+                $"rfe-{Guid.NewGuid():N}",
+                session.Id,
+                experiment.Id,
+                session.SiteLabel,
+                ExperimentStage(experiment.Type),
+                experiment.Type,
+                string.Join(", ", profile.Sources.Where(source => profile.SelectedSourceIndexes.Count == 0 || profile.SelectedSourceIndexes.Contains(source.Index)).Select(source => source.Serial.Length > 0 ? source.Serial : $"source:{source.Index}")),
+                ShortRevision(session.RfPathSummary),
+                ShortRevision(session.SourcePlanSummary),
+                experiment.StartedAtUtc ?? experiment.CreatedAtUtc,
+                experiment.FinishedAtUtc ?? DateTime.UtcNow,
+                MediaTypeForPath(fullPath),
+                Path.GetRelativePath(session.ArtifactPath, fullPath),
+                file.Length,
+                hash,
+                DateTime.UtcNow);
+            await _database.AddSetupRfEvidenceAsync(row, ct);
+            rows.Add(row);
+        }
+        return rows;
+    }
+
+    private static void CollectArtifactPaths(JsonElement element, string artifactRoot, ISet<string> paths)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.String && property.Name.Contains("path", StringComparison.OrdinalIgnoreCase))
+                {
+                    var value = property.Value.GetString() ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(value))
+                        paths.Add(Path.IsPathRooted(value) ? value : Path.Combine(artifactRoot, value));
+                }
+                else CollectArtifactPaths(property.Value, artifactRoot, paths);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var value in element.EnumerateArray()) CollectArtifactPaths(value, artifactRoot, paths);
         }
     }
 
-    private static async Task<RfSurveyToolStatusDto> ToolAsync(string id, string label, string category, bool required, string command, string versionCommand, string purpose, string installHint)
+    private async Task AddExperimentActivityAsync(
+        RfSurveySessionDto session,
+        string experimentId,
+        string name,
+        string type,
+        string status,
+        string summary,
+        RfSurveyRunExperimentRequest request,
+        IReadOnlyList<SetupRfEvidenceDto> evidence,
+        CancellationToken ct)
     {
-        var exists = await CommandExistsAsync(command, CancellationToken.None);
-        var version = exists
-            ? (await RunCaptureAsync("bash", "-lc " + Quote(versionCommand + " 2>&1 | head -3"), CancellationToken.None)).Stdout.Trim()
-            : string.Empty;
-        return new RfSurveyToolStatusDto(id, label, category, required, exists, version, command, purpose, exists ? "Installed." : installHint);
+        var terminal = status != "started";
+        var details = JsonSerializer.Serialize(new
+        {
+            surveyId = session.Id,
+            experimentId,
+            name,
+            type,
+            stage = ExperimentStage(type),
+            status,
+            request.SourceIndex,
+            request.ControlChannelHz,
+            request.DurationSeconds,
+            request.Hypothesis,
+            request.PhysicalChange,
+            evidenceIds = evidence.Select(value => value.Id),
+            evidenceFiles = evidence.Select(value => value.FilePath)
+        }, EngineConfig.JsonOptions());
+        await _database.AddSiteSetupActivityAsync(new SiteSetupActivityDto(
+            0,
+            DateTime.UtcNow,
+            "rf_validation",
+            terminal ? "rf_experiment_finished" : "rf_experiment_started",
+            string.IsNullOrWhiteSpace(summary) ? $"{name}: {status}." : $"{name}: {summary}",
+            details,
+            _config.SiteSetup.DesiredVersion,
+            _config.SiteSetup.LastAppliedConfigHash,
+            "validation",
+            "server:rf-validation"), ct);
+    }
+
+    private static string DefaultExperimentName(string type, RfSurveyRunExperimentRequest request)
+    {
+        var label = string.Join(' ', type.Split('_', StringSplitOptions.RemoveEmptyEntries).Select(word => char.ToUpperInvariant(word[0]) + word[1..]));
+        if (request.ControlChannelHz is > 0)
+            return $"{label} {request.ControlChannelHz.Value / 1_000_000d:0.00000} MHz";
+        return label;
+    }
+
+    private static string ExperimentStage(string type) => type switch
+    {
+        "sdr_inventory" or "ground_truth_review" or "tr_stopped_check" => "preparation",
+        "rf_power_scan" => "spectrum",
+        "control_channel_quality" or "control_channel_p25_probe" or "error_gain_sweep" or "rf_validation_sweep" => "control",
+        "temp_tr_config_plan" => "coverage",
+        "voice_capture_trial" or "transcription_gate" => "calls",
+        "stability_verdict" => "verdict",
+        _ => "rf_validation"
+    };
+
+    private static string ShortRevision(string value) => string.IsNullOrWhiteSpace(value)
+        ? string.Empty
+        : Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant()[..12];
+
+    private static string MediaTypeForPath(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".json" => "application/json",
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".wav" => "audio/wav",
+        ".csv" => "text/csv",
+        ".txt" or ".log" or ".md" => "text/plain",
+        _ => "application/octet-stream"
+    };
+
+    private static async Task<RfSurveyToolStatusDto> SoftwareToolAsync(string id, string label, string category, bool required, string command, string purpose, string installHint, CancellationToken ct)
+    {
+        var exists = await CommandExistsAsync(command, ct);
+        return new RfSurveyToolStatusDto(id, label, category, required, exists, exists ? "Available on PATH" : string.Empty, command, purpose, exists ? "Available." : installHint);
     }
 
     private RfSurveyToolStatusDto TranscriptionTool()
@@ -4817,7 +6809,7 @@ public sealed class RfSurveyService
             provider,
             provider,
             "Runs the captured-call transcription acceptance gate.",
-            "Configure and test transcription settings before Radio Setup.");
+            "Configure and test transcription settings before Setup RF validation.");
     }
 
     private async Task<(RfSurveyToolPrepDto? Prep, string Json)> EnsureReusableToolPrepAsync(
@@ -4838,6 +6830,22 @@ public sealed class RfSurveyService
         await WriteArtifactAsync(session.ArtifactPath, "tool-prep.json", reusable, ct);
         await _database.UpdateRfSurveySessionAsync(session, profileJson, json, ct);
         return (reusable, json);
+    }
+
+    private async Task<(RfSurveyToolPrepDto? Prep, string Json)> ResolveToolPrepForReadAsync(
+        string sessionId,
+        string toolPrepJson,
+        CancellationToken ct)
+    {
+        var prep = DeserializeOrDefault<RfSurveyToolPrepDto>(toolPrepJson);
+        if (HasToolPrepRun(prep))
+            return (prep, toolPrepJson);
+
+        var reusable = await LatestReusableToolPrepAsync(sessionId, ct);
+        if (reusable == null)
+            return (prep, toolPrepJson);
+
+        return (reusable, JsonSerializer.Serialize(reusable, EngineConfig.JsonOptions()));
     }
 
     private async Task<RfSurveyToolPrepDto?> LatestReusableToolPrepAsync(string? exceptSessionId, CancellationToken ct)
@@ -4866,14 +6874,20 @@ public sealed class RfSurveyService
 
     private static bool HasToolPrepRun(RfSurveyToolPrepDto? prep) => prep?.Tools.Count > 0;
 
-    private static RfSurveyToolPrepDto EmptyToolPrep() => new(
+    private static bool ToolPrepMatchesAppliedConfig(RfSurveyToolPrepDto? prep, string appliedConfigHash) =>
+        HasToolPrepRun(prep) && string.Equals(prep!.AppliedConfigHash, appliedConfigHash?.Trim() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+    private static RfSurveyToolPrepDto EmptyToolPrep(string appliedConfigHash = "") => new(
         DateTime.UtcNow,
         false,
         false,
         false,
         false,
         [],
-        ["Tool prep has not run yet."]);
+        ["Required software has not been checked for this applied Setup."])
+    {
+        AppliedConfigHash = appliedConfigHash?.Trim() ?? string.Empty
+    };
 
     private async Task TryCopyTrConfigAsync(string artifactPath, CancellationToken ct)
     {
@@ -4888,7 +6902,7 @@ public sealed class RfSurveyService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Unable to copy TR config into Radio Setup artifact folder");
+            _logger.LogWarning(ex, "Unable to copy TR config into Setup RF evidence folder");
         }
     }
 
@@ -4910,7 +6924,7 @@ public sealed class RfSurveyService
         var target = Path.GetFullPath(artifactPath);
         if (!target.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("Refusing to delete Radio Setup artifact path outside root: {ArtifactPath}", artifactPath);
+            _logger.LogWarning("Refusing to delete Setup RF evidence path outside root: {ArtifactPath}", artifactPath);
             return;
         }
 
@@ -4923,7 +6937,7 @@ public sealed class RfSurveyService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(ex, "Deleted Radio Setup database row but could not remove artifact path {ArtifactPath}", target);
+            _logger.LogWarning(ex, "Deleted Setup RF database row but could not remove evidence path {ArtifactPath}", target);
         }
     }
 
@@ -5000,16 +7014,213 @@ public sealed class RfSurveyService
             var passing = siteCandidates
                 .Where(IsMonitorableRfCandidate)
                 .OrderByDescending(ScoreRfValidationCandidate)
-                .FirstOrDefault();
-            if (passing == null)
+                .ToList();
+            if (passing.Count == 0)
             {
                 warnings.Add($"RF Sweep did not prove a usable control channel for {system.SiteLabel}; Config Draft will not allocate source bandwidth to that site.");
                 continue;
             }
 
-            planned.Add(system with { ControlChannelsHz = [passing.ControlChannelHz] });
+            var provenControlChannels = passing
+                .GroupBy(candidate => candidate.ControlChannelHz)
+                .Select(group => group.OrderByDescending(ScoreRfValidationCandidate).First())
+                .OrderByDescending(ScoreRfValidationCandidate)
+                .Select(candidate => candidate.ControlChannelHz)
+                .Where(frequency => frequency > 0)
+                .Distinct()
+                .ToList();
+            var recoveryControlChannels = provenControlChannels
+                .Concat(system.ControlChannelsHz.Where(frequency => !provenControlChannels.Contains(frequency)))
+                .Where(frequency => frequency > 0)
+                .Distinct()
+                .ToList();
+            var unprovenCount = recoveryControlChannels.Count - provenControlChannels.Count;
+            if (unprovenCount > 0)
+                warnings.Add($"{system.SiteLabel}: retained {unprovenCount} authoritative alternate control channel(s) for cold-start recovery; {provenControlChannels.Count} channel(s) currently passed live decode validation.");
+            planned.Add(system with { ControlChannelsHz = recoveryControlChannels });
         }
         return planned;
+    }
+
+    private static IReadOnlyDictionary<int, SourceWindow> BuildAssignedSourceWindows(
+        RfSurveyProfileDto profile,
+        IReadOnlyList<RfSurveySystemDto> systems,
+        IReadOnlyList<int> selectedSourceIndexes,
+        bool controlOnlyPlan,
+        int defaultRate,
+        List<string> warnings)
+    {
+        var selected = selectedSourceIndexes.ToHashSet();
+        var assignments = NormalizeSourceAssignments(profile.SourceAssignments, systems, profile.Sources)
+            .Where(kvp => systems.Any(system => string.Equals(system.ShortName, kvp.Key, StringComparison.OrdinalIgnoreCase)))
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
+        if (assignments.Count == 0)
+            return new Dictionary<int, SourceWindow>();
+
+        foreach (var assignment in assignments.Where(kvp => !selected.Contains(kvp.Value)))
+            warnings.Add($"{assignment.Key} is assigned to Source {assignment.Value}, but that source is not selected for Config Draft.");
+
+        var assignedNames = assignments.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var system in systems.Where(system => !assignedNames.Contains(system.ShortName)))
+        {
+            var inferred = InferSourceAssignment(system, profile.Sources, selected, defaultRate);
+            if (inferred.HasValue)
+            {
+                assignments[system.ShortName] = inferred.Value;
+                warnings.Add($"{system.SiteLabel}: no explicit source assignment; Config Draft inferred Source {inferred.Value} from control-channel proximity.");
+            }
+            else
+            {
+                warnings.Add($"{system.SiteLabel}: no explicit source assignment; Config Draft will not move an assigned source window for this site.");
+            }
+        }
+
+        var result = new Dictionary<int, SourceWindow>();
+        foreach (var sourceIndex in selectedSourceIndexes)
+        {
+            var source = profile.Sources.FirstOrDefault(row => row.Index == sourceIndex);
+            var sampleRate = source?.SampleRate > 0 ? source.SampleRate : defaultRate;
+            var assignedSystems = systems
+                .Where(system => assignments.TryGetValue(system.ShortName, out var assignedSource) && assignedSource == sourceIndex)
+                .ToList();
+            if (assignedSystems.Count == 0)
+                continue;
+
+            var frequencies = assignedSystems
+                .SelectMany(system => controlOnlyPlan ? system.ControlChannelsHz : system.ControlChannelsHz.Concat(system.VoiceFrequenciesHz))
+                .Where(value => value > 0)
+                .Distinct()
+                .Order()
+                .ToList();
+            if (frequencies.Count == 0)
+                continue;
+
+            IReadOnlyList<long> priority = controlOnlyPlan
+                ? assignedSystems.SelectMany(system => system.ControlChannelsHz).Where(value => value > 0).Distinct().Order().ToList()
+                : [];
+            var windows = BuildSourceWindows(frequencies, sampleRate, priority);
+            if (windows.Count > 1)
+                warnings.Add($"{string.Join(", ", assignedSystems.Select(system => system.SiteLabel))} assigned to Source {sourceIndex} needs {windows.Count} source windows at {sampleRate} sps; only the first can be used on this source.");
+            if (windows.Count > 0)
+                result[sourceIndex] = windows[0];
+        }
+        return result;
+    }
+
+    private static int? InferSourceAssignment(
+        RfSurveySystemDto system,
+        IReadOnlyList<RfSurveySourceDto> sources,
+        IReadOnlySet<int> selectedSourceIndexes,
+        int defaultRate)
+    {
+        var controlChannels = system.ControlChannelsHz
+            .Where(value => value > 0)
+            .Distinct()
+            .Order()
+            .ToList();
+        if (controlChannels.Count == 0)
+            return null;
+
+        var candidates = sources
+            .Where(source => selectedSourceIndexes.Contains(source.Index))
+            .Select(source =>
+            {
+                var sampleRate = source.SampleRate > 0 ? source.SampleRate : defaultRate;
+                var half = TrUsableHalfBandwidthHz(sampleRate);
+                var low = source.CenterHz - half;
+                var high = source.CenterHz + half;
+                var covered = controlChannels.Count(frequency => frequency >= low && frequency <= high);
+                var distance = controlChannels.Sum(frequency =>
+                {
+                    if (frequency < low)
+                        return low - frequency;
+                    if (frequency > high)
+                        return frequency - high;
+                    return 0;
+                });
+                var centerDistance = controlChannels.Sum(frequency => Math.Abs(frequency - source.CenterHz));
+                return new { source.Index, Covered = covered, Distance = distance, CenterDistance = centerDistance };
+            })
+            .OrderByDescending(row => row.Covered)
+            .ThenBy(row => row.Distance)
+            .ThenBy(row => row.CenterDistance)
+            .ThenBy(row => row.Index)
+            .ToList();
+
+        return candidates.Count == 0 ? null : candidates[0].Index;
+    }
+
+    private static IReadOnlyList<RfSurveySystemDto> AddObservedVoiceFrequencies(
+        IReadOnlyList<RfSurveySystemDto> systems,
+        IReadOnlyDictionary<string, IReadOnlyList<long>> observedFrequencies,
+        List<string> warnings)
+    {
+        if (systems.Count == 0 || observedFrequencies.Count == 0)
+            return systems;
+
+        var augmented = new List<RfSurveySystemDto>(systems.Count);
+        foreach (var system in systems)
+        {
+            if (system.VoiceFrequenciesHz.Count > 0 ||
+                !observedFrequencies.TryGetValue(system.ShortName, out var observed) ||
+                observed.Count == 0)
+            {
+                augmented.Add(system);
+                continue;
+            }
+
+            var controlChannels = system.ControlChannelsHz.ToHashSet();
+            var voice = observed
+                .Where(value => value > 0 && !controlChannels.Contains(value))
+                .Distinct()
+                .Order()
+                .ToList();
+            if (voice.Count == 0)
+            {
+                augmented.Add(system);
+                continue;
+            }
+
+            augmented.Add(system with { VoiceFrequenciesHz = voice });
+            warnings.Add($"{system.SiteLabel}: no imported voice channel list was available; Config Draft is using {voice.Count} observed PizzaWave call frequenc{(voice.Count == 1 ? "y" : "ies")} for source-window planning.");
+        }
+        return augmented;
+    }
+
+    private async Task<Dictionary<string, IReadOnlyList<long>>> BuildObservedVoiceFrequenciesBySystemAsync(CancellationToken ct)
+    {
+        var combined = (await _database.ListObservedCallFrequenciesBySystemAsync(ct))
+            .ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value.Where(value => value > 0).ToHashSet(),
+                StringComparer.OrdinalIgnoreCase);
+
+        var log = await ReadTrJournalAsync(DateTime.UtcNow.AddHours(-12), DateTime.UtcNow, ct);
+        foreach (Match match in TrCallEventRegex.Matches(log))
+        {
+            var message = match.Groups["message"].Value;
+            if (!message.Contains("no source covering", StringComparison.OrdinalIgnoreCase) &&
+                !message.Contains("Starting P25 Recorder", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var system = match.Groups["system"].Value.Trim();
+            if (string.IsNullOrWhiteSpace(system))
+                continue;
+            var frequency = (long)Math.Round(ParseDouble(match.Groups["freq"].Value) * 1_000_000d);
+            if (frequency <= 0)
+                continue;
+            if (!combined.TryGetValue(system, out var values))
+            {
+                values = [];
+                combined[system] = values;
+            }
+            values.Add(frequency);
+        }
+
+        return combined.ToDictionary(
+            kvp => kvp.Key,
+            kvp => (IReadOnlyList<long>)kvp.Value.Distinct().Order().ToList(),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool SourcePlanRfValidationPassed(RfSurveyProfileDto profile, IReadOnlyList<RfSurveyExperimentDto> experiments)
@@ -5035,6 +7246,46 @@ public sealed class RfSurveyService
             .Any(IsMonitorableRfCandidate));
     }
 
+    private static IReadOnlyDictionary<int, RfValidationCandidate> BuildRfValidationSourceCandidates(
+        RfSurveyProfileDto profile,
+        IReadOnlyList<RfSurveyExperimentDto> experiments)
+    {
+        var requested = SourcePlanSystemNames(profile);
+        var systems = profile.Systems
+            .Where(system => requested.Count == 0 || requested.Any(name => string.Equals(name, system.ShortName, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        var selectedSources = profile.SelectedSourceIndexes.Count > 0
+            ? profile.SelectedSourceIndexes.ToHashSet()
+            : profile.Sources.Select(source => source.Index).ToHashSet();
+        foreach (var experiment in experiments
+            .Where(experiment => string.Equals(experiment.Type, "rf_validation_sweep", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(experiment => experiment.CreatedAtUtc))
+        {
+            var candidates = ReadRfValidationCandidates(experiment.EvidenceJson)
+                .Where(candidate => selectedSources.Count == 0 || selectedSources.Contains(candidate.SourceIndex))
+                .Where(candidate => systems.Count == 0 || systems.Any(system => CandidateBelongsToSystem(candidate, system)))
+                .Select(candidate => candidate.Score == 0 ? candidate with { Score = ScoreRfValidationCandidate(candidate) } : candidate)
+                .ToList();
+            if (candidates.Count == 0)
+                continue;
+
+            var usable = candidates.Any(IsMonitorableRfCandidate)
+                ? candidates.Where(IsMonitorableRfCandidate).ToList()
+                : candidates.Where(candidate => candidate.P25Frames || string.Equals(candidate.P25Status, "passed", StringComparison.OrdinalIgnoreCase)).ToList();
+            var chosen = usable
+                .GroupBy(candidate => candidate!.SourceIndex)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .OrderByDescending(ScoreRfValidationCandidate)
+                        .First());
+            if (chosen.Count > 0)
+                return chosen;
+        }
+
+        return new Dictionary<int, RfValidationCandidate>();
+    }
+
     private static IReadOnlyList<RfValidationCandidate> ReadRfValidationCandidates(string? evidenceJson)
     {
         if (string.IsNullOrWhiteSpace(evidenceJson))
@@ -5054,10 +7305,12 @@ public sealed class RfSurveyService
 
     private static bool CandidateBelongsToSystem(RfValidationCandidate candidate, RfSurveySystemDto system)
     {
+        if (system.ControlChannelsHz.Count > 0)
+            return system.ControlChannelsHz.Contains(candidate.ControlChannelHz);
         if (!string.IsNullOrWhiteSpace(candidate.SystemShortName) &&
             string.Equals(candidate.SystemShortName, system.ShortName, StringComparison.OrdinalIgnoreCase))
             return true;
-        return system.ControlChannelsHz.Contains(candidate.ControlChannelHz);
+        return false;
     }
 
     private static IReadOnlyList<RfSurveySystemDto> NormalizeSystemDefinitions(IReadOnlyList<RfSurveySystemDto>? definitions) =>
@@ -5067,7 +7320,7 @@ public sealed class RfSurveyService
         {
             ShortName = definition.ShortName.Trim(),
             SiteLabel = string.IsNullOrWhiteSpace(definition.SiteLabel) ? definition.ShortName.Trim() : definition.SiteLabel.Trim(),
-            ControlChannelsHz = definition.ControlChannelsHz.Where(value => value > 0).Distinct().Order().ToList(),
+            ControlChannelsHz = definition.ControlChannelsHz.Where(value => value > 0).Distinct().ToList(),
             VoiceFrequenciesHz = definition.VoiceFrequenciesHz.Where(value => value > 0).Distinct().Order().ToList()
         })
         .GroupBy(definition => definition.ShortName, StringComparer.OrdinalIgnoreCase)
@@ -5080,7 +7333,7 @@ public sealed class RfSurveyService
         .Select((source, index) => new RfSurveySourceDto(
             source.Index >= 0 ? source.Index : index,
             (source.Device ?? string.Empty).Trim(),
-            (source.Serial ?? string.Empty).Trim(),
+            FirstNonEmpty(source.Serial, ExtractAirspySerial(source.Device), ExtractRtlSerial(source.Device)),
             string.IsNullOrWhiteSpace(source.SdrType) ? InferSdrType(source.Device ?? string.Empty, source.Serial ?? string.Empty) : source.SdrType.Trim(),
             source.CenterHz > 0 ? source.CenterHz : 0,
             source.SampleRate > 0 ? source.SampleRate : 2_400_000,
@@ -5091,80 +7344,27 @@ public sealed class RfSurveyService
         .OrderBy(source => source.Index)
         .ToList();
 
-    private static IReadOnlyList<RfSurveySourceDto> BuildRfSurveySourcesFromDetectedDevices(IReadOnlyList<SetupSdrDeviceDto> devices, RfSurveyProfileDto profile)
+    private static IReadOnlyDictionary<string, int> NormalizeSourceAssignments(
+        IReadOnlyDictionary<string, int>? assignments,
+        IReadOnlyList<RfSurveySystemDto> systems,
+        IReadOnlyList<RfSurveySourceDto> sources)
     {
-        var validDevices = devices
-            .Where(device => !string.IsNullOrWhiteSpace(device.DeviceArgs) || !string.IsNullOrWhiteSpace(device.Serial) || !string.IsNullOrWhiteSpace(device.Label))
-            .ToList();
-        if (validDevices.Count == 0)
-            return [];
-
-        var centerHz = profile.ControlChannelsHz.Count > 0
-            ? (long)Math.Round((profile.ControlChannelsHz.Min() + profile.ControlChannelsHz.Max()) / 2.0)
-            : profile.Sources.FirstOrDefault(source => source.CenterHz > 0)?.CenterHz ?? 0;
-        return validDevices.Select((device, index) =>
-        {
-            var type = string.IsNullOrWhiteSpace(device.Type) ? InferSdrType(device.DeviceArgs, device.Serial) : device.Type.Trim();
-            var sampleRate = device.DefaultSampleRate > 0
-                ? device.DefaultSampleRate
-                : type.Contains("Airspy", StringComparison.OrdinalIgnoreCase) ? 3_000_000 : 2_400_000;
-            var gain = string.IsNullOrWhiteSpace(device.DefaultGain)
-                ? type.Contains("Airspy", StringComparison.OrdinalIgnoreCase) ? "15" : "28"
-                : device.DefaultGain.Trim();
-            return new RfSurveySourceDto(
-                index,
-                string.IsNullOrWhiteSpace(device.DeviceArgs) ? device.Serial : device.DeviceArgs.Trim(),
-                device.Serial.Trim(),
-                type,
-                centerHz,
-                sampleRate,
-                0,
-                gain);
-        }).ToList();
+        var sourceIndexes = sources.Select(source => source.Index).ToHashSet();
+        var systemNames = systems.Select(system => system.ShortName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return (assignments ?? new Dictionary<string, int>())
+            .Where(kvp => !string.IsNullOrWhiteSpace(kvp.Key))
+            .Where(kvp => systemNames.Count == 0 || systemNames.Contains(kvp.Key))
+            .Where(kvp => sourceIndexes.Count == 0 || sourceIndexes.Contains(kvp.Value))
+            .GroupBy(kvp => kvp.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.OrdinalIgnoreCase);
     }
-
-    private static IReadOnlyList<RfSurveySdrDeviceDto> BuildRfSurveyDevicesFromDetectedDevices(IReadOnlyList<SetupSdrDeviceDto> devices, IReadOnlyList<RfSurveySourceDto> sources)
-    {
-        var validDevices = devices
-            .Where(device => !string.IsNullOrWhiteSpace(device.DeviceArgs) || !string.IsNullOrWhiteSpace(device.Serial) || !string.IsNullOrWhiteSpace(device.Label))
-            .ToList();
-        return validDevices.Select((device, ordinal) =>
-        {
-            var source = sources.FirstOrDefault(row =>
-                row.Index == device.Index ||
-                (!string.IsNullOrWhiteSpace(device.Serial) && string.Equals(row.Serial, device.Serial, StringComparison.OrdinalIgnoreCase)) ||
-                (!string.IsNullOrWhiteSpace(device.DeviceArgs) && string.Equals(row.Device, device.DeviceArgs, StringComparison.OrdinalIgnoreCase)));
-            var type = string.IsNullOrWhiteSpace(device.Type) ? source?.SdrType ?? InferSdrType(device.DeviceArgs, device.Serial) : device.Type.Trim();
-            var index = source?.Index ?? (device.Index >= 0 ? device.Index : ordinal);
-            var deviceArgs = string.IsNullOrWhiteSpace(device.DeviceArgs) ? source?.Device ?? device.UsbLine : device.DeviceArgs.Trim();
-            return new RfSurveySdrDeviceDto(
-                index,
-                (device.Serial ?? string.Empty).Trim(),
-                string.IsNullOrWhiteSpace(device.Label) ? $"{type} source {index}" : device.Label.Trim(),
-                type,
-                string.IsNullOrWhiteSpace(device.UsbLine) ? deviceArgs : device.UsbLine.Trim(),
-                (device.Warning ?? string.Empty).Trim(),
-                device.SampleRateOptions?.Where(rate => rate > 0).Distinct().Order().ToList() ?? [],
-                device.DefaultSampleRate);
-        }).ToList();
-    }
-
-    private static bool SameSourceHardware(IReadOnlyList<RfSurveySourceDto> current, IReadOnlyList<RfSurveySourceDto> detected)
-    {
-        var currentKeys = current.Select(SourceHardwareKey).Order(StringComparer.OrdinalIgnoreCase).ToList();
-        var detectedKeys = detected.Select(SourceHardwareKey).Order(StringComparer.OrdinalIgnoreCase).ToList();
-        return currentKeys.SequenceEqual(detectedKeys, StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static string SourceHardwareKey(RfSurveySourceDto source) =>
-        $"{source.SdrType}|{source.Serial}|{source.Device}".Trim().ToLowerInvariant();
 
     private static IReadOnlyList<RfSurveySystemDto> MergeSystemDefinitions(
-        IReadOnlyList<RfSurveySystemDto> liveDefinitions,
-        IReadOnlyList<RfSurveySystemDto> requestDefinitions)
+        IReadOnlyList<RfSurveySystemDto> primaryDefinitions,
+        IReadOnlyList<RfSurveySystemDto> fallbackDefinitions)
     {
-        var merged = new List<RfSurveySystemDto>(liveDefinitions);
-        foreach (var definition in requestDefinitions)
+        var merged = new List<RfSurveySystemDto>(primaryDefinitions);
+        foreach (var definition in fallbackDefinitions)
         {
             if (merged.Any(existing => string.Equals(existing.ShortName, definition.ShortName, StringComparison.OrdinalIgnoreCase)))
                 continue;
@@ -5248,12 +7448,50 @@ public sealed class RfSurveyService
     private static bool SameStringSet(IReadOnlyList<string> left, IReadOnlyList<string> right) =>
         left.Count == right.Count && left.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(right.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
 
+    private static bool SameSystemDefinitions(
+        IReadOnlyList<RfSurveySystemDto> left,
+        IReadOnlyList<RfSurveySystemDto> right)
+    {
+        var normalizedLeft = NormalizeSystemDefinitions(left);
+        var normalizedRight = NormalizeSystemDefinitions(right);
+        if (normalizedLeft.Count != normalizedRight.Count)
+            return false;
+        foreach (var system in normalizedLeft)
+        {
+            var other = normalizedRight.FirstOrDefault(candidate =>
+                string.Equals(candidate.ShortName, system.ShortName, StringComparison.OrdinalIgnoreCase));
+            if (other == null ||
+                !string.Equals(other.SiteLabel, system.SiteLabel, StringComparison.Ordinal) ||
+                !string.Equals(other.RadioReferenceSid, system.RadioReferenceSid, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(other.TalkgroupSystemShortName, system.TalkgroupSystemShortName, StringComparison.OrdinalIgnoreCase) ||
+                !other.ControlChannelsHz.SequenceEqual(system.ControlChannelsHz) ||
+                !other.VoiceFrequenciesHz.Order().SequenceEqual(system.VoiceFrequenciesHz.Order()))
+                return false;
+        }
+        return true;
+    }
+
+    private static bool SameSourceAssignments(IReadOnlyDictionary<string, int> left, IReadOnlyDictionary<string, int> right)
+    {
+        if (left.Count != right.Count)
+            return false;
+        foreach (var (key, value) in left)
+            if (!right.TryGetValue(key, out var other) || other != value)
+                return false;
+        return true;
+    }
+
     private static string SummarizeSdrs(IReadOnlyList<RfSurveySourceDto> sources)
     {
         if (sources.Count == 0) return "No configured SDR sources";
         var grouped = sources.GroupBy(s => s.SdrType).Select(g => $"{g.Count()} {g.Key}");
         return string.Join(", ", grouped);
     }
+
+    private static string SummarizeSelectedSdrs(RfSurveyProfileDto profile) =>
+        SummarizeSdrs(profile.Sources
+            .Where(source => profile.SelectedSourceIndexes.Count == 0 || profile.SelectedSourceIndexes.Contains(source.Index))
+            .ToList());
 
     private static string SummarizeRfPath(RfSurveyPathProfileDto path)
     {
@@ -5352,7 +7590,7 @@ public sealed class RfSurveyService
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (requested.Count == 0)
         {
-            warnings.Add("Workspace system short names are missing; TR systems were left unchanged.");
+            warnings.Add("Setup system short names are missing; TR systems were left unchanged.");
             return systems
                 .OfType<JsonObject>()
                 .Select(system => system["shortName"]?.GetValue<string>() ?? string.Empty)
@@ -5379,18 +7617,18 @@ public sealed class RfSurveyService
 
         if (kept.Count == 0)
         {
-            warnings.Add($"Workspace systems '{string.Join(", ", requested)}' were not found in the live TR config; Radio Setup will add them from workspace ground truth if available.");
+            warnings.Add($"Setup systems '{string.Join(", ", requested)}' were not found in the live TR config; Setup will add them from selected site definitions if available.");
             root["systems"] = kept;
             return [];
         }
 
         root["systems"] = kept;
         if (removed.Count > 0)
-            changes.Add($"systems: kept {string.Join(", ", keptNames)}; removed {string.Join(", ", removed)} from the active TR config for this workspace draft");
+            changes.Add($"systems: kept {string.Join(", ", keptNames)}; removed {string.Join(", ", removed)} from the active TR config for this Setup draft");
         return keptNames;
     }
 
-    private static IReadOnlyList<string> EnsureDraftWorkspaceSystems(
+    private IReadOnlyList<string> EnsureDraftWorkspaceSystems(
         JsonObject root,
         IReadOnlyList<RfSurveySystemDto> definitions,
         IReadOnlyList<string> requestedNames,
@@ -5408,21 +7646,58 @@ public sealed class RfSurveyService
             var definition = definitions.FirstOrDefault(row => string.Equals(row.ShortName, requested, StringComparison.OrdinalIgnoreCase));
             if (definition == null)
             {
-                warnings.Add($"Workspace system '{requested}' has no frequency definition; it was not added to the TR config draft.");
+                warnings.Add($"Setup system '{requested}' has no frequency definition; it was not added to the TR config draft.");
                 continue;
             }
             JsonObject system = [];
             system["shortName"] = definition.ShortName;
             system["type"] = "p25";
             system["modulation"] = "qpsk";
+            var talkgroupSystem = ResolveTalkgroupSystemShortName(definition, _talkgroups.Load());
+            if (!string.IsNullOrWhiteSpace(talkgroupSystem))
+                system["talkgroupSystemShortName"] = talkgroupSystem;
             system["control_channels"] = new JsonArray(definition.ControlChannelsHz.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
             if (definition.VoiceFrequenciesHz.Count > 0)
                 system["channels"] = new JsonArray(definition.VoiceFrequenciesHz.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
             systems.Add(system);
             names.Add(definition.ShortName);
-            changes.Add($"systems: added {definition.ShortName} from Radio Setup workspace ground truth");
+            changes.Add($"systems: added {definition.ShortName} from selected Setup site definitions");
         }
         return names;
+    }
+
+    private static string ResolveTalkgroupSystemShortName(RfSurveySystemDto definition, TalkgroupCatalogDocument catalog)
+    {
+        if (!string.IsNullOrWhiteSpace(definition.TalkgroupSystemShortName))
+            return TalkgroupCatalogService.NormalizeSystemShortName(definition.TalkgroupSystemShortName);
+        var sid = definition.RadioReferenceSid?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(sid))
+            return string.Empty;
+        var imported = catalog.Imports
+            .Where(row => string.Equals(row.RadioReferenceSid?.Trim(), sid, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(row => row.ImportedAtUtc)
+            .Select(row => row.SystemShortName)
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        if (string.IsNullOrWhiteSpace(imported))
+            imported = catalog.Items
+                .Where(row => string.Equals(row.RadioReferenceSid?.Trim(), sid, StringComparison.OrdinalIgnoreCase))
+                .Select(row => row.SystemShortName)
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        return TalkgroupCatalogService.NormalizeSystemShortName(imported);
+    }
+
+    private static void ValidateReferencedTalkgroupFiles(JsonObject root)
+    {
+        if (root["systems"] is not JsonArray systems)
+            return;
+        var missing = systems
+            .OfType<JsonObject>()
+            .Select(system => system["talkgroupsFile"]?.GetValue<string>() ?? string.Empty)
+            .Where(path => !string.IsNullOrWhiteSpace(path) && !File.Exists(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (missing.Count > 0)
+            throw new InvalidOperationException("Candidate TR config references missing talkgroup catalog file(s): " + string.Join(", ", missing) + ". Monitoring was not changed.");
     }
 
     private void PatchCallstreamStreams(JsonObject root, IReadOnlyList<string> systemShortNames, List<string> changes)
@@ -5442,6 +7717,10 @@ public sealed class RfSurveyService
         callstream["library"] = callstream["library"]?.GetValue<string>() ?? "libcallstream.so";
         callstream["host"] = _config.Ingest.CallstreamBind;
         callstream["port"] = _config.Ingest.CallstreamPort;
+        JsonObject rfTelemetry = [];
+        rfTelemetry["enabled"] = true;
+        rfTelemetry["sample_interval_seconds"] = 15;
+        callstream["rf_telemetry"] = rfTelemetry;
         var clients = new JsonArray();
         JsonObject client = [];
         client["address"] = _config.Ingest.CallstreamBind;
@@ -5458,10 +7737,10 @@ public sealed class RfSurveyService
         }).ToArray());
         var after = callstream["streams"]?.ToJsonString() ?? "null";
         if (!string.Equals(before, after, StringComparison.Ordinal))
-            changes.Add("callstream streams updated for workspace system list");
+            changes.Add("callstream streams updated for Setup system list");
     }
 
-    private static void NormalizeRadioSetupTrConfig(JsonObject root, List<string> changes)
+    private static void NormalizeRadioSetupTrConfig(JsonObject root, List<string> changes, string talkgroupsPath)
     {
         SetRootValue(root, "ver", 2, changes);
         SetRootValue(root, "defaultMode", "digital", changes);
@@ -5479,7 +7758,7 @@ public sealed class RfSurveyService
         if (root["systems"] is JsonArray systems)
         {
             foreach (var system in systems.OfType<JsonObject>())
-                NormalizeRadioSetupSystem(system, changes);
+                NormalizeRadioSetupSystem(system, changes, talkgroupsPath);
         }
 
         if (root["sources"] is JsonArray sources)
@@ -5494,7 +7773,7 @@ public sealed class RfSurveyService
         TrRecorderCapacitySizer.EnsureJsonConfigRecorderCapacity(root, changes);
     }
 
-    private static void NormalizeRadioSetupSystem(JsonObject system, List<string> changes)
+    private static void NormalizeRadioSetupSystem(JsonObject system, List<string> changes, string talkgroupsPath)
     {
         SetObjectValue(system, "system", "type", "p25", changes);
         SetObjectValue(system, "system", "modulation", "qpsk", changes);
@@ -5506,11 +7785,20 @@ public sealed class RfSurveyService
         SetObjectValue(system, "system", "recordUUVCalls", true, changes);
         SetObjectValue(system, "system", "hideEncrypted", true, changes);
         SetObjectValue(system, "system", "hideUnknownTalkgroups", false, changes);
-        SetObjectValue(system, "system", "minDuration", 5, changes);
+        SetObjectValue(system, "system", "minDuration", 0, changes);
         SetObjectValue(system, "system", "minTransmissionDuration", 0, changes);
         SetObjectValue(system, "system", "talkgroupDisplayFormat", "id_tag", changes);
         SetObjectValue(system, "system", "multiSite", true, changes);
-        SetObjectValue(system, "system", "talkgroupsFile", "/etc/trunk-recorder/talkgroups.csv", changes);
+        var shortName = system["shortName"]?.GetValue<string>() ?? system["short_name"]?.GetValue<string>() ?? system["name"]?.GetValue<string>() ?? string.Empty;
+        var talkgroupSystem = system["talkgroupSystemShortName"]?.GetValue<string>() ?? string.Empty;
+        var existingTalkgroupsFile = system["talkgroupsFile"]?.GetValue<string>() ?? string.Empty;
+        var resolvedTalkgroupsFile = !string.IsNullOrWhiteSpace(talkgroupSystem)
+            ? TalkgroupCatalogService.TrCsvPathForSystem(talkgroupsPath, talkgroupSystem)
+            : !string.IsNullOrWhiteSpace(existingTalkgroupsFile)
+                ? existingTalkgroupsFile
+                : TalkgroupCatalogService.TrCsvPathForSystem(talkgroupsPath, shortName);
+        SetObjectValue(system, "system", "talkgroupsFile", resolvedTalkgroupsFile, changes);
+        system.Remove("talkgroupSystemShortName");
 
         var postprocess = system["audio_postprocess"] as JsonObject;
         if (postprocess == null)
@@ -5523,10 +7811,39 @@ public sealed class RfSurveyService
         SetObjectValue(postprocess, "system audio_postprocess", "loudnorm_two_pass", false, changes);
     }
 
+    private static void PatchSourceGainFields(JsonObject source, RfSurveySourceDto? profileSource, string? gain, List<string> changes, int sourceIndex)
+    {
+        if (string.IsNullOrWhiteSpace(gain))
+            return;
+
+        if (IsAirspySource(profileSource))
+        {
+            if (source.Remove("gain"))
+                changes.Add($"source {sourceIndex} gain removed for Airspy stage gains");
+            var stageGains = BuildAirspyStageGains(gain);
+            PatchSourceField(source, "lnaGain", stageGains.Lna, changes, sourceIndex);
+            PatchSourceField(source, "mixGain", stageGains.Mix, changes, sourceIndex);
+            PatchSourceField(source, "ifGain", stageGains.If, changes, sourceIndex);
+            return;
+        }
+
+        if (source.Remove("lnaGain"))
+            changes.Add($"source {sourceIndex} lnaGain removed for generic gain");
+        if (source.Remove("mixGain"))
+            changes.Add($"source {sourceIndex} mixGain removed for generic gain");
+        if (source.Remove("ifGain"))
+            changes.Add($"source {sourceIndex} ifGain removed for generic gain");
+        PatchSourceField(source, "gain", ParseJsonValue(gain), changes, sourceIndex);
+    }
+
+    private static bool HasAirspyStageGains(JsonObject source) =>
+        source.ContainsKey("lnaGain") || source.ContainsKey("mixGain") || source.ContainsKey("ifGain");
+
     private static void NormalizeRadioSetupSource(JsonObject source, int sourceIndex, List<string> changes)
     {
         SetObjectValue(source, $"source {sourceIndex}", "error", 0, changes);
-        SetObjectValue(source, $"source {sourceIndex}", "gain", 32, changes);
+        if (!HasAirspyStageGains(source))
+            SetObjectValue(source, $"source {sourceIndex}", "gain", 32, changes);
         SetObjectValue(source, $"source {sourceIndex}", "digitalRecorders", TrRecorderCapacitySizer.MinimumDigitalRecorders, changes);
         SetObjectValue(source, $"source {sourceIndex}", "analogRecorders", 0, changes);
         SetObjectValue(source, $"source {sourceIndex}", "driver", "osmosdr", changes);
@@ -5591,12 +7908,18 @@ public sealed class RfSurveyService
         };
     }
 
-    private static List<SourceWindow> BuildSourceWindows(IReadOnlyList<long> frequencies, int sampleRate)
+    private static List<SourceWindow> BuildSourceWindows(IReadOnlyList<long> frequencies, int sampleRate, IReadOnlyList<long>? priorityFrequencies = null)
     {
         var rows = new List<SourceWindow>();
         if (frequencies.Count == 0)
             return rows;
-        var span = Math.Max(1, TrUsableHalfBandwidthHz(sampleRate) * 2);
+        var halfSpan = Math.Max(1, TrUsableHalfBandwidthHz(sampleRate));
+        var span = halfSpan * 2;
+        var priorities = (priorityFrequencies ?? [])
+            .Where(value => value > 0)
+            .Distinct()
+            .Order()
+            .ToList();
         var index = 0;
         while (index < frequencies.Count)
         {
@@ -5605,10 +7928,27 @@ public sealed class RfSurveyService
             while (endIndex + 1 < frequencies.Count && frequencies[endIndex + 1] - start <= span)
                 endIndex++;
             var end = frequencies[endIndex];
-            rows.Add(new SourceWindow((long)Math.Round((start + end) / 2.0), start, end, endIndex - index + 1));
+            var center = CenterForSourceWindow(start, end, halfSpan, priorities);
+            rows.Add(new SourceWindow(center, start, end, endIndex - index + 1));
             index = endIndex + 1;
         }
         return rows;
+    }
+
+    private static long CenterForSourceWindow(long start, long end, long halfSpan, IReadOnlyList<long> priorityFrequencies)
+    {
+        var midpoint = (long)Math.Round((start + end) / 2.0, MidpointRounding.AwayFromZero);
+        var minCenter = end - halfSpan;
+        var maxCenter = start + halfSpan;
+        if (minCenter > maxCenter)
+            return midpoint;
+
+        var priority = priorityFrequencies
+            .Where(value => value >= start && value <= end)
+            .OrderBy(value => Math.Abs(value - midpoint))
+            .FirstOrDefault();
+        var desired = priority > 0 ? priority : midpoint;
+        return Math.Clamp(desired, minCenter, maxCenter);
     }
 
     private static void PatchSourceField(JsonObject source, string field, object? value, List<string> changes, int sourceIndex)
@@ -5673,7 +8013,7 @@ public sealed class RfSurveyService
             "source_center" => PatchSourceNumber(root, profile, request.SourceIndex, "center", request.CenterHz, warnings),
             "source_gain" => PatchSourceGain(root, profile, request.SourceIndex, request.Gain, warnings),
             "sample_rate" => PatchSourceNumber(root, profile, request.SourceIndex, "rate", request.SampleRate, warnings),
-            _ => throw new InvalidOperationException("Unsupported Radio Setup candidate trial type.")
+            _ => throw new InvalidOperationException("Unsupported Setup RF validation candidate trial type.")
         };
     }
 
@@ -5778,7 +8118,7 @@ public sealed class RfSurveyService
         var controlChannel = controlChannelHz ?? profile.ControlChannelsHz.FirstOrDefault();
         var blocking = string.Empty;
         if (!configured)
-            blocking = "Radio Setup P25 probe command template is not configured.";
+            blocking = "Setup P25 probe command template is not configured.";
         else if (controlChannel <= 0)
             blocking = "No control channel is available from setup/RR ground truth.";
         else if (profile.Sources.Count == 0)
@@ -5801,7 +8141,7 @@ public sealed class RfSurveyService
             ]);
     }
 
-    private string RenderP25ProbeCommand(RfSurveyProfileDto profile, long controlChannelHz, int? durationSeconds, string outputDir, int? sourceIndex = null)
+    private string RenderP25ProbeCommand(RfSurveyProfileDto profile, long controlChannelHz, int? durationSeconds, string outputDir, int? sourceIndex = null, string? demod = null)
     {
         var source = sourceIndex.HasValue
             ? profile.Sources.FirstOrDefault(s => s.Index == sourceIndex.Value) ?? SelectSourceForFrequency(profile, controlChannelHz)
@@ -5813,6 +8153,10 @@ public sealed class RfSurveyService
             ? 0
             : -source.ErrorHz / (controlChannelHz / 1_000_000.0);
         var p25SampleRate = P25ProbeSampleRate(profile, source);
+        var pinAirspySerial = profile.Sources.Count(IsAirspySource) > 1;
+        var normalizedDemod = NormalizeP25Demod(demod);
+        if (string.IsNullOrWhiteSpace(normalizedDemod))
+            normalizedDemod = "cqpsk";
         var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["{frequency_hz}"] = controlChannelHz.ToString(CultureInfo.InvariantCulture),
@@ -5821,17 +8165,33 @@ public sealed class RfSurveyService
             ["{gain}"] = ShellQuote(NormalizeP25ProbeGain(source?.Gain)),
             ["{error_hz}"] = (source?.ErrorHz ?? 0).ToString(CultureInfo.InvariantCulture),
             ["{error_ppm}"] = errorPpm.ToString("F6", CultureInfo.InvariantCulture),
-            ["{device}"] = ShellQuote(NormalizeP25ProbeDeviceArgs(source, usesTypedGainArgs)),
-            ["{serial}"] = ShellQuote(source?.Serial ?? string.Empty),
+            ["{device}"] = ShellQuote(NormalizeP25ProbeDeviceArgsWithSerialPinning(source, usesTypedGainArgs, pinAirspySerial)),
+            ["{serial}"] = ShellQuote(pinAirspySerial ? source?.Serial ?? string.Empty : string.Empty),
             ["{source_index}"] = (source?.Index ?? -1).ToString(CultureInfo.InvariantCulture),
             ["{duration_seconds}"] = duration.ToString(CultureInfo.InvariantCulture),
             ["{output_dir}"] = ShellQuote(outputDir),
             ["{sdr_type}"] = ShellQuote(source?.SdrType ?? string.Empty),
+            ["{demod}"] = ShellQuote(normalizedDemod),
             ["{p25_gain_args}"] = BuildP25ProbeGainArgs(source)
         };
         foreach (var pair in replacements)
             command = command.Replace(pair.Key, pair.Value, StringComparison.OrdinalIgnoreCase);
+        command = ApplyP25DemodOverride(command, demod);
         return command;
+    }
+
+    private static string ApplyP25DemodOverride(string command, string? demod)
+    {
+        var normalized = NormalizeP25Demod(demod);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return command;
+        var shortDemod = new Regex(@"(?<!\S)-D\s+\S+");
+        if (shortDemod.IsMatch(command))
+            return shortDemod.Replace(command, "-D " + normalized, 1);
+        var longDemod = new Regex(@"(?<!\S)--demod-type(?:=|\s+)\S+");
+        if (longDemod.IsMatch(command))
+            return longDemod.Replace(command, "--demod-type " + normalized, 1);
+        return command + " -D " + normalized;
     }
 
     private static int P25ProbeSampleRate(RfSurveyProfileDto profile, RfSurveySourceDto? source)
@@ -5839,7 +8199,7 @@ public sealed class RfSurveyService
         var requested = Math.Max(0, source?.SampleRate ?? 0);
         if (requested <= 0 || !IsAirspySource(source))
             return requested;
-        return TrRuntimeSampleRate(profile, source, requested);
+        return AirspyRuntimeSampleRate(Math.Max(requested, 6_000_000), AirspySampleRateOptionsForSource(profile, source));
     }
 
     private static RfSurveySourceDto? SelectSourceForFrequency(RfSurveyProfileDto profile, long frequencyHz)
@@ -5888,7 +8248,7 @@ public sealed class RfSurveyService
 
         if (sources.Count == 0)
         {
-            var missing = sourceIndex.HasValue ? $"Source {sourceIndex.Value} is not present in the Radio Setup profile." : "No SDR source is present in the Radio Setup profile.";
+            var missing = sourceIndex.HasValue ? $"Source {sourceIndex.Value} is not present in the Setup RF profile." : "No SDR source is present in the Setup RF profile.";
             return new TrSourceCoverageCheck(false, $"{missing} Select or generate a TR config source before running TR CC Metrics.", rows);
         }
 
@@ -5924,21 +8284,39 @@ public sealed class RfSurveyService
         }
     }
 
-    private static bool HasP25FrameEvidence(string output)
+    private static string FindP25FrameEvidence(string output)
     {
         if (string.IsNullOrWhiteSpace(output))
-            return false;
+            return string.Empty;
         var lowered = output.ToLowerInvariant();
         if (lowered.Contains("no p25", StringComparison.OrdinalIgnoreCase) ||
             lowered.Contains("could not find terminal", StringComparison.OrdinalIgnoreCase) ||
             lowered.Contains("terminal: exception", StringComparison.OrdinalIgnoreCase))
-            return false;
+            return string.Empty;
         var strongMarkers = new[]
         {
-            "tsbk", "nac ", "nac:", "duid", "voice grant", "grp_v_ch_grant", "net_sts_bcst", "rfss_sts_bcst",
+            "tsbk", "duid", "voice grant", "grp_v_ch_grant", "net_sts_bcst", "rfss_sts_bcst",
             "secondary control channel", "mbt"
         };
-        return strongMarkers.Any(lowered.Contains);
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (strongMarkers.Any(marker => line.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+                return TrimOutput(line, 500);
+        }
+        return string.Empty;
+    }
+
+    private static string FindP25SynchronizationEvidence(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return string.Empty;
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (line.Contains("p25_dibit::set_fs_index", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("frame sync", StringComparison.OrdinalIgnoreCase))
+                return TrimOutput(line, 500);
+        }
+        return string.Empty;
     }
 
     private static bool HasP25ProbeToolFailure(string output)
@@ -5998,7 +8376,10 @@ public sealed class RfSurveyService
         };
     }
 
-    private static string NormalizeP25ProbeDeviceArgs(RfSurveySourceDto? source, bool useNamedAirspyStageGains = false)
+    private static string NormalizeP25ProbeDeviceArgs(RfSurveySourceDto? source, bool useNamedAirspyStageGains = false) =>
+        NormalizeP25ProbeDeviceArgsWithSerialPinning(source, useNamedAirspyStageGains, pinAirspySerial: true);
+
+    private static string NormalizeP25ProbeDeviceArgsWithSerialPinning(RfSurveySourceDto? source, bool useNamedAirspyStageGains, bool pinAirspySerial)
     {
         var device = (source?.Device ?? string.Empty).Trim();
         if (!IsAirspySource(source))
@@ -6014,6 +8395,7 @@ public sealed class RfSurveyService
         if (string.IsNullOrWhiteSpace(device))
             return device;
 
+        device = NormalizeAirspyDeviceSelector(device, pinAirspySerial);
         var parts = device
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToList();
@@ -6062,6 +8444,14 @@ public sealed class RfSurveyService
                source.Device.Contains("airspy", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsRtlSource(RfSurveySourceDto? source)
+    {
+        if (source == null || IsAirspySource(source))
+            return false;
+        return string.Equals(source.SdrType, "RTL-SDR", StringComparison.OrdinalIgnoreCase) ||
+               source.Device.Contains("rtl", StringComparison.OrdinalIgnoreCase);
+    }
+
     private string TrUnitName()
     {
         var service = string.IsNullOrWhiteSpace(_config.TrunkRecorder.LogServiceName)
@@ -6085,37 +8475,48 @@ public sealed class RfSurveyService
 
     private async Task<string> InstallTrFileAsync(string sourcePath, string targetPath, CancellationToken ct)
     {
+        string backup;
         if (NeedsProtectedTrWrite(targetPath))
         {
             var helper = FindAdminHelper() ?? throw new FileNotFoundException("pizzawave_setup_admin.sh was not found; protected TR config writes are unavailable.");
             var output = await RunAdminHelperAsync(helper, ["install-tr-file", sourcePath, targetPath], ct);
             if (output.ExitCode != 0)
                 throw new InvalidOperationException($"install-tr-file failed: {output.Output.Trim()}");
-            return output.Output.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Contains(".bak-", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
+            backup = output.Output.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Contains(".bak-", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
         }
-
-        Directory.CreateDirectory(Path.GetDirectoryName(targetPath) ?? ".");
-        var backup = string.Empty;
-        if (File.Exists(targetPath))
+        else
         {
-            backup = $"{targetPath}.bak-{DateTime.UtcNow:yyyyMMddHHmmss}";
-            File.Copy(targetPath, backup, overwrite: false);
+            Directory.CreateDirectory(Path.GetDirectoryName(targetPath) ?? ".");
+            backup = string.Empty;
+            if (File.Exists(targetPath))
+            {
+                backup = $"{targetPath}.bak-{DateTime.UtcNow:yyyyMMddHHmmss}";
+                File.Copy(targetPath, backup, overwrite: false);
+            }
+            File.Copy(sourcePath, targetPath, overwrite: true);
         }
-        File.Copy(sourcePath, targetPath, overwrite: true);
+        if (_configProvenance != null && !string.IsNullOrWhiteSpace(backup))
+        {
+            var activity = Path.GetFileName(Path.GetDirectoryName(sourcePath)) ?? string.Empty;
+            await _configProvenance.RecordAsync(backup, "RF workflow", "Safety backup created before an RF workflow installed a Trunk Recorder configuration.", activity, ct);
+        }
         return backup;
     }
 
-    private async Task<string> RunServiceHelperAsync(string action, CancellationToken ct)
+    private async Task<string> RunServiceHelperAsync(string action, CancellationToken ct, bool stopWaterfallsFirst = true)
     {
         if (OperatingSystem.IsWindows())
             return $"{action} is unavailable on Windows.";
+        var waterfallStopOutput = stopWaterfallsFirst && (string.Equals(action, "start-tr", StringComparison.OrdinalIgnoreCase) || string.Equals(action, "restart-tr", StringComparison.OrdinalIgnoreCase))
+            ? await StopActiveWaterfallsBeforeTrStartAsync(ct)
+            : string.Empty;
         var helper = FindAdminHelper();
         if (!string.IsNullOrWhiteSpace(helper))
         {
             var result = await RunAdminHelperAsync(helper, [action], ct);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"{action} failed: {result.Output.Trim()}");
-            return result.Output;
+            return string.IsNullOrWhiteSpace(waterfallStopOutput) ? result.Output : waterfallStopOutput + Environment.NewLine + result.Output;
         }
 
         var command = action switch
@@ -6128,7 +8529,7 @@ public sealed class RfSurveyService
         var direct = await RunCaptureAsync("systemctl", $"{command} {TrUnitName()}", ct);
         if (direct.ExitCode != 0)
             throw new InvalidOperationException($"systemctl {command} {TrUnitName()} failed: {direct.Stdout.Trim()}");
-        return direct.Stdout;
+        return string.IsNullOrWhiteSpace(waterfallStopOutput) ? direct.Stdout : waterfallStopOutput + Environment.NewLine + direct.Stdout;
     }
 
     private async Task<TrServiceState> QueryTrActiveAsync(CancellationToken ct)
@@ -6408,7 +8809,7 @@ public sealed class RfSurveyService
             string.Equals(c.TranscriptionStatus, "complete", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(c.QualityReason, "ok", StringComparison.OrdinalIgnoreCase) &&
             !string.IsNullOrWhiteSpace(c.Transcription) &&
-            c.Transcription.Trim().Length >= 40);
+            c.Transcription.Trim().Length >= MinUsableTranscriptionGateChars);
 
     private async Task<TranscriptionProviderReadiness> CheckTranscriptionProviderReadinessAsync(CancellationToken ct)
     {
@@ -6528,7 +8929,7 @@ public sealed class RfSurveyService
         if (!combinedRfPassed && LatestStatus(detail.Experiments, "rf_validation_sweep") != "passed")
             rows.Add("Run the combined RF Sweep to rank candidates using RF margin, P25 evidence, and TR CC metrics.");
         if (!combinedRfPassed && LatestStatus(detail.Experiments, "control_channel_quality") != "passed")
-            rows.Add("Measure stable per-control-channel decode quality before treating error/gain sweeps as conclusive.");
+            rows.Add("Measure stable per-control-channel decode quality before treating frequency-correction and gain sweeps as conclusive.");
         if (!combinedRfPassed && LatestStatus(detail.Experiments, "rf_power_scan") != "passed")
             rows.Add("Run RF power scan to confirm the selected control channel stands above the noise floor without overload.");
         if (!combinedRfPassed && LatestStatus(detail.Experiments, "control_channel_p25_probe") != "passed")
@@ -6540,7 +8941,7 @@ public sealed class RfSurveyService
         if (LatestStatus(detail.Experiments, "stability_verdict") != "passed")
             rows.Add("Run a longer stability window when traffic exists, or carry the no-traffic caveat from healthy TR metrics.");
         if (rows.Count == 0)
-            rows.Add("Radio Setup evidence supports applying the plan, subject to operator review.");
+            rows.Add("Setup RF evidence supports applying the plan, subject to operator review.");
         return rows;
     }
 
@@ -6566,7 +8967,7 @@ public sealed class RfSurveyService
     {
         var lines = new List<string>
         {
-            $"# Radio Setup Export: {detail.Session.SiteLabel}",
+            $"# Setup RF Export: {detail.Session.SiteLabel}",
             "",
             $"- Survey: {detail.Session.Id}",
             $"- Verdict: {detail.Session.Verdict}",

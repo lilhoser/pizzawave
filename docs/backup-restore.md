@@ -1,74 +1,100 @@
-# Backup and Restore
+# Backup, Restore, and Support Packages
 
-PizzaWave backups are created from `System > Backup`.
+PizzaWave has two artifact types with different purposes:
 
-The archive includes, when present:
+- A **Backup** is an encrypted, same-system recovery archive. It can be
+  downloaded for safekeeping, but it is not a migration or cloning format.
+- A **Support Package** is a secret-free diagnostic ZIP that an operator can
+  share. It cannot be restored.
 
-- the PizzaWave SQLite database;
-- recorded call audio under the configured audio root, limited by the selected
-  preset window;
-- PizzaWave app data, excluding backup/staging scratch directories;
-- Qdrant storage;
-- PizzaWave config and admin token;
-- trunk-recorder config and talkgroup CSV.
+## Backup
 
-The SQLite database is snapshotted with SQLite before it is added to the
-archive. Qdrant and audio files are copied from disk as they exist at backup
-time, so create backups during quiet periods when possible.
+Create backups from `System > Backup`. New backups use the `.pwbak` format and
+require an operator-entered passphrase of at least 12 characters, entered
+twice. PizzaWave does not store the passphrase. The archive is immediately
+unlocked and its manifest, sizes, and SHA-256 hashes are verified before the
+job is marked complete. If PizzaWave stops during creation, the partial archive
+is discarded and the job must be started again.
 
-App data cache directories such as `cache` and `.cache` are intentionally
-excluded. Portable backups should contain PizzaWave state, not transient model
-downloads or symlink-heavy package caches that can be recreated.
+Every backup includes, when configured and present:
 
-## Estimate
+- the PizzaWave SQLite database, captured with an online SQLite snapshot;
+- PizzaWave configuration, credentials, and authentication token;
+- PizzaWave app data, excluding working/cache directories and raw RF captures;
+- Trunk Recorder configuration and talkgroups;
+- a Qdrant online collection snapshot, downloaded and checksum-verified through
+  Qdrant's snapshot API when embeddings are enabled; and
+- the selected recorded-audio window: none, 24 hours, 7 days, 30 days, 60
+  days, or all.
 
-`System > Backup` shows an estimated backup size before creation. This is a
-source-size estimate across the configured files and directories for the
-selected recorded-audio window; the final compressed archive size can differ.
+The audio selection is the only component choice. Restore applies the scope
+recorded in the backup and does not present another component mixer. Backups
+are never automatically deleted.
 
-PizzaWave does not enforce backup size or age caps. Backup creation includes all
-core configuration/state and the full SQLite database. Recorded call audio can
-be limited to one of the operator presets: last 24 hours, 7 days, 30 days, 60
-days, or all. The audio window is based on audio file timestamps. If the
-estimate is too large for the target system or available time, choose a smaller
-audio window, purge old data, or run maintenance before creating the backup.
+Existing plaintext PizzaWave `.zip` backups remain supported as-is. They are
+listed, downloadable, stageable, and restorable without conversion or special
+warnings.
 
-Existing backup archives can be downloaded or deleted from the same page. Delete
-only removes the local archive; it does not touch live PizzaWave data.
+## Restore
 
-## Restore Flow
+Restore has a nondisruptive staging phase and a disruptive apply phase.
+Uploading or choosing a local backup, entering its passphrase when encrypted,
+decrypting it, validating the manifest, and checking every file do not change
+live data or restart services. A staged restore remains visible until applied
+or canceled. Uploaded archives use verified 4 MiB chunks. An incomplete upload
+can resume after a browser reload or disconnect when the operator reselects the
+same file; incomplete sessions expire after 24 hours. Whole-file SHA-256 is
+verified before decryption begins.
 
-Restore is staged first. Uploading a backup archive validates its manifest,
-checks file sizes and SHA-256 hashes, and returns PizzaWave to setup mode with a
-`Restore` step at the front of the wizard.
+Restore destinations are derived from the current same-system configuration;
+absolute destination paths supplied by an archive are never trusted. Canceling
+a staged restore deletes staging files and changes nothing live.
 
-Applying restore overwrites the backed-up PizzaWave/TR files, restarts Qdrant
-and trunk-recorder when present, and schedules a pizzad restart. The restored
-PizzaWave config is forced back into setup mode so the operator must re-run
-sanity checks before normal operation resumes.
+Apply is destructive. Before apply, PizzaWave must create and verify a backup
+of the current state using the restore passphrase. The final confirmation must
+name every service that will stop or restart, including Trunk Recorder. Apply
+then verifies the restored manifest, SQLite integrity, configuration load,
+PizzaWave health, and included dependent services. Outcomes are `Completed`,
+`Completed with warnings`, or `Failed`, with a durable stage log and guided
+rollback rather than an automatic restart loop.
 
-When the SQLite database is restored, PizzaWave removes stale SQLite WAL/SHM
-sidecar files before and after copying the database snapshot. Those sidecars
-belong to the previous live database and must not be reused with the restored
-snapshot.
+Restore is same-system disaster recovery. It is not a backfill, migration, or
+cross-system cloning path.
 
-Canceling a staged restore clears the pending restore state and removes the
-temporary staging directory. It does not change live PizzaWave, trunk-recorder,
-database, audio, or Qdrant files.
+## Support Package
 
-After applying restore, complete the wizard checks for:
+`System > Backup > Support Package` creates a shareable diagnostic ZIP. The
+default window is the last 24 hours. Its manifest lists the evidence categories
+and sizes, collection failures, exclusions, and redaction count.
 
-- trunk-recorder config and health;
-- talkgroup CSV/catalog;
-- callstream wiring;
-- transcription engine;
-- monitored areas;
-- optional AI, Qdrant/embeddings, alerts, and calibration.
+The default package contains redacted PizzaWave and Trunk Recorder
+configuration, PizzaWave/TR logs, version/runtime information, and database
+table counts without database records. It excludes database files, Qdrant
+data, credentials, authentication tokens, call audio, and transcript text.
+PizzaWave scans the collected files after redaction and does not publish a
+package if authentication-shaped material remains.
 
-Do not treat restore as a backfill path. It is for disaster recovery or cloning
-a known PizzaWave state.
+Call audio or transcript text can be added only through the explicit private-
+evidence opt-in and acknowledgement. That scope is limited to 24 hours, and
+transcripts are capped at 5,000 records. The manifest lists these privacy
+inclusions prominently before download.
 
-For moving a rig to a different geography, RF site, frequency set, or talkgroup
-plan, use [Rig Migration](migration.md) instead of backup/restore. Migration
-preserves portable settings while clearing old site-specific calls, audio,
-vectors, incidents, TR config, talkgroups, and monitored areas.
+Support packages expire after seven days by default. Deleting a support
+package never affects live PizzaWave data or backups.
+
+## Reset
+
+Reset scopes are mutually exclusive:
+
+- `Data Only` briefly pauses PizzaWave ingest, clears operational history, and
+  resumes ingest. It does not stop or restart Trunk Recorder.
+- `Site Reset` also clears site/TR/RF setup state, stops Trunk Recorder, and
+  leaves capture stopped until Setup is deliberately applied.
+- `Full Reset` has the same capture behavior as Site Reset and returns
+  PizzaWave to first-run prerequisites.
+
+When `Create backup before reset` is selected, the passphrase is required and
+the encrypted backup must complete verification before destructive work starts.
+Reset without a backup requires the stronger no-recovery confirmation. Reset
+and restore-apply must be tested only in automated or isolated environments
+unless the operator explicitly authorizes a live recovery drill.

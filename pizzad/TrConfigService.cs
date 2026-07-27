@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -6,39 +8,40 @@ namespace pizzad;
 
 public sealed class TrConfigService
 {
+    private const long MaxViewerArtifactBytes = 4L * 1024L * 1024L;
     private readonly EngineConfig _config;
     private readonly ILogger<TrConfigService> _logger;
+    private readonly TrConfigArtifactProvenanceStore? _provenance;
 
-    public TrConfigService(EngineConfig config, ILogger<TrConfigService> logger)
+    public TrConfigService(EngineConfig config, ILogger<TrConfigService> logger, TrConfigArtifactProvenanceStore? provenance = null)
     {
         _config = config;
         _logger = logger;
+        _provenance = provenance;
     }
 
-    public async Task<TrConfigEditorDto> GetEditorAsync(CancellationToken ct)
+    public async Task<TrConfigViewerDto> GetViewerAsync(IReadOnlyList<RfSurveySessionDto> surveySessions, string? selectedId, CancellationToken ct)
     {
-        var livePath = _config.TrunkRecorder.ConfigPath;
-        var liveJson = File.Exists(livePath) ? await File.ReadAllTextAsync(livePath, ct) : string.Empty;
-        var draftPath = EditorDraftPath();
-        var hasDraft = File.Exists(draftPath);
-        var configJson = hasDraft ? await File.ReadAllTextAsync(draftPath, ct) : liveJson;
-        return BuildEditorDto(livePath, draftPath, configJson, liveJson, hasDraft);
-    }
+        var artifacts = BuildViewerCatalog(surveySessions);
+        var active = artifacts.FirstOrDefault(row => row.IsActive);
+        var selected = artifacts.FirstOrDefault(row => string.Equals(row.Id, selectedId, StringComparison.Ordinal)) ?? active ?? artifacts.FirstOrDefault();
+        var activeRead = active == null ? (Content: string.Empty, Error: string.Empty) : await ReadViewerArtifactAsync(active, ct);
+        var activeJson = activeRead.Content;
+        TrConfigArtifactDetailDto? detail = null;
+        if (selected != null)
+        {
+            var selectedRead = selected.IsActive ? activeRead : await ReadViewerArtifactAsync(selected, ct);
+            detail = string.IsNullOrWhiteSpace(selectedRead.Error)
+                ? BuildViewerDetail(selected, selectedRead.Content)
+                : new TrConfigArtifactDetailDto(selected, selectedRead.Content, false, selectedRead.Error, EmptySummary());
+        }
 
-    public async Task<TrConfigEditorDto> SaveEditorDraftAsync(TrConfigEditorSaveRequest request, CancellationToken ct)
-    {
-        var draftPath = EditorDraftPath();
-        Directory.CreateDirectory(Path.GetDirectoryName(draftPath) ?? ".");
-        await File.WriteAllTextAsync(draftPath, NormalizeText(request.ConfigJson ?? string.Empty), ct);
-        return await GetEditorAsync(ct);
-    }
-
-    public Task ClearEditorDraftAsync(CancellationToken ct)
-    {
-        var path = EditorDraftPath();
-        if (File.Exists(path))
-            File.Delete(path);
-        return Task.CompletedTask;
+        return new TrConfigViewerDto(
+            active?.Id ?? string.Empty,
+            selected?.Id ?? string.Empty,
+            artifacts,
+            detail,
+            activeJson);
     }
 
     public IReadOnlyList<TrConfigBackupDto> ListConfigBackups()
@@ -55,6 +58,17 @@ public sealed class TrConfigService
             .OrderByDescending(file => file.LastWriteTimeUtc)
             .Select(file => new TrConfigBackupDto(file.Name, file.FullName, file.Length, file.LastWriteTimeUtc))
             .ToList();
+    }
+
+    public Task ClearLegacyEditorDraftAsync(CancellationToken ct)
+    {
+        var path = EditorDraftPath();
+        if (!File.Exists(path))
+            return Task.CompletedTask;
+
+        ct.ThrowIfCancellationRequested();
+        File.Delete(path);
+        return Task.CompletedTask;
     }
 
     public async Task<TrConfigRestoreResultDto> RestoreConfigBackupAsync(TrConfigRestoreRequest request, CancellationToken ct)
@@ -93,19 +107,11 @@ public sealed class TrConfigService
             restoreBackup = result.Output.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Contains(".bak-", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
         }
 
+        if (_provenance != null && !string.IsNullOrWhiteSpace(restoreBackup))
+            await _provenance.RecordAsync(restoreBackup, "TR configuration restore", "Safety backup created before restoring another Trunk Recorder configuration.", Path.GetFileName(fullBackupPath), ct);
+
         var serviceOutput = request.RestartTr ? await RestartTrAsync(ct) : "Restart TR when you are ready for the restored config to take effect.";
         return new TrConfigRestoreResultDto(true, $"Restored TR config backup {Path.GetFileName(fullBackupPath)}.", fullBackupPath, restoreBackup, serviceOutput);
-    }
-
-    public async Task<string> GetEditorConfigForApplyAsync(string? configJson, CancellationToken ct)
-    {
-        if (!string.IsNullOrWhiteSpace(configJson))
-            return configJson;
-        var draftPath = EditorDraftPath();
-        if (File.Exists(draftPath))
-            return await File.ReadAllTextAsync(draftPath, ct);
-        var livePath = _config.TrunkRecorder.ConfigPath;
-        return File.Exists(livePath) ? await File.ReadAllTextAsync(livePath, ct) : string.Empty;
     }
 
     public object Validate()
@@ -163,112 +169,169 @@ public sealed class TrConfigService
         }
     }
 
-    public async Task<SetupValidationResult> PatchCallstreamAsync(SetupTrConfigPatchRequest request, CancellationToken ct)
+    private IReadOnlyList<TrConfigArtifactCatalogDto> BuildViewerCatalog(IReadOnlyList<RfSurveySessionDto> surveySessions)
     {
-        var path = _config.TrunkRecorder.ConfigPath;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            return new SetupValidationResult(false, "TR config file was not found.", new { path });
+        var rows = new List<TrConfigArtifactCatalogDto>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var livePath = _config.TrunkRecorder.ConfigPath;
+        AddViewerArtifact(rows, seen, livePath, "active", "Active", "Current active configuration", "Trunk Recorder", "Installed configuration currently read by Trunk Recorder.", "", true, true);
 
-        JsonNode root;
-        try
-        {
-            root = JsonNode.Parse(await File.ReadAllTextAsync(path, ct)) ?? throw new JsonException("empty JSON document");
-        }
-        catch (Exception ex)
-        {
-            return new SetupValidationResult(false, "TR config could not be parsed: " + ex.Message, new { path });
-        }
+        var draftPath = EditorDraftPath();
+        AddViewerArtifact(rows, seen, draftPath, "draft", "Legacy draft", "Unapplied legacy configuration draft", "Retired configuration editor", "Read-only draft retained from the retired standalone configuration editor.", "", true, false);
 
-        if (root is not JsonObject obj)
-            return new SetupValidationResult(false, "TR config root must be a JSON object.", new { path });
-
-        var plugins = obj["plugins"] as JsonArray;
-        if (plugins == null)
+        if (!string.IsNullOrWhiteSpace(livePath))
         {
-            plugins = [];
-            obj["plugins"] = plugins;
-        }
-
-        JsonObject? callstream = null;
-        for (var i = 0; i < plugins.Count; i++)
-        {
-            if (plugins[i] is JsonObject plugin &&
-                string.Equals(plugin["name"]?.GetValue<string>(), "callstream", StringComparison.OrdinalIgnoreCase))
+            var directory = Path.GetDirectoryName(livePath);
+            var liveName = Path.GetFileName(livePath);
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
             {
-                callstream = plugin;
-                break;
+                foreach (var path in Directory.EnumerateFiles(directory, liveName + ".*", SearchOption.TopDirectoryOnly))
+                {
+                    var name = Path.GetFileName(path);
+                    AddViewerArtifact(
+                        rows,
+                        seen,
+                        path,
+                        "backup",
+                        "Backup",
+                        FriendlyBackupName(name, liveName),
+                        "Legacy or automatic safety backup",
+                        "Previous configuration retained before an operator or workflow change. The exact originating workflow was not recorded.",
+                        "",
+                        false,
+                        false);
+                }
             }
         }
 
-        if (callstream == null)
+        foreach (var session in surveySessions)
         {
-            callstream = [];
-            plugins.Add(callstream);
+            if (string.IsNullOrWhiteSpace(session.ArtifactPath) || !Directory.Exists(session.ArtifactPath))
+                continue;
+            var activity = string.IsNullOrWhiteSpace(session.SiteLabel) ? session.Id : $"{session.SiteLabel} · {session.Id}";
+            AddSurveyArtifact(rows, seen, session, "tr-config-before.json", "backup", "Backup", "Configuration before RF workflow", "Configuration captured before the RF workflow changed Trunk Recorder.", activity);
+            AddSurveyArtifact(rows, seen, session, "config-draft.json", "experiment", "Experimental", "RF workflow configuration draft", "Draft produced by RF planning; it is not the active configuration.", activity);
+            AddSurveyArtifact(rows, seen, session, "tr-config-candidate.json", "experiment", "Experimental", "RF workflow candidate", "Candidate configuration produced for RF validation.", activity);
+            AddSurveyArtifacts(rows, seen, session, "tr-config-selected-rf-validation-*.json", "Selected RF validation candidate", "Candidate selected by the RF validation workflow.", activity);
+            AddSurveyArtifacts(rows, seen, session, "tr-config-source-apply*.json", "RF source-plan artifact", "Configuration produced while applying an RF source plan.", activity);
         }
 
-        callstream["name"] = "callstream";
-        callstream["library"] = callstream["library"]?.GetValue<string>() ?? "libcallstream.so";
-        callstream["host"] = _config.Ingest.CallstreamBind;
-        callstream["port"] = _config.Ingest.CallstreamPort;
-        if (request.DisableCaptureDir)
-            obj.Remove("captureDir");
-
-        var helper = FindAdminHelper();
-        string backup;
-        string restartMessage;
-        if (string.IsNullOrWhiteSpace(helper))
-        {
-            backup = $"{path}.bak-{DateTime.UtcNow:yyyyMMddHHmmss}";
-            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
-            File.Copy(path, backup, overwrite: false);
-            await File.WriteAllTextAsync(path, NormalizeJson(obj), ct);
-            restartMessage = request.RestartTr ? await RestartTrAsync(ct) : "Restart TR when you are ready for the change to take effect.";
-        }
-        else
-        {
-            var result = await RunAdminHelperAsync(
-                helper,
-                "patch-callstream",
-                path,
-                _config.Ingest.CallstreamBind,
-                _config.Ingest.CallstreamPort.ToString(),
-                request.DisableCaptureDir ? "1" : "0",
-                request.RestartTr ? TrUnitName() : string.Empty,
-                ct);
-            if (result.ExitCode != 0)
-                return new SetupValidationResult(false, "Callstream patch failed: " + result.Output.Trim(), new { path });
-            backup = result.Output.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Contains(".bak-", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
-            restartMessage = request.RestartTr ? $"Restarted {TrUnitName()}." : "Restart TR when you are ready for the change to take effect.";
-        }
-        _config.Setup.CallstreamValidated = true;
-        await SaveConfigAsync(ct);
-        _logger.LogInformation("Patched callstream in TR config {Path}; backup {Backup}", path, backup);
-
-        var captureMessage = request.DisableCaptureDir ? " Removed captureDir so callstream/PizzaWave owns persistence." : string.Empty;
-        var message = $"Patched callstream config.{captureMessage} {restartMessage}";
-        return new SetupValidationResult(true, message, new { path, backup, target = $"{_config.Ingest.CallstreamBind}:{_config.Ingest.CallstreamPort}", captureDirDisabled = request.DisableCaptureDir, restarted = request.RestartTr });
+        var origins = _provenance?.ReadAll() ?? new Dictionary<string, TrConfigArtifactOrigin>(StringComparer.OrdinalIgnoreCase);
+        return rows
+            .Select(row => origins.TryGetValue(Path.GetFullPath(row.Path), out var origin)
+                ? row with
+                {
+                    CreatedAtUtc = origin.CreatedAtUtc,
+                    Workflow = origin.Workflow,
+                    Reason = origin.Reason,
+                    RelatedActivity = origin.RelatedActivity,
+                    HasRecordedOrigin = true
+                }
+                : row)
+            .OrderBy(row => ViewerKindOrder(row.Kind))
+            .ThenByDescending(row => row.CreatedAtUtc)
+            .ThenBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
-    private TrConfigEditorDto BuildEditorDto(string livePath, string draftPath, string configJson, string liveJson, bool hasDraft)
+    private void AddSurveyArtifact(List<TrConfigArtifactCatalogDto> rows, HashSet<string> seen, RfSurveySessionDto session, string fileName, string kind, string state, string name, string reason, string activity)
     {
-        var summary = EmptySummary();
-        var parseOk = false;
-        var parseMessage = string.Empty;
+        AddViewerArtifact(rows, seen, Path.Combine(session.ArtifactPath, fileName), kind, state, name, $"RF workflow: {session.Status}", reason, activity, true, false);
+    }
+
+    private void AddSurveyArtifacts(List<TrConfigArtifactCatalogDto> rows, HashSet<string> seen, RfSurveySessionDto session, string pattern, string name, string reason, string activity)
+    {
+        foreach (var path in Directory.EnumerateFiles(session.ArtifactPath, pattern, SearchOption.TopDirectoryOnly))
+            AddViewerArtifact(rows, seen, path, "experiment", "Experimental", name, $"RF workflow: {session.Status}", reason, activity, true, false);
+    }
+
+    private static void AddViewerArtifact(List<TrConfigArtifactCatalogDto> rows, HashSet<string> seen, string path, string kind, string state, string name, string workflow, string reason, string activity, bool hasOrigin, bool isActive)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return;
+        var file = new FileInfo(path);
+        if (file.Length <= 0 || file.Length > MaxViewerArtifactBytes)
+            return;
+        var fullPath = file.FullName;
+        if (!seen.Add(fullPath))
+            return;
+        rows.Add(new TrConfigArtifactCatalogDto(
+            ViewerArtifactId(fullPath),
+            kind,
+            state,
+            name,
+            fullPath,
+            file.LastWriteTimeUtc,
+            file.Length,
+            workflow,
+            reason,
+            activity,
+            hasOrigin,
+            isActive));
+    }
+
+    private async Task<(string Content, string Error)> ReadViewerArtifactAsync(TrConfigArtifactCatalogDto artifact, CancellationToken ct)
+    {
+        var file = new FileInfo(artifact.Path);
+        if (!file.Exists || file.Length <= 0 || file.Length > MaxViewerArtifactBytes)
+            return (string.Empty, "Configuration artifact is missing or outside the viewer size limit.");
+        try
+        {
+            return (await File.ReadAllTextAsync(file.FullName, ct), string.Empty);
+        }
+        catch (UnauthorizedAccessException) when (!OperatingSystem.IsWindows() && artifact.Path.StartsWith("/etc/trunk-recorder/config.json", StringComparison.Ordinal))
+        {
+            var helper = FindAdminHelper();
+            if (string.IsNullOrWhiteSpace(helper))
+                return (string.Empty, "Configuration artifact exists but PizzaWave does not have permission to read it.");
+            var result = await RunAdminHelperAsync(helper, "read-tr-config-artifact", artifact.Path, string.Empty, string.Empty, string.Empty, string.Empty, ct);
+            return result.ExitCode == 0
+                ? (result.Output, string.Empty)
+                : (string.Empty, "Configuration artifact could not be read safely: " + result.Output.Trim());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (string.Empty, "Configuration artifact could not be read: " + ex.Message);
+        }
+    }
+
+    private static TrConfigArtifactDetailDto BuildViewerDetail(TrConfigArtifactCatalogDto artifact, string configJson)
+    {
         try
         {
             var root = JsonNode.Parse(string.IsNullOrWhiteSpace(configJson) ? "{}" : configJson) as JsonObject
                 ?? throw new JsonException("TR config root must be a JSON object.");
-            summary = Summarize(root);
-            parseOk = true;
-            parseMessage = "Valid JSON.";
+            return new TrConfigArtifactDetailDto(artifact, configJson, true, "Valid JSON.", Summarize(root));
         }
         catch (Exception ex)
         {
-            parseMessage = ex.Message;
+            return new TrConfigArtifactDetailDto(artifact, configJson, false, ex.Message, EmptySummary());
         }
-
-        return new TrConfigEditorDto(livePath, draftPath, configJson, liveJson, hasDraft, parseOk, parseMessage, summary);
     }
+
+    private static string ViewerArtifactId(string path)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant()));
+        return Convert.ToHexString(hash[..12]).ToLowerInvariant();
+    }
+
+    private static string FriendlyBackupName(string fileName, string liveName)
+    {
+        var suffix = fileName.StartsWith(liveName + ".", StringComparison.OrdinalIgnoreCase)
+            ? fileName[(liveName.Length + 1)..]
+            : fileName;
+        suffix = suffix.Replace(".bak", "", StringComparison.OrdinalIgnoreCase).Replace('_', ' ').Replace('-', ' ').Trim();
+        return string.IsNullOrWhiteSpace(suffix) ? "Configuration backup" : suffix;
+    }
+
+    private static int ViewerKindOrder(string kind) => kind switch
+    {
+        "active" => 0,
+        "draft" => 1,
+        "backup" => 2,
+        "experiment" => 3,
+        _ => 4
+    };
 
     private string EditorDraftPath() =>
         Path.Combine(_config.Storage.AppDataRoot, "tr-config-editor-draft.json");
@@ -366,9 +429,6 @@ public sealed class TrConfigService
 
     private static string NormalizeJson(JsonNode node) =>
         node.ToJsonString(EngineConfig.JsonOptions()).Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd() + "\n";
-
-    private static string NormalizeText(string text) =>
-        text.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd() + "\n";
 
     private async Task<string> RestartTrAsync(CancellationToken ct)
     {

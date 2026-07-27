@@ -39,12 +39,16 @@ artifacts/
 *.dll
 *.exe
 *.pdb
+__pycache__/
+*.py[cod]
 *.ilk
 *.exp
 *.lastcodeanalysissucceeded
 *.nupkg
 *.snupkg
 *.symbols.nupkg
+__pycache__/
+*.py[cod]
 
 # Publish output
 publish/
@@ -76,6 +80,7 @@ artifacts/
 node_modules/
 npm-debug.log
 yarn-error.log
+*.tsbuildinfo
 
 # macOS
 .DS_Store

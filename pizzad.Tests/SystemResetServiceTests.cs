@@ -2,79 +2,51 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Security.Cryptography;
 
 namespace pizzad.Tests;
 
-public sealed class MigrationServiceTests
+public sealed class SystemResetServiceTests
 {
     [Fact]
-    public async Task ResetForNewSite_RequiresBeginMigration()
-    {
-        using var temp = new TempMigrationStore();
-        var database = temp.CreateDatabase();
-        await database.InitializeAsync(CancellationToken.None);
-        await temp.SeedCallAsync(database);
-        var service = temp.CreateService(database);
-
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetForNewSiteAsync(new MigrationResetRequestDto(), CancellationToken.None));
-
-        Assert.Contains("Begin migration mode", error.Message);
-        Assert.True(File.Exists(temp.AudioFile));
-        Assert.True(File.Exists(temp.TrConfigPath));
-    }
-
-    [Fact]
-    public async Task CancelBeforeReset_RestoresPreviousCompletedState()
-    {
-        using var temp = new TempMigrationStore();
-        var database = temp.CreateDatabase();
-        await database.InitializeAsync(CancellationToken.None);
-        var service = temp.CreateService(database);
-
-        await service.BeginAsync(CancellationToken.None);
-        var cancel = await service.CancelAsync(CancellationToken.None);
-
-        Assert.True(cancel.Ok);
-        Assert.True(temp.Config.Setup.Completed);
-        Assert.Equal("complete", temp.Config.Setup.CurrentStep);
-        Assert.False(temp.Config.Setup.MigrationMode);
-        Assert.True(File.Exists(temp.AudioFile));
-    }
-
-    [Fact]
-    public async Task ResetForNewSite_ClearsQdrantEvenWhenSetupIncomplete()
+    public async Task SiteReset_ClearsQdrantEvenWhenSetupIncomplete()
     {
         using var qdrant = await FakeQdrantServer.StartAsync();
         using var temp = new TempMigrationStore();
         temp.Config.Setup.Completed = false;
-        temp.Config.Setup.MigrationMode = true;
-        temp.Config.Setup.MigrationStartedAtUtc = DateTime.UtcNow;
         temp.Config.Embeddings.Enabled = true;
         temp.Config.Embeddings.OpenAiBaseUrl = "http://embedding.invalid/v1";
         temp.Config.Embeddings.OpenAiModel = "nomic-embed-text";
         temp.Config.Embeddings.QdrantBaseUrl = qdrant.BaseUrl;
-        temp.Config.Embeddings.Collection = "migration_test";
+        temp.Config.Embeddings.Collection = "reset_test";
         var database = temp.CreateDatabase();
         await database.InitializeAsync(CancellationToken.None);
         await temp.SeedCallAsync(database);
         var service = temp.CreateService(database);
 
-        var result = await service.ResetForNewSiteAsync(new MigrationResetRequestDto(), CancellationToken.None);
+        var result = await service.ResetAsync(new SystemResetRequestDto
+        {
+            Presets = ["site-reset"],
+            CreateBackup = true,
+            BackupPassphrase = "correct horse battery staple",
+            BackupPassphraseConfirmation = "correct horse battery staple"
+        }, CancellationToken.None);
 
         Assert.True(result.Ok);
         Assert.NotNull(result.Backup);
-        Assert.Contains("/collections/migration_test", qdrant.Requests);
+        Assert.Contains("/collections/reset_test", qdrant.Requests);
         Assert.False(File.Exists(temp.AudioFile));
         Assert.False(File.Exists(temp.TrConfigPath));
         Assert.False(File.Exists(temp.TrTalkgroupsPath));
         Assert.False(File.Exists(temp.TalkgroupCatalogPath));
         Assert.Equal("freshTr", temp.Config.Setup.InstallMode);
         Assert.True(temp.Config.Embeddings.Enabled);
-        Assert.Equal("migration_test", temp.Config.Embeddings.Collection);
+        Assert.Equal("reset_test", temp.Config.Embeddings.Collection);
+        Assert.True(temp.Config.Setup.Completed);
     }
 
     [Fact]
-    public async Task ResetForNewSite_OnlyPreservesSelectedSettings()
+    public async Task SiteReset_OnlyPreservesSelectedSettings()
     {
         using var temp = new TempMigrationStore();
         temp.Config.Branding.StackName = "Old Site";
@@ -88,15 +60,15 @@ public sealed class MigrationServiceTests
         temp.Config.Alerts.EmailEnabled = true;
         temp.Config.Alerts.Playback.Enabled = true;
         temp.Config.RfSurvey.P25ProbeDurationSeconds = 75;
-        temp.Config.Setup.MigrationMode = true;
-        temp.Config.Setup.MigrationStartedAtUtc = DateTime.UtcNow;
         var database = temp.CreateDatabase();
         await database.InitializeAsync(CancellationToken.None);
         var service = temp.CreateService(database);
 
-        await service.ResetForNewSiteAsync(new MigrationResetRequestDto
+        await service.ResetAsync(new SystemResetRequestDto
         {
+            Presets = ["site-reset"],
             CreateBackup = false,
+            ConfirmNoBackup = true,
             PreserveBranding = false,
             PreserveTranscription = true,
             PreserveAiInsights = true,
@@ -119,21 +91,68 @@ public sealed class MigrationServiceTests
     }
 
     [Fact]
-    public async Task CancelAfterReset_IsRejected()
+    public async Task FailedSafetyBackup_DoesNotPauseLiveIngest()
     {
         using var temp = new TempMigrationStore();
-        temp.Config.Setup.MigrationMode = true;
-        temp.Config.Setup.MigrationStartedAtUtc = DateTime.UtcNow;
-        temp.Config.Setup.MigrationResetAtUtc = DateTime.UtcNow;
         var database = temp.CreateDatabase();
         await database.InitializeAsync(CancellationToken.None);
-        var service = temp.CreateService(database);
+        var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
+        var service = temp.CreateService(database, ingest);
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CancelAsync(CancellationToken.None));
+        Directory.Delete(temp.AppDataRoot, recursive: true);
+        await File.WriteAllTextAsync(temp.AppDataRoot, "blocks backup directory creation");
 
-        Assert.Contains("cannot be canceled", error.Message);
-        Assert.True(temp.Config.Setup.MigrationMode);
-        Assert.NotNull(temp.Config.Setup.MigrationResetAtUtc);
+        await Assert.ThrowsAnyAsync<IOException>(() => service.ResetAsync(new SystemResetRequestDto
+        {
+            Presets = ["data-only"],
+            CreateBackup = true,
+            BackupPassphrase = "correct horse battery staple",
+            BackupPassphraseConfirmation = "correct horse battery staple"
+        }, CancellationToken.None));
+
+        Assert.False(ingest.Paused);
+    }
+
+    [Theory]
+    [InlineData("custom")]
+    [InlineData("unknown")]
+    public async Task UnsupportedResetScope_IsRejectedWithoutPausingIngest(string scope)
+    {
+        using var temp = new TempMigrationStore();
+        var database = temp.CreateDatabase();
+        await database.InitializeAsync(CancellationToken.None);
+        var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
+        var service = temp.CreateService(database, ingest);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetAsync(new SystemResetRequestDto
+        {
+            Presets = [scope],
+            CreateBackup = false,
+            ConfirmNoBackup = true
+        }, CancellationToken.None));
+
+        Assert.Contains("Unsupported reset scope", error.Message);
+        Assert.False(ingest.Paused);
+    }
+
+    [Fact]
+    public async Task MultipleResetScopes_AreRejectedWithoutPausingIngest()
+    {
+        using var temp = new TempMigrationStore();
+        var database = temp.CreateDatabase();
+        await database.InitializeAsync(CancellationToken.None);
+        var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
+        var service = temp.CreateService(database, ingest);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetAsync(new SystemResetRequestDto
+        {
+            Presets = ["data-only", "full-reset"],
+            CreateBackup = false,
+            ConfirmNoBackup = true
+        }, CancellationToken.None));
+
+        Assert.Contains("exactly one reset scope", error.Message);
+        Assert.False(ingest.Paused);
     }
 
     private sealed class TempMigrationStore : IDisposable
@@ -174,7 +193,7 @@ public sealed class MigrationServiceTests
                 },
                 Profiles = new ProfileConfig
                 {
-                    Items = [new ProcessingProfile { Name = "Old profile", AllowedTalkgroups = [1001] }]
+                    Items = [new ProcessingProfile { Name = "Old profile", Talkgroups = [new ProfileTalkgroupSetting { SystemShortName = "old", Id = 1001, Enabled = false }] }]
                 },
                 Locations = new LocationConfig
                 {
@@ -197,15 +216,15 @@ public sealed class MigrationServiceTests
 
         public EngineDatabase CreateDatabase() => new(Config, NullLogger<EngineDatabase>.Instance);
 
-        public MigrationService CreateService(EngineDatabase database)
+        public SystemResetService CreateService(EngineDatabase database, IngestControlService? ingest = null)
         {
             var events = new EventStream();
-            var embeddings = new EmbeddingService(Config, database, events, NullLogger<EmbeddingService>.Instance);
-            var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
-            var credentials = new CredentialStore(Config, NullLogger<CredentialStore>.Instance);
+            var catalog = new TalkgroupCatalogService(Config, NullLogger<TalkgroupCatalogService>.Instance);
+            var embeddings = new EmbeddingService(Config, database, events, catalog, NullLogger<EmbeddingService>.Instance);
+            ingest ??= new IngestControlService(NullLogger<IngestControlService>.Instance);
             var auth = new AuthService(Config, NullLogger<AuthService>.Instance);
             var backups = new BackupRestoreService(Config, NullLogger<BackupRestoreService>.Instance);
-            return new MigrationService(Config, database, embeddings, ingest, credentials, auth, backups, NullLogger<MigrationService>.Instance);
+            return new SystemResetService(Config, database, embeddings, ingest, auth, backups, NullLogger<SystemResetService>.Instance);
         }
 
         public async Task<long> SeedCallAsync(EngineDatabase database) =>
@@ -236,6 +255,7 @@ public sealed class MigrationServiceTests
 
     private sealed class FakeQdrantServer : IDisposable
     {
+        private static readonly byte[] Snapshot = Encoding.UTF8.GetBytes("qdrant snapshot data");
         private readonly HttpListener _listener = new();
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _loop;
@@ -283,7 +303,20 @@ public sealed class MigrationServiceTests
                 lock (Requests)
                     Requests.Add(context.Request.RawUrl ?? string.Empty);
                 context.Response.StatusCode = 200;
-                var body = Encoding.UTF8.GetBytes("{\"result\":true}");
+                byte[] body;
+                if (context.Request.HttpMethod == "POST" && (context.Request.RawUrl ?? string.Empty).Contains("/snapshots", StringComparison.Ordinal))
+                {
+                    var checksum = Convert.ToHexString(SHA256.HashData(Snapshot)).ToLowerInvariant();
+                    body = Encoding.UTF8.GetBytes($"{{\"result\":{{\"name\":\"reset-test.snapshot\",\"checksum\":\"{checksum}\"}},\"status\":\"ok\"}}");
+                }
+                else if (context.Request.HttpMethod == "GET" && (context.Request.RawUrl ?? string.Empty).EndsWith(".snapshot", StringComparison.Ordinal))
+                {
+                    body = Snapshot;
+                }
+                else
+                {
+                    body = Encoding.UTF8.GetBytes("{\"result\":true}");
+                }
                 await context.Response.OutputStream.WriteAsync(body);
                 context.Response.Close();
             }

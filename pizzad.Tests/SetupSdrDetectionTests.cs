@@ -35,7 +35,7 @@ public sealed class SetupSdrDetectionTests
         Assert.Equal("Airspy", airspy.Type);
         Assert.Equal("26A464DC28793293", airspy.Serial);
         Assert.Equal("airspy=26A464DC28793293", airspy.DeviceArgs);
-        Assert.Equal(3_000_000, airspy.DefaultSampleRate);
+        Assert.Equal(6_000_000, airspy.DefaultSampleRate);
         Assert.Contains(6_000_000, airspy.SampleRateOptions);
     }
 

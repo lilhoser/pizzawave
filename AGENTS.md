@@ -1,7 +1,7 @@
 # Agent Instructions
 
-This repository contains the PizzaWave engine, web UI, setup tooling, RF survey
-workflow, deployment scripts, and operational documentation.
+This repository contains the PizzaWave engine, web UI, Setup tooling, RF
+validation workflow, deployment scripts, and operational documentation.
 
 ## Worktree Rule
 
@@ -31,22 +31,44 @@ dotnet test C:\projects\pizzawave\pizzad.Tests\pizzad.Tests.csproj --no-restore
 - Built web assets are checked into `pizzad/wwwroot`.
 - If web source changes, rebuild the UI before committing generated assets.
 
+## Deployment Helpers
+
+- Use the automatic direct-deploy helper for development deployments:
+
+```powershell
+.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@100.105.110.92 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
+```
+
+- The helper hashes deployable inputs and compares them with the live manifest.
+  It performs only a health check when nothing changed, automatically uses a
+  no-restart web-only deployment for frontend changes, and publishes/restarts
+  only for backend changes. Do not manually choose a full deployment for a UI
+  change.
+- `-WebOnly` and `-BackendOnly` remain explicit overrides. `-ForceBuild`
+  invalidates local build caches; `-ForceDeploy` repeats the smallest valid
+  deployment. Use `-BackendOnly -ForceDeploy` only when a full reinstall is
+  genuinely required.
+- The helper prints per-stage timing and must fail on any build, archive,
+  upload, remote-install, or health-check error.
+- Do not restart `trunk-recorder` as part of deploy verification unless the user
+  explicitly asks. Verify `pizzad` health with `/api/v1/health`.
+
 ## Repo Map
 
-- `pizzad/`: engine, API server, AI incident logic, setup, RF survey, TR health,
+- `pizzad/`: engine, API server, AI incident logic, Setup, RF validation, TR health,
   transcription, embeddings, and web hosting.
 - `pizzad.Tests/`: .NET test suite.
 - `pizzad/web/`: React/Vite web UI source.
 - `scripts/`: deployment, setup, diagnostics, and replay helpers.
 - `docs/`: operator docs, status docs, architecture notes, and field notes.
 
-## Radio Setup And RF Diagnostics
+## Setup And RF Diagnostics
 
 - Treat [docs/rf-path-survey-mode.md](docs/rf-path-survey-mode.md) as the
-  canonical Radio Setup workflow reference.
+  canonical Setup RF validation workflow reference.
 - For field antenna comparisons, use the relevant log under `docs/field-tests/`
   as the run book and evidence record.
-- Prefer PizzaWave API endpoints for Radio Setup, TR health, and RF analysis.
+- Prefer PizzaWave API endpoints for Setup, TR health, and RF analysis.
   Do not use old user-local Codex RF diagnostic skills or standalone scripts as
   the primary workflow.
 - For 30-minute antenna A/B baselines, record exact Unix start/end timestamps
@@ -88,6 +110,10 @@ dotnet test C:\projects\pizzawave\pizzad.Tests\pizzad.Tests.csproj --no-restore
 ## Git Hygiene
 
 - Commit focused changes with a clear message.
+- Before integrating a task branch into `main`, always squash its task commits
+  into one cohesive commit. Do not add merge commits or preserve incremental
+  experiment/checkpoint commits on `main` unless the user explicitly requests
+  their history be retained.
 - Do not include temporary artifacts, local telemetry dumps, or unrelated
   generated files unless they are intentionally part of the task.
 - Before committing, run `git status --short` and review the exact file list.

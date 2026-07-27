@@ -240,6 +240,7 @@ callstream["name"] = "callstream"
 callstream["library"] = callstream.get("library") or "libcallstream.so"
 callstream["host"] = host
 callstream["port"] = port
+callstream["rf_telemetry"] = {"enabled": True, "sample_interval_seconds": 15}
 if disable_capture_dir:
     data.pop("captureDir", None)
 
@@ -326,6 +327,19 @@ if dest.name == "config.json":
         print(f"Warning: installed TR config, but could not prepare tempDir ownership: {exc}", file=sys.stderr)
 print(backup)
 PY
+}
+
+read_tr_config_artifact() {
+  local path="${2:?TR config artifact path required}"
+  case "$path" in
+    /etc/trunk-recorder/config.json|/etc/trunk-recorder/config.json.*) ;;
+    *) echo "Refusing TR config artifact outside the approved config family: $path" >&2; return 2 ;;
+  esac
+  [[ -f "$path" && ! -L "$path" ]] || { echo "TR config artifact is not a regular file: $path" >&2; return 2; }
+  local bytes
+  bytes="$(stat -c %s -- "$path")"
+  (( bytes > 0 && bytes <= 4194304 )) || { echo "TR config artifact size is outside the viewer limit: $bytes bytes" >&2; return 2; }
+  cat -- "$path"
 }
 
 restart_pizzad() {
@@ -546,56 +560,77 @@ for row in entries:
     if expected and sha256(source) != expected:
         raise SystemExit(f"Checksum mismatch before restore: {source}")
 
-for row in entries:
-    source = Path(real(row.get("sourcePath", "")))
-    target = Path(os.path.realpath(row.get("targetPath", "")))
-    if target.exists():
-        backup = backup_root / target.relative_to("/")
-        backup.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(target, backup)
-    if target.name.endswith(".db"):
-        for sidecar_suffix in ("-wal", "-shm"):
-            sidecar = Path(str(target) + sidecar_suffix)
-            if sidecar.exists():
-                backup = backup_root / sidecar.relative_to("/")
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(sidecar, backup)
-                sidecar.unlink()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.parent / (target.name + f".restore-tmp-{os.getpid()}")
-    shutil.copy2(source, tmp)
-    os.replace(tmp, target)
-    if target.name.endswith(".db"):
-        for sidecar_suffix in ("-wal", "-shm"):
-            sidecar = Path(str(target) + sidecar_suffix)
-            if sidecar.exists():
-                sidecar.unlink()
+mutated = []
+try:
+    for row in entries:
+        source = Path(real(row.get("sourcePath", "")))
+        target = Path(os.path.realpath(row.get("targetPath", "")))
+        existed = target.exists()
+        if existed:
+            backup = backup_root / target.relative_to("/")
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target, backup)
+        if target.name.endswith(".db"):
+            for sidecar_suffix in ("-wal", "-shm"):
+                sidecar = Path(str(target) + sidecar_suffix)
+                if sidecar.exists():
+                    backup = backup_root / sidecar.relative_to("/")
+                    backup.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(sidecar, backup)
+                    sidecar.unlink()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.parent / (target.name + f".restore-tmp-{os.getpid()}")
+        shutil.copy2(source, tmp)
+        os.replace(tmp, target)
+        mutated.append((target, existed))
+        if target.name.endswith(".db"):
+            for sidecar_suffix in ("-wal", "-shm"):
+                sidecar = Path(str(target) + sidecar_suffix)
+                if sidecar.exists():
+                    sidecar.unlink()
 
-config_path = Path("/etc/pizzawave/pizzad.json")
-if config_path.exists():
-    with config_path.open("r", encoding="utf-8-sig") as handle:
-        config = json.load(handle)
-    setup = config.setdefault("setup", {})
-    setup["completed"] = False
-    setup["completedAtUtc"] = None
-    setup["currentStep"] = "tr"
-    setup["installMode"] = "reuseExistingTr"
-    setup["restoreAppliedAtUtc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    for key in (
-        "trDetected",
-        "trConfigured",
-        "talkgroupsValidated",
-        "callstreamValidated",
-        "transcriptionValidated",
-        "monitoredAreasValidated",
-        "healthValidated",
-    ):
-        setup[key] = False
-    setup["pendingRestorePath"] = ""
-    setup["pendingRestoreManifestJson"] = ""
-    tmp_config = config_path.with_name(config_path.name + f".restore-setup-tmp-{os.getpid()}")
-    tmp_config.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp_config, config_path)
+    config_path = Path("/etc/pizzawave/pizzad.json")
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8-sig") as handle:
+            config = json.load(handle)
+        setup = config.setdefault("setup", {})
+        setup["completed"] = False
+        setup["completedAtUtc"] = None
+        setup["currentStep"] = "tr"
+        setup["installMode"] = "reuseExistingTr"
+        setup["restoreAppliedAtUtc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        for key in (
+            "trDetected",
+            "trConfigured",
+            "talkgroupsValidated",
+            "callstreamValidated",
+            "transcriptionValidated",
+            "monitoredAreasValidated",
+            "healthValidated",
+        ):
+            setup[key] = False
+        setup["pendingRestorePath"] = ""
+        setup["pendingRestoreManifestJson"] = ""
+        tmp_config = config_path.with_name(config_path.name + f".restore-setup-tmp-{os.getpid()}")
+        tmp_config.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp_config, config_path)
+except Exception:
+    for target, existed in reversed(mutated):
+        backup = backup_root / target.relative_to("/")
+        if existed and backup.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(backup, target)
+        elif not existed and target.exists():
+            target.unlink()
+        if target.name.endswith(".db"):
+            for sidecar_suffix in ("-wal", "-shm"):
+                sidecar = Path(str(target) + sidecar_suffix)
+                sidecar_backup = backup_root / sidecar.relative_to("/")
+                if sidecar_backup.exists():
+                    shutil.copy2(sidecar_backup, sidecar)
+                elif sidecar.exists():
+                    sidecar.unlink()
+    raise
 
 print(f"Restore copied {len(entries)} file(s). Previous files were backed up under {backup_root}.")
 PY
@@ -607,84 +642,76 @@ PY
   chmod 0640 /etc/pizzawave/pizzad.token 2>/dev/null || true
   chown root:root /etc/trunk-recorder/config.json /etc/trunk-recorder/talkgroups.csv 2>/dev/null || true
   systemctl restart qdrant.service 2>/dev/null || true
+  python3 - "$real_plan" <<'PY'
+import http.client
+import json
+import os
+import sys
+import time
+import uuid
+from pathlib import Path
+from urllib.parse import quote, urlsplit
+
+with open(sys.argv[1], "r", encoding="utf-8-sig") as handle:
+    plan = json.load(handle)
+snapshots = [row for row in (plan.get("entries") or []) if row.get("kind") == "qdrant-snapshot"]
+if snapshots:
+    with open("/etc/pizzawave/pizzad.json", "r", encoding="utf-8-sig") as handle:
+        config = json.load(handle)
+    embeddings = config.get("embeddings") or {}
+    base_url = embeddings.get("qdrantBaseUrl") or "http://localhost:6333"
+    api_key = embeddings.get("qdrantApiKey") or ""
+    collection = embeddings.get("collection") or "pizzawave_calls"
+    parsed = urlsplit(base_url)
+    connection_type = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+
+    for row in snapshots:
+        snapshot = Path(row["targetPath"])
+        if not snapshot.is_file():
+            raise SystemExit(f"Staged Qdrant snapshot is missing: {snapshot}")
+        boundary = "----pizzawave-" + uuid.uuid4().hex
+        prefix = (
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"snapshot\"; filename=\"{snapshot.name}\"\r\n"
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8")
+        suffix = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        endpoint = (parsed.path.rstrip("/") + f"/collections/{quote(collection, safe='')}/snapshots/upload?wait=true&priority=snapshot")
+        last_error = None
+        for attempt in range(30):
+            try:
+                connection = connection_type(parsed.hostname, parsed.port, timeout=600)
+                connection.putrequest("POST", endpoint)
+                connection.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
+                connection.putheader("Content-Length", str(len(prefix) + snapshot.stat().st_size + len(suffix)))
+                if api_key:
+                    connection.putheader("api-key", api_key)
+                connection.endheaders()
+                connection.send(prefix)
+                with snapshot.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        connection.send(chunk)
+                connection.send(suffix)
+                response = connection.getresponse()
+                body = response.read().decode("utf-8", errors="replace")
+                connection.close()
+                if 200 <= response.status < 300:
+                    snapshot.unlink()
+                    last_error = None
+                    break
+                last_error = f"HTTP {response.status}: {body[:500]}"
+            except Exception as error:
+                last_error = str(error)
+            time.sleep(1)
+        if last_error:
+            raise SystemExit(f"Qdrant snapshot recovery failed: {last_error}")
+PY
   systemctl restart trunk-recorder.service 2>/dev/null || true
   nohup sh -c 'sleep 1; systemctl restart pizzad.service' >/tmp/pizzawave-restore-restart-pizzad.log 2>&1 &
   echo "Restore applied. qdrant/trunk-recorder were restarted when present; pizzad restart scheduled."
 }
 
-begin_migration() {
-  local config="${2:-/etc/pizzawave/pizzad.json}"
-  python3 - "$config" <<'PY'
-import grp
-import json
-import os
-import shutil
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-path = Path(sys.argv[1])
-if path.resolve() != Path("/etc/pizzawave/pizzad.json"):
-    raise SystemExit(f"Refusing migration config outside /etc/pizzawave/pizzad.json: {path}")
-data = json.loads(path.read_text(encoding="utf-8-sig"))
-setup = data.setdefault("setup", {})
-if not setup.get("migrationMode"):
-    setup["migrationPreviousCompleted"] = bool(setup.get("completed"))
-    setup["migrationPreviousCurrentStep"] = setup.get("currentStep") or ("complete" if setup.get("completed") else "stack")
-setup["completed"] = False
-setup["currentStep"] = "migration"
-setup["migrationMode"] = True
-setup["migrationStartedAtUtc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-backup_dir = Path("/var/backups/pizzawave/migration-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
-backup_dir.mkdir(parents=True, exist_ok=True)
-shutil.copy2(path, backup_dir / "pizzad.json")
-tmp = path.with_name(path.name + f".migration-tmp-{os.getpid()}")
-tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-os.chown(tmp, 0, grp.getgrnam("pizzawave").gr_gid)
-os.chmod(tmp, 0o660)
-os.replace(tmp, path)
-print(f"Migration mode enabled. Previous config copied to {backup_dir}.")
-PY
-  nohup sh -c 'sleep 1; systemctl restart pizzad.service' >/tmp/pizzawave-migration-restart-pizzad.log 2>&1 &
-}
-
-cancel_migration() {
-  local config="${2:-/etc/pizzawave/pizzad.json}"
-  python3 - "$config" <<'PY'
-import grp
-import json
-import os
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-if path.resolve() != Path("/etc/pizzawave/pizzad.json"):
-    raise SystemExit(f"Refusing migration config outside /etc/pizzawave/pizzad.json: {path}")
-data = json.loads(path.read_text(encoding="utf-8-sig"))
-setup = data.setdefault("setup", {})
-reset_applied = bool(setup.get("migrationResetAtUtc"))
-setup["migrationMode"] = False
-setup["migrationStartedAtUtc"] = None
-setup["migrationResetAtUtc"] = None
-if reset_applied:
-    setup["completed"] = False
-    setup["currentStep"] = "tr"
-else:
-    setup["completed"] = bool(setup.get("migrationPreviousCompleted"))
-    setup["currentStep"] = setup.get("migrationPreviousCurrentStep") or ("complete" if setup.get("completed") else "stack")
-setup["migrationPreviousCompleted"] = False
-setup["migrationPreviousCurrentStep"] = ""
-tmp = path.with_name(path.name + f".migration-cancel-tmp-{os.getpid()}")
-tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-os.chown(tmp, 0, grp.getgrnam("pizzawave").gr_gid)
-os.chmod(tmp, 0o660)
-os.replace(tmp, path)
-print("Migration mode canceled.")
-PY
-  nohup sh -c 'sleep 1; systemctl restart pizzad.service' >/tmp/pizzawave-migration-restart-pizzad.log 2>&1 &
-}
-
-reset_migration_site_files() {
+reset_site_files() {
   local tr_config="${2:-/etc/trunk-recorder/config.json}"
   local talkgroups="${3:-/etc/trunk-recorder/talkgroups.csv}"
   systemctl stop trunk-recorder.service 2>/dev/null || true
@@ -695,7 +722,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 targets = [Path(sys.argv[1]), Path(sys.argv[2])]
-backup_dir = Path("/var/backups/pizzawave/migration-site-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
+backup_dir = Path("/var/backups/pizzawave/site-reset-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
 backup_dir.mkdir(parents=True, exist_ok=True)
 for target in targets:
     if not str(target).startswith("/etc/trunk-recorder/"):
@@ -703,7 +730,7 @@ for target in targets:
     if target.exists():
         shutil.copy2(target, backup_dir / target.name)
         target.unlink()
-print(f"Site-specific TR files reset. Previous files were backed up under {backup_dir}.")
+print(f"Site TR files reset. Previous files were backed up under {backup_dir}.")
 PY
 }
 
@@ -770,6 +797,9 @@ case "$ACTION" in
   install-tr-file)
     install_tr_file "$@"
     ;;
+  read-tr-config-artifact)
+    read_tr_config_artifact "$@"
+    ;;
   restart-pizzad)
     restart_pizzad
     ;;
@@ -788,20 +818,14 @@ case "$ACTION" in
   apply-staged-restore)
     apply_staged_restore "$@"
     ;;
-  begin-migration)
-    begin_migration "$@"
-    ;;
-  cancel-migration)
-    cancel_migration "$@"
-    ;;
-  reset-migration-site-files)
-    reset_migration_site_files "$@"
+  reset-site-files)
+    reset_site_files "$@"
     ;;
   install-auth-token)
     install_auth_token "$@"
     ;;
   *)
-    echo "Usage: $0 {backup-existing-tr|remove-legacy-apps|stop-tr|start-tr|install-tr-watchdog|record-tr-fault|stop-calibration|restart-tr|restart-qdrant|patch-callstream|detect-sdrs|install-tr-file|restart-pizzad|install-sdr-tools|install-diagnostic-tools|install-qdrant|install-pizzad-config|apply-staged-restore|begin-migration|cancel-migration|reset-migration-site-files|install-auth-token}" >&2
+    echo "Usage: $0 {backup-existing-tr|remove-legacy-apps|stop-tr|start-tr|install-tr-watchdog|record-tr-fault|stop-calibration|restart-tr|restart-qdrant|patch-callstream|detect-sdrs|install-tr-file|read-tr-config-artifact|restart-pizzad|install-sdr-tools|install-diagnostic-tools|install-qdrant|install-pizzad-config|apply-staged-restore|reset-site-files|install-auth-token}" >&2
     exit 2
     ;;
 esac

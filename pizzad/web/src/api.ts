@@ -5,6 +5,19 @@ export type AuthTokenRequest = {
 
 export type AuthTokenProvider = (request: AuthTokenRequest) => Promise<string | null>;
 
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function isRetriableRefreshError(error: unknown) {
+  if (error instanceof ApiError)
+    return error.status === 408 || error.status === 429 || error.status >= 500;
+  return error instanceof TypeError && error.message === "Failed to fetch";
+}
+
 export class ApiClient {
   private authTokenProvider: AuthTokenProvider | null = null;
 
@@ -72,7 +85,7 @@ export class ApiClient {
     } catch {
       // Keep the raw response text when the body is not JSON.
     }
-    throw new Error(message);
+    throw new ApiError(message, response.status);
   }
 }
 

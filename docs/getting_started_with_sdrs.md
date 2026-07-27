@@ -15,9 +15,10 @@ completed calls to `pizzad`.
 | Decode rate | Control-channel message decode quality |
 | Retune | trunk-recorder switched control-channel target |
 
-## Wizard Flow
+## Setup Flow
 
-The first-run wizard can:
+First-run only verifies or installs host prerequisites. SDR and
+trunk-recorder monitoring work happens in Setup. Setup can:
 
 - detect RTL-SDR USB devices;
 - detect an existing trunk-recorder config;
@@ -27,17 +28,17 @@ The first-run wizard can:
 - assist with gain/error calibration.
 
 If an existing trunk-recorder service is running, SDR detection or calibration
-may require stopping it. The wizard should ask first and restart services on
+may require stopping it. Setup should ask first and restart services on
 cancel where possible.
 
 ## Calibration
 
 Calibration is intentionally guided:
 
-1. The wizard identifies systems, control channels, source coverage, and SDRs.
+1. Setup identifies systems, control channels, source coverage, and SDRs.
 2. The user supplies initial gain/error values from GQRX or chooses to skip.
 3. PizzaWave runs bounded tuning sweeps and shows log output.
-4. The wizard presents findings and lets the user apply or reject changes.
+4. Setup presents findings and lets the user apply or reject changes.
 
 GQRX may require a desktop session. On headless installs, open GQRX manually on
 the Pi/host desktop if the service cannot launch it.

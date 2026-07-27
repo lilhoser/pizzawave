@@ -38,7 +38,7 @@ public sealed class IncidentPlanExecutorV3Tests
         Assert.Equal("create_incident", operation.ExecutionAction);
         Assert.True(operation.WouldMutate);
         Assert.True(operation.Blocked);
-        Assert.Contains("live_create_new_not_implemented", result.BlockReasons);
+        Assert.Contains("incident_v3_retired_shadow_only", result.BlockReasons);
     }
 
     [Fact]
@@ -52,7 +52,8 @@ public sealed class IncidentPlanExecutorV3Tests
         Assert.Equal("dry_run", result.Mode);
         Assert.False(result.CanMutate);
         Assert.Equal(1, result.BlockedOperationCount);
-        Assert.Contains("unsupported_target_incident_id", result.BlockReasons);
+        Assert.Contains(result.BlockReasons, reason =>
+            reason.Contains("unsupported_target_incident_id", StringComparison.OrdinalIgnoreCase));
         Assert.True(Assert.Single(result.Operations).Blocked);
     }
 
@@ -76,7 +77,7 @@ public sealed class IncidentPlanExecutorV3Tests
     }
 
     [Fact]
-    public void BuildExecutionPlan_LiveModeAllowsOnlyUpdateCurrentAgainstActiveTargets()
+    public void BuildExecutionPlan_RetiredV3NeverAllowsLiveUpdateCurrent()
     {
         var executor = new IncidentPlanExecutorV3();
         var result = executor.BuildExecutionPlan(
@@ -86,20 +87,20 @@ public sealed class IncidentPlanExecutorV3Tests
             ],
             new IncidentPlanExecutionOptionsV3(Enabled: true, DryRun: false));
 
-        Assert.Equal("live_update_current", result.Mode);
-        Assert.True(result.CanMutate);
+        Assert.Equal("blocked", result.Mode);
+        Assert.False(result.CanMutate);
         Assert.Equal(2, result.OperationCount);
         Assert.Equal(1, result.MutatingOperationCount);
-        Assert.Equal(0, result.BlockedOperationCount);
-        Assert.Empty(result.BlockReasons);
+        Assert.Equal(1, result.BlockedOperationCount);
+        Assert.Contains("incident_v3_retired_shadow_only", result.BlockReasons);
         Assert.Contains(result.Operations, operation =>
             operation.PlanAction == "update_current" &&
             operation.WouldMutate &&
-            !operation.Blocked);
+            operation.Blocked);
     }
 
     [Fact]
-    public void BuildExecutionPlan_LiveModeAllowsUpdateCurrentWhileCreateRemainsBlocked()
+    public void BuildExecutionPlan_RetiredV3BlocksEveryWriteAction()
     {
         var executor = new IncidentPlanExecutorV3();
         var result = executor.BuildExecutionPlan(
@@ -109,20 +110,20 @@ public sealed class IncidentPlanExecutorV3Tests
             ],
             new IncidentPlanExecutionOptionsV3(Enabled: true, DryRun: false));
 
-        Assert.Equal("live_update_current_partial", result.Mode);
-        Assert.True(result.CanMutate);
+        Assert.Equal("blocked", result.Mode);
+        Assert.False(result.CanMutate);
         Assert.Equal(2, result.MutatingOperationCount);
-        Assert.Equal(1, result.BlockedOperationCount);
-        Assert.Contains("live_create_new_not_implemented", result.BlockReasons);
+        Assert.Equal(2, result.BlockedOperationCount);
+        Assert.Contains("incident_v3_retired_shadow_only", result.BlockReasons);
         Assert.Contains(result.Operations, operation =>
             operation.PlanAction == "update_current" &&
             operation.WouldMutate &&
-            !operation.Blocked);
+            operation.Blocked);
         Assert.Contains(result.Operations, operation =>
             operation.PlanAction == "create_new" &&
             operation.WouldMutate &&
             operation.Blocked &&
-            operation.BlockedBecause.Contains("live_create_new_not_implemented", StringComparison.OrdinalIgnoreCase));
+            operation.BlockedBecause.Contains("incident_v3_retired_shadow_only", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
@@ -143,7 +144,7 @@ public sealed class IncidentPlanExecutorV3Tests
     }
 
     [Fact]
-    public void BuildExecutionPlan_BlocksLiveCreatesUntilExecutionIsImplemented()
+    public void BuildExecutionPlan_RetiredV3BlocksLiveCreates()
     {
         var executor = new IncidentPlanExecutorV3();
         var result = executor.BuildExecutionPlan(
@@ -152,7 +153,7 @@ public sealed class IncidentPlanExecutorV3Tests
 
         Assert.Equal("blocked", result.Mode);
         Assert.False(result.CanMutate);
-        Assert.Contains("live_create_new_not_implemented", result.BlockReasons);
+        Assert.Contains("incident_v3_retired_shadow_only", result.BlockReasons);
     }
 
     private static IncidentPlanDecisionV3 Plan(

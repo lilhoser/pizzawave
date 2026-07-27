@@ -8,6 +8,15 @@ namespace pizzad.Tests;
 
 public sealed class RfSurveyMultiSystemTests
 {
+    private static RfSurveyService CreateService(EngineConfig config, EngineDatabase database, SetupCalibrationService calibration) =>
+        new(
+            config,
+            database,
+            calibration,
+            null!,
+            new TalkgroupCatalogService(config, NullLogger<TalkgroupCatalogService>.Instance),
+            NullLogger<RfSurveyService>.Instance);
+
     [Fact]
     public void BuildProfile_AggregatesSelectedSystems()
     {
@@ -34,12 +43,14 @@ public sealed class RfSurveyMultiSystemTests
             };
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
 
             var profile = service.BuildProfile(new RfSurveyCreateRequest(
                 SystemShortName: "raymond",
-                SystemShortNames: ["raymond", "utica"]));
+                SystemShortNames: ["raymond", "utica"],
+                RadioReferenceSid: "12345"));
 
+            Assert.Equal("12345", profile.RadioReferenceSid);
             Assert.Equal(["raymond", "utica"], profile.SystemShortNames);
             Assert.Equal("raymond", profile.SystemShortName);
             Assert.Equal([773031250, 774281250], profile.ControlChannelsHz);
@@ -78,7 +89,7 @@ public sealed class RfSurveyMultiSystemTests
             };
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
 
             var profile = service.BuildProfile(new RfSurveyCreateRequest(
                 SiteLabel: "Radio Setup",
@@ -126,7 +137,7 @@ public sealed class RfSurveyMultiSystemTests
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             await database.InitializeAsync(CancellationToken.None);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
             var profile = new RfSurveyProfileDto
             {
                 SiteLabel = "airspy-test-1",
@@ -195,6 +206,34 @@ public sealed class RfSurveyMultiSystemTests
             Assert.Equal(summary, updated.Session.SourcePlanSummary);
             Assert.Equal([0], updated.Profile.SelectedSourceIndexes);
             Assert.Equal(4, updated.Profile.CurrentStep);
+
+            var siteSetupArtifactPath = Path.Combine(root, "site-setup");
+            Directory.CreateDirectory(siteSetupArtifactPath);
+            var siteSetupSession = session with { Id = "site-setup", ArtifactPath = siteSetupArtifactPath };
+            await database.AddRfSurveySessionAsync(
+                siteSetupSession,
+                JsonSerializer.Serialize(profile, EngineConfig.JsonOptions()),
+                JsonSerializer.Serialize(new RfSurveyToolPrepDto(DateTime.UtcNow, true, true, true, true, [], []), EngineConfig.JsonOptions()),
+                CancellationToken.None);
+            var authoritativeDefinitions = new RfSurveySystemDto[]
+            {
+                new("chattanooga", "Chattanooga", [855212500, 856237500], []),
+                new("cleveland", "Cleveland", [851050000], [])
+            };
+
+            var refreshedSiteSetup = await service.UpdateDraftAsync("site-setup", new RfSurveyDraftUpdateRequest(
+                SystemShortName: profile.SystemShortName,
+                SiteLabel: profile.SiteLabel,
+                SelectedSourceIndexes: [0],
+                CurrentStep: 4,
+                SystemShortNames: profile.SystemShortNames,
+                SourcePlanSystemShortNames: profile.SourcePlanSystemShortNames,
+                SourcePlanMode: profile.SourcePlanMode,
+                SystemDefinitions: authoritativeDefinitions,
+                SdrSources: profile.Sources), CancellationToken.None);
+
+            Assert.Equal([855212500, 856237500], refreshedSiteSetup.Profile.Systems.Single(system => system.ShortName == "chattanooga").ControlChannelsHz);
+            Assert.Equal("draft", refreshedSiteSetup.Session.Status);
         }
         finally
         {
@@ -204,7 +243,7 @@ public sealed class RfSurveyMultiSystemTests
     }
 
     [Fact]
-    public async Task GetAsync_ReusesLatestPrerequisiteCheckForEmptyWorkspace()
+    public async Task GetAsync_ShowsReusablePrerequisiteCheckWithoutMutatingWorkspace()
     {
         var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-toolprep-reuse-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
@@ -229,7 +268,7 @@ public sealed class RfSurveyMultiSystemTests
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             await database.InitializeAsync(CancellationToken.None);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
             var profile = new RfSurveyProfileDto
             {
                 SiteLabel = "raymond",
@@ -276,6 +315,7 @@ public sealed class RfSurveyMultiSystemTests
                 SiteLabel = "empty",
                 SystemShortName = "raymond",
                 ArtifactPath = Path.Combine(root, "rf-empty"),
+                CreatedAtUtc = DateTime.UtcNow.AddHours(-2),
                 UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-1)
             };
             Directory.CreateDirectory(staleEditedSession.ArtifactPath);
@@ -305,10 +345,394 @@ public sealed class RfSurveyMultiSystemTests
             Assert.True(detail!.ToolPrep?.ReadyForControlChannelTests);
             Assert.Single(detail.ToolPrep!.Tools);
             Assert.Equal("p25", detail.ToolPrep.Tools[0].Id);
-            Assert.True(storedPrep?.ReadyForControlChannelTests);
+            Assert.Equal(emptySession.UpdatedAtUtc.ToUniversalTime(), stored.Value.Session.UpdatedAtUtc.ToUniversalTime());
+            Assert.False(storedPrep?.ReadyForControlChannelTests);
+            Assert.Empty(storedPrep!.Tools);
+            Assert.False(File.Exists(Path.Combine(emptySession.ArtifactPath, "tool-prep.json")));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveTalkgroupSystemShortName_UsesRadioReferenceImportOwnership()
+    {
+        var definition = new RfSurveySystemDto("jackson-ms-hinds-ms", "Jackson", [855_287_500], [], "8202", "");
+        var catalog = new TalkgroupCatalogDocument
+        {
+            Imports = [new TalkgroupCatalogImport { RadioReferenceSid = "8202", SystemShortName = "Entergy", ImportedAtUtc = DateTime.UtcNow }]
+        };
+        var method = typeof(RfSurveyService).GetMethod("ResolveTalkgroupSystemShortName", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "ResolveTalkgroupSystemShortName");
+
+        var resolved = (string)method.Invoke(null, [definition, catalog])!;
+
+        Assert.Equal("entergy", resolved);
+    }
+
+    [Fact]
+    public async Task GetAsync_InvalidatesSiteSetupSoftwareCheckForDifferentAppliedConfig()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-software-revision-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = new EngineConfig
+            {
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = Path.Combine(root, "tr-config.json") },
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = root, AppDataRoot = root }
+            };
+            File.WriteAllText(config.TrunkRecorder.ConfigPath, "{}");
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
+            var service = CreateService(config, database, calibration);
+            var session = new RfSurveySessionDto
+            {
+                Id = "site-setup",
+                Status = "source_plan_applied",
+                SiteLabel = "Site Setup",
+                ArtifactPath = Path.Combine(root, "site-setup"),
+                CreatedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            Directory.CreateDirectory(session.ArtifactPath);
+            var prep = new RfSurveyToolPrepDto(
+                DateTime.UtcNow,
+                true,
+                true,
+                true,
+                true,
+                [new("p25", "P25", "p25", true, true, "Available", "rx.py", "P25 probe", "Available")],
+                [])
+            {
+                AppliedConfigHash = "old-config"
+            };
+            await database.AddRfSurveySessionAsync(
+                session,
+                JsonSerializer.Serialize(new RfSurveyProfileDto { SiteLabel = "Site Setup" }, EngineConfig.JsonOptions()),
+                JsonSerializer.Serialize(prep, EngineConfig.JsonOptions()),
+                CancellationToken.None);
+
+            var detail = await service.GetAsync("site-setup", CancellationToken.None, appliedConfigHash: "new-config");
+            var stored = await database.GetRfSurveySessionAsync("site-setup", CancellationToken.None);
+            var storedPrep = JsonSerializer.Deserialize<RfSurveyToolPrepDto>(stored!.Value.ToolPrepJson, EngineConfig.JsonOptions());
+
+            Assert.NotNull(detail);
+            Assert.Empty(detail!.ToolPrep!.Tools);
+            Assert.Equal("new-config", detail.ToolPrep.AppliedConfigHash);
+            Assert.Contains(detail.ToolPrep.Warnings, warning => warning.Contains("not been checked", StringComparison.OrdinalIgnoreCase));
             Assert.Single(storedPrep!.Tools);
-            Assert.Equal("p25", storedPrep.Tools[0].Id);
-            Assert.True(File.Exists(Path.Combine(emptySession.ArtifactPath, "tool-prep.json")));
+            Assert.Equal("old-config", storedPrep.AppliedConfigHash);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunToolPrepAsync_PreservesConfigurationAndSessionStatus()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-software-check-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = new EngineConfig
+            {
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = Path.Combine(root, "tr-config.json") },
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = root, AppDataRoot = root }
+            };
+            File.WriteAllText(config.TrunkRecorder.ConfigPath, "{}");
+            config.RfSurvey.P25ProbeCommandTemplate = string.Empty;
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
+            var service = CreateService(config, database, calibration);
+            var session = new RfSurveySessionDto
+            {
+                Id = "site-setup",
+                Status = "source_plan_applied",
+                SiteLabel = "Site Setup",
+                ArtifactPath = Path.Combine(root, "site-setup"),
+                CreatedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            Directory.CreateDirectory(session.ArtifactPath);
+            await database.AddRfSurveySessionAsync(
+                session,
+                JsonSerializer.Serialize(new RfSurveyProfileDto { SiteLabel = "Site Setup" }, EngineConfig.JsonOptions()),
+                JsonSerializer.Serialize(new RfSurveyToolPrepDto(DateTime.UtcNow, false, false, false, false, [], []), EngineConfig.JsonOptions()),
+                CancellationToken.None);
+
+            var prep = await service.RunToolPrepAsync("site-setup", "applied-config", false, CancellationToken.None);
+            var stored = await database.GetRfSurveySessionAsync("site-setup", CancellationToken.None);
+            var storedPrep = JsonSerializer.Deserialize<RfSurveyToolPrepDto>(stored!.Value.ToolPrepJson, EngineConfig.JsonOptions());
+            var repeated = await service.RunToolPrepAsync("site-setup", "applied-config", false, CancellationToken.None);
+            var storedAfterRepeat = await database.GetRfSurveySessionAsync("site-setup", CancellationToken.None);
+
+            Assert.Equal("applied-config", prep.AppliedConfigHash);
+            Assert.NotEmpty(prep.Tools);
+            Assert.Equal(string.Empty, config.RfSurvey.P25ProbeCommandTemplate);
+            Assert.Equal("source_plan_applied", stored.Value.Session.Status);
+            Assert.Equal("applied-config", storedPrep!.AppliedConfigHash);
+            Assert.Equal(prep.GeneratedAtUtc, repeated.GeneratedAtUtc);
+            Assert.Equal(stored.Value.Session.UpdatedAtUtc, storedAfterRepeat!.Value.Session.UpdatedAtUtc);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateDraft_DoesNotRefreshSavedWorkspaceFromLiveTr()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-draft-preserve-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var artifactPath = Path.Combine(root, "rf-test");
+            Directory.CreateDirectory(artifactPath);
+            var trConfigPath = Path.Combine(root, "tr-config.json");
+            File.WriteAllText(trConfigPath, """
+                {
+                  "sources": [
+                    { "center": 856412500, "rate": 2400000, "error": 0, "gain": 28, "device": "rtl=active-tr" }
+                  ],
+                  "systems": [
+                    { "shortName": "hinds-county-simulcast-2-hinds", "control_channels": [856237500] }
+                  ]
+                }
+                """);
+            var config = new EngineConfig
+            {
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath },
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = root, AppDataRoot = root }
+            };
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
+            var service = CreateService(config, database, calibration);
+            var profile = new RfSurveyProfileDto
+            {
+                SiteLabel = "airspyMini-Hinds-Simulcast2",
+                RadioReferenceSid = "12345",
+                SystemShortName = "hinds-county-simulcast-2-hinds",
+                SystemShortNames = ["hinds-county-simulcast-2-hinds"],
+                SourcePlanSystemShortNames = ["hinds-county-simulcast-2-hinds"],
+                Systems =
+                [
+                    new("hinds-county-simulcast-2-hinds", "Hinds County Simulcast 2 Hinds", [851775000, 852212500], [])
+                ],
+                ControlChannelsHz = [851775000, 852212500],
+                Sources =
+                [
+                    new(0, "airspy=637862DC2E457DD7", "637862DC2E457DD7", "Airspy", 852506250, 6000000, 0, "15")
+                ],
+                SourceOverride = false,
+                SelectedSourceIndexes = [0],
+                CurrentStep = 1
+            };
+            var session = new RfSurveySessionDto
+            {
+                Id = "rf-test",
+                Status = "draft",
+                SiteLabel = profile.SiteLabel,
+                SystemShortName = profile.SystemShortName,
+                ArtifactPath = artifactPath
+            };
+            await database.AddRfSurveySessionAsync(
+                session,
+                JsonSerializer.Serialize(profile, EngineConfig.JsonOptions()),
+                JsonSerializer.Serialize(new RfSurveyToolPrepDto(DateTime.UtcNow, true, true, true, true, [], []), EngineConfig.JsonOptions()),
+                CancellationToken.None);
+
+            var updated = await service.UpdateDraftAsync("rf-test", new RfSurveyDraftUpdateRequest(
+                SystemShortName: profile.SystemShortName,
+                SiteLabel: profile.SiteLabel,
+                SystemShortNames: profile.SystemShortNames,
+                SourcePlanSystemShortNames: profile.SourcePlanSystemShortNames,
+                CurrentStep: 2), CancellationToken.None);
+
+            Assert.Equal("12345", updated.Profile.RadioReferenceSid);
+            Assert.Equal([851775000, 852212500], updated.Profile.ControlChannelsHz);
+            Assert.Equal("637862DC2E457DD7", updated.Profile.Sources.Single().Serial);
+            Assert.Equal(852506250, updated.Profile.Sources.Single().CenterHz);
+            Assert.DoesNotContain(updated.Profile.Warnings, warning => warning.Contains("No TR system was available", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildProfile_SavedDefinitionsAndSourcesOverrideLiveTrFacts()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-saved-facts-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var trConfigPath = Path.Combine(root, "tr-config.json");
+            File.WriteAllText(trConfigPath, """
+                {
+                  "sources": [
+                    { "center": 856412500, "rate": 2400000, "error": 0, "gain": 28, "device": "rtl=stale-live" }
+                  ],
+                  "systems": [
+                    { "shortName": "hinds-county-simulcast-2-hinds", "control_channels": [856237500] }
+                  ]
+                }
+                """);
+            var config = new EngineConfig
+            {
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath },
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = root, AppDataRoot = root }
+            };
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
+            var service = CreateService(config, database, calibration);
+
+            var profile = service.BuildProfile(new RfSurveyCreateRequest(
+                SystemShortName: "hinds-county-simulcast-2-hinds",
+                SiteLabel: "airspyMini-Hinds-Simulcast2",
+                SystemShortNames: ["hinds-county-simulcast-2-hinds"],
+                SystemDefinitions:
+                [
+                    new("hinds-county-simulcast-2-hinds", "Hinds County Simulcast 2 Hinds", [851775000, 852212500], [])
+                ],
+                SdrSources:
+                [
+                    new(0, "airspy=637862DC2E457DD7", "637862DC2E457DD7", "Airspy", 852506250, 6000000, 0, "15")
+                ],
+                RadioReferenceSid: "12345"));
+
+            Assert.Equal("12345", profile.RadioReferenceSid);
+            Assert.Equal([851775000, 852212500], profile.ControlChannelsHz);
+            Assert.Equal("637862DC2E457DD7", profile.Sources.Single().Serial);
+            Assert.DoesNotContain(profile.Warnings, warning => warning.Contains("No TR system was available", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ApplyP25DemodOverride_ReplacesConfiguredDemod()
+    {
+        var method = typeof(RfSurveyService).GetMethod("ApplyP25DemodOverride", BindingFlags.NonPublic | BindingFlags.Static);
+
+        var command = (string)method!.Invoke(null, ["rx.py --args 'airspy=abc' -D cqpsk -f 851775000", "fsk4"])!;
+
+        Assert.Contains("-D fsk4", command);
+        Assert.DoesNotContain("-D cqpsk", command);
+    }
+
+    [Fact]
+    public void ReadP25DemodSequence_DefaultsToFsk4ThenCqpsk()
+    {
+        var method = typeof(RfSurveyService).GetMethod("ReadP25DemodSequence", BindingFlags.NonPublic | BindingFlags.Static);
+        var parameters = JsonSerializer.SerializeToElement(new { });
+
+        var demods = (IReadOnlyList<string>)method!.Invoke(null, [parameters])!;
+
+        Assert.Equal(["fsk4", "cqpsk"], demods);
+    }
+
+    [Fact]
+    public async Task GetAsync_DoesNotRefreshSavedProfileFromLiveTrConfig()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-rfsurvey-readonly-profile-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var trConfigPath = Path.Combine(root, "tr-config.json");
+            File.WriteAllText(trConfigPath, """
+                {
+                  "sources": [
+                    { "center": 856225000, "rate": 2400000, "error": 0, "gain": 28, "device": "rtl=00000002" }
+                  ],
+                  "systems": [
+                    { "shortName": "tacn-chattanooga", "control_channels": [856237500] }
+                  ]
+                }
+                """);
+            var config = new EngineConfig
+            {
+                TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath },
+                Storage = new StorageConfig { DatabasePath = Path.Combine(root, "pizzad.db"), AudioRoot = root, AppDataRoot = root }
+            };
+            var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
+            var service = CreateService(config, database, calibration);
+            var artifactPath = Path.Combine(root, "rf-raymond");
+            Directory.CreateDirectory(artifactPath);
+            var savedUpdatedAt = DateTime.UtcNow.AddHours(-1);
+            var profile = new RfSurveyProfileDto
+            {
+                SiteLabel = "airspyMini-Hinds-Simulcast2",
+                RadioReferenceSid = "4879",
+                SystemShortName = "mswin-etv-raymond",
+                SystemShortNames = ["mswin-etv-raymond", "mswin-utica"],
+                SourcePlanSystemShortNames = ["mswin-etv-raymond", "mswin-utica"],
+                SourcePlanMode = "full",
+                Systems =
+                [
+                    new("mswin-etv-raymond", "ETV Raymond Hinds", [773031250, 773281250], [770081250]),
+                    new("mswin-utica", "Utica Hinds", [774281250, 774531250], [769581250])
+                ],
+                ControlChannelsHz = [773031250, 773281250, 774281250, 774531250],
+                VoiceFrequenciesHz = [769581250, 770081250],
+                Sources =
+                [
+                    new(0, "airspy=26A464DC28793293", "26A464DC28793293", "Airspy", 772000000, 3000000, 0, "15")
+                ],
+                SourceOverride = true,
+                SelectedSourceIndexes = [0],
+                Warnings = ["No TR system was available. Complete setup/TR config before running Radio Setup."]
+            };
+            var session = new RfSurveySessionDto
+            {
+                Id = "rf-raymond",
+                Status = "draft",
+                SiteLabel = profile.SiteLabel,
+                SystemShortName = profile.SystemShortName,
+                ArtifactPath = artifactPath,
+                CreatedAtUtc = savedUpdatedAt.AddMinutes(-10),
+                UpdatedAtUtc = savedUpdatedAt
+            };
+            var profileJson = JsonSerializer.Serialize(profile, EngineConfig.JsonOptions());
+            await database.AddRfSurveySessionAsync(
+                session,
+                profileJson,
+                JsonSerializer.Serialize(new RfSurveyToolPrepDto(DateTime.UtcNow.AddDays(-1), false, false, false, false, [], []), EngineConfig.JsonOptions()),
+                CancellationToken.None);
+
+            var detail = await service.GetAsync("rf-raymond", CancellationToken.None);
+            var stored = await database.GetRfSurveySessionAsync("rf-raymond", CancellationToken.None);
+            var storedProfile = JsonSerializer.Deserialize<RfSurveyProfileDto>(stored!.Value.ProfileJson, EngineConfig.JsonOptions());
+
+            Assert.NotNull(detail);
+            Assert.Equal("mswin-etv-raymond", detail!.Profile.SystemShortName);
+            Assert.Equal(["mswin-etv-raymond", "mswin-utica"], detail.Profile.SystemShortNames);
+            Assert.Contains(detail.Profile.Systems, system => system.SiteLabel == "ETV Raymond Hinds");
+            Assert.DoesNotContain(detail.Profile.Systems, system => system.ShortName == "tacn-chattanooga");
+            Assert.Equal("4879", detail.Profile.RadioReferenceSid);
+            Assert.DoesNotContain(detail.Profile.Warnings, warning => warning.Contains("No TR system was available", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(savedUpdatedAt.ToUniversalTime(), stored.Value.Session.UpdatedAtUtc.ToUniversalTime());
+            Assert.Equal("mswin-etv-raymond", storedProfile?.SystemShortName);
+            Assert.Contains(storedProfile!.Warnings, warning => warning.Contains("No TR system was available", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(profileJson, stored.Value.ProfileJson);
         }
         finally
         {
@@ -367,7 +791,7 @@ public sealed class RfSurveyMultiSystemTests
             };
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
 
             var profile = service.BuildProfile(new RfSurveyCreateRequest(
                 SystemShortName: "utica",
@@ -420,7 +844,7 @@ public sealed class RfSurveyMultiSystemTests
             };
             var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
             var calibration = new SetupCalibrationService(config, database, NullLogger<SetupCalibrationService>.Instance);
-            var service = new RfSurveyService(config, database, calibration, null!, NullLogger<RfSurveyService>.Instance);
+            var service = CreateService(config, database, calibration);
             var profile = new RfSurveyProfileDto
             {
                 SystemShortName = "chattanooga",
@@ -451,14 +875,20 @@ public sealed class RfSurveyMultiSystemTests
             var rootElement = document.RootElement;
             var system = rootElement.GetProperty("systems")[0];
             var stream = rootElement.GetProperty("plugins")[0].GetProperty("streams")[0];
+            var rfTelemetry = rootElement.GetProperty("plugins")[0].GetProperty("rf_telemetry");
             var source = rootElement.GetProperty("sources")[0];
 
             Assert.True(rootElement.GetProperty("audioStreaming").GetBoolean());
             Assert.Equal("north-bradley", system.GetProperty("shortName").GetString());
+            Assert.Equal([769606250L], system.GetProperty("control_channels").EnumerateArray().Select(value => value.GetInt64()).ToArray());
+            Assert.Equal(config.TrunkRecorder.TalkgroupsPath, system.GetProperty("talkgroupsFile").GetString());
+            Assert.False(system.GetProperty("hideUnknownTalkgroups").GetBoolean());
             Assert.Equal(0, system.GetProperty("minDuration").GetInt32());
             Assert.Equal(0, system.GetProperty("minTransmissionDuration").GetInt32());
             Assert.True(system.GetProperty("callLog").GetBoolean());
             Assert.Equal("north-bradley", stream.GetProperty("shortName").GetString());
+            Assert.True(rfTelemetry.GetProperty("enabled").GetBoolean());
+            Assert.Equal(15, rfTelemetry.GetProperty("sample_interval_seconds").GetInt32());
             Assert.Equal("airspy=26A464DC28793293,sensitivity=0,linearity=0,bias=0", source.GetProperty("device").GetString());
             Assert.False(source.TryGetProperty("gain", out _));
             Assert.Equal(15, source.GetProperty("lnaGain").GetInt32());
@@ -561,6 +991,34 @@ public sealed class RfSurveyMultiSystemTests
     }
 
     [Fact]
+    public void ValidationSweep_IncludesAirspyDecodeGainForPrimaryControlChannel()
+    {
+        var profile = new RfSurveyProfileDto
+        {
+            Systems = [new("hinds", "Hinds", [851775000, 852212500], [])],
+            ControlChannelsHz = [851775000, 852212500],
+            Sources = [new(0, "airspy=637862DC2E3A19D7", "637862DC2E3A19D7", "Airspy", 852506250, 6000000, 0, "15")],
+            SelectedSourceIndexes = [0]
+        };
+        var candidates = NewValidationCandidateArray(
+            NewValidationCandidate(851775000, 8.0, gain: "8"),
+            NewValidationCandidate(851775000, 4.5, gain: "20"),
+            NewValidationCandidate(852212500, 7.0, gain: "8"));
+        var powerMethod = typeof(RfSurveyService).GetMethod("SelectRfValidationPowerCandidates", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "SelectRfValidationPowerCandidates");
+        var p25Method = typeof(RfSurveyService).GetMethod("SelectRfValidationP25Seeds", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "SelectRfValidationP25Seeds");
+
+        var powerSelected = ((System.Collections.IEnumerable)powerMethod.Invoke(null, [profile, candidates, 1])!).Cast<object>().ToList();
+        var p25Selected = ((System.Collections.IEnumerable)p25Method.Invoke(null, [profile, candidates, 1])!).Cast<object>().ToList();
+
+        Assert.Contains(powerSelected, candidate => (long)candidate.GetType().GetProperty("ControlChannelHz")!.GetValue(candidate)! == 851775000 &&
+                                                    (string)candidate.GetType().GetProperty("Gain")!.GetValue(candidate)! == "20");
+        Assert.Contains(p25Selected, seed => (long)seed.GetType().GetProperty("ControlChannelHz")!.GetValue(seed)! == 851775000 &&
+                                             (string)seed.GetType().GetProperty("Gain")!.GetValue(seed)! == "20");
+    }
+
+    [Fact]
     public void ValidationSweep_BuildsSiteReadinessForEverySelectedSite()
     {
         var profile = new RfSurveyProfileDto
@@ -617,6 +1075,25 @@ public sealed class RfSurveyMultiSystemTests
     }
 
     [Fact]
+    public void ValidationSweep_NativeTrMetricsCanProveP25WhenStandaloneProbeIsInconclusive()
+    {
+        var profile = new RfSurveyProfileDto
+        {
+            Systems = [new("alpha", "Alpha", [100], [])],
+            ControlChannelsHz = [100]
+        };
+        var candidates = NewValidationCandidateArray(
+            NewValidationCandidate(100, 16, systemShortName: "alpha", p25Status: "failed", metricsStatus: "passed", voiceStatus: "failed", voiceSummary: "No traffic occurred."));
+        var method = typeof(RfSurveyService).GetMethod("BuildRfValidationSiteReadiness", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "BuildRfValidationSiteReadiness");
+
+        var readiness = ((System.Collections.IEnumerable)method.Invoke(null, [profile, candidates])!).Cast<object>().Single();
+
+        Assert.True((bool)readiness.GetType().GetProperty("Monitorable")!.GetValue(readiness)!);
+        Assert.Equal("voice_inconclusive", readiness.GetType().GetProperty("Stage")!.GetValue(readiness));
+    }
+
+    [Fact]
     public void AppliedSourcePlanSummary_ReportsSystemsAndSourceWindows()
     {
         var root = JsonNode.Parse("""
@@ -636,6 +1113,35 @@ public sealed class RfSurveyMultiSystemTests
         var summary = (string)method.Invoke(null, [root, new[] { 0 }])!;
 
         Assert.Equal("Applied 1 SDR source window for 2 systems: chattanooga-simulcast-hamilton-t, cleveland-bradley-tn. Updated source index(es): 0.", summary);
+    }
+
+    [Fact]
+    public void AppliedDraftDrift_AllowsOnlyAdditiveRecoveryControlChannels()
+    {
+        var source = new TrConfigSourceCoverageSource(0, "airspy=abc", "osmosdr", 772_000_000, 6_000_000, 769_187_500, 774_812_500);
+        var live = new TrConfigSourceCoverageValidation(
+            true,
+            [],
+            [source],
+            [new TrConfigSourceCoverageSystem("raymond", [773_781_250])]);
+        var additiveDraft = new TrConfigSourceCoverageValidation(
+            true,
+            [],
+            [source],
+            [new TrConfigSourceCoverageSystem("raymond", [773_781_250, 773_031_250, 773_281_250, 773_531_250])]);
+        var replacementDraft = new TrConfigSourceCoverageValidation(
+            true,
+            [],
+            [source],
+            [new TrConfigSourceCoverageSystem("raymond", [773_031_250])]);
+        var method = typeof(RfSurveyService).GetMethod("AppliedDraftDrift", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(typeof(RfSurveyService).FullName, "AppliedDraftDrift");
+
+        var additiveDrift = (IReadOnlyList<string>)method.Invoke(null, [live, additiveDraft])!;
+        var replacementDrift = (IReadOnlyList<string>)method.Invoke(null, [live, replacementDraft])!;
+
+        Assert.Empty(additiveDrift);
+        Assert.Contains(replacementDrift, item => item.Contains("system/control-channel", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

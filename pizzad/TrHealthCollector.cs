@@ -6,6 +6,8 @@ namespace pizzad;
 
 public sealed class TrHealthCollector : BackgroundService
 {
+    private static readonly TimeSpan RfSampleRetention = TimeSpan.FromDays(8);
+    private static readonly TimeSpan RfEventRetention = TimeSpan.FromDays(90);
     private static readonly Regex CcSummaryDecodeRateRegex = new(
         @"\[(?<scope>[^\]]+)\]\s+(?<freq>\d+(?:\.\d+)?)\s+MHz\s+(?<rate>-?\d+(?:\.\d+)?)\s+msg/sec",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -73,6 +75,20 @@ public sealed class TrHealthCollector : BackgroundService
             log = string.Empty;
         }
 
+        var parsedTelemetryEvents = RfTelemetryParser.ParseJournal(log, out var rejectedTelemetryRows);
+        var telemetryEvents = RfTelemetryParser.CollapseForPersistence(parsedTelemetryEvents);
+        var telemetryWritten = await _database.UpsertRfTelemetryEventsAsync(telemetryEvents, ct);
+        var telemetryPruned = await _database.PruneRfTelemetryEventsAsync(
+            DateTime.UtcNow.Subtract(RfSampleRetention),
+            DateTime.UtcNow.Subtract(RfEventRetention),
+            ct);
+        if (rejectedTelemetryRows > 0)
+            _logger.LogWarning("TR RF telemetry rejected {RejectedRows} malformed or unsupported row(s)", rejectedTelemetryRows);
+        if (parsedTelemetryEvents.Count > telemetryEvents.Count)
+            _logger.LogDebug("TR RF telemetry collapsed {CollapsedRows} repetitive retune row(s) into five-minute narrative representatives", parsedTelemetryEvents.Count - telemetryEvents.Count);
+        if (telemetryPruned > 0)
+            _logger.LogInformation("TR RF telemetry pruned {PrunedRows} expired row(s)", telemetryPruned);
+
         var global = BuildSample("global", start, end, log) with
         {
             TrCpuPercent = runtime.TrCpuPercent,
@@ -85,31 +101,38 @@ public sealed class TrHealthCollector : BackgroundService
             HostLoad5 = runtime.HostLoad5,
             HostLoad15 = runtime.HostLoad15
         };
-        if (!HasAnyHealthSignal(global) && !HasAnyResourceSignal(global))
+        var hasHealthSample = HasAnyHealthSignal(global) || HasAnyResourceSignal(global);
+        if (!hasHealthSample && telemetryEvents.Count == 0)
         {
             _logger.LogDebug("TR health collection skipped empty window {Start:u} - {End:u}", start, end);
             return;
         }
 
-        var samplesWritten = 1;
-        await _database.InsertHealthSampleAsync(global, ct);
-
-        var logLines = log.Split('\n');
-        foreach (var scope in ExtractSystemScopes(log))
+        var samplesWritten = 0;
+        if (hasHealthSample)
         {
-            var scopedLines = string.Join('\n', logLines.Where(line => string.Equals(ExtractSystemScope(line), scope, StringComparison.OrdinalIgnoreCase)));
-            if (scopedLines.Length == 0)
-                continue;
-            await _database.InsertHealthSampleAsync(BuildSample(scope, start, end, scopedLines), ct);
-            samplesWritten++;
+            await _database.InsertHealthSampleAsync(global, ct);
+            samplesWritten = 1;
+            var logLines = log.Split('\n');
+            foreach (var scope in ExtractSystemScopes(log))
+            {
+                var scopedLines = string.Join('\n', logLines.Where(line => string.Equals(ExtractDisplaySystemScope(line), scope, StringComparison.OrdinalIgnoreCase)));
+                if (scopedLines.Length == 0)
+                    continue;
+                await _database.InsertHealthSampleAsync(BuildSample(scope, start, end, scopedLines), ct);
+                samplesWritten++;
+            }
+            await _events.PublishAsync("health_updated", new { windowStartUtc = start, windowEndUtc = end }, ct);
         }
 
-        await _events.PublishAsync("health_updated", new { windowStartUtc = start, windowEndUtc = end }, ct);
-        if (HasLiveTrCaptureSignal(global))
+        if (telemetryWritten > 0)
+            await _events.PublishAsync("rf_telemetry_updated", new { windowStartUtc = start, windowEndUtc = end, events = telemetryWritten }, ct);
+        if (HasLiveTrCaptureSignal(global) || telemetryEvents.Count > 0)
             _liveTrActivity.MarkTrHealth(DateTime.UtcNow);
         _logger.LogInformation(
-            "TR health collected {SamplesWritten} sample(s) for {Start:u} - {End:u}: decodeLines={DecodeLines}, callsStarted={CallsStarted}, callsConcluded={CallsConcluded}",
+            "TR health collected {SamplesWritten} sample(s) and {TelemetryWritten} new RF event(s) for {Start:u} - {End:u}: decodeLines={DecodeLines}, callsStarted={CallsStarted}, callsConcluded={CallsConcluded}",
             samplesWritten,
+            telemetryWritten,
             start,
             end,
             global.DecodeLines,
@@ -436,16 +459,20 @@ public sealed class TrHealthCollector : BackgroundService
 
     private static IReadOnlyList<string> ExtractSystemScopes(string log) =>
         log.Split('\n')
-            .Select(ExtractSystemScope)
+            .Select(ExtractDisplaySystemScope)
             .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Where(s => !s.All(char.IsDigit) && !s.StartsWith("source", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    private static string ExtractSystemScope(string line)
+    public static string ExtractDisplaySystemScope(string line)
     {
         var match = SystemScopeRegex.Match(line);
-        return match.Success ? NormalizeScope(match.Groups["scope"].Value) : string.Empty;
+        if (!match.Success)
+            return string.Empty;
+        var scope = NormalizeScope(match.Groups["scope"].Value);
+        return scope.Length == 0 || scope.All(char.IsDigit) || scope.StartsWith("source", StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : scope;
     }
 
     private static string NormalizeScope(string scope) => scope.Trim();
@@ -456,7 +483,7 @@ public sealed class TrHealthCollector : BackgroundService
     private static double ParseDouble(string value) =>
         double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
 
-    private static bool TryParseCcSummaryDecodeRate(string line, out double rate)
+    public static bool TryParseCcSummaryDecodeRate(string line, out double rate)
     {
         rate = 0;
         if (!line.Contains("msg/sec", StringComparison.OrdinalIgnoreCase))
@@ -468,6 +495,9 @@ public sealed class TrHealthCollector : BackgroundService
 
         return double.TryParse(match.Groups["rate"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out rate);
     }
+
+    public static bool TryParseLiveControlChannelDecodeRate(string line, out double rate) =>
+        TryParseCcSummaryDecodeRate(line, out rate) || TryParseLowDecodeWarningRate(line, out rate);
 
     private static bool TryParseLowDecodeWarningRate(string line, out double rate)
     {

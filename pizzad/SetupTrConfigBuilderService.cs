@@ -14,11 +14,15 @@ public sealed partial class SetupTrConfigBuilderService
 
     private readonly HttpClient _http;
     private readonly EngineConfig _config;
+    private readonly TalkgroupCatalogService _talkgroups;
+    private readonly TrConfigArtifactProvenanceStore? _provenance;
 
-    public SetupTrConfigBuilderService(HttpClient http, EngineConfig config)
+    public SetupTrConfigBuilderService(HttpClient http, EngineConfig config, TalkgroupCatalogService talkgroups, TrConfigArtifactProvenanceStore? provenance = null)
     {
         _http = http;
         _config = config;
+        _talkgroups = talkgroups;
+        _provenance = provenance;
     }
 
     public async Task<SetupTrConfigSitesDto> ListSitesAsync(SetupTrConfigSitesRequest request, CancellationToken ct)
@@ -28,7 +32,7 @@ public sealed partial class SetupTrConfigBuilderService
 
         var html = await LoadHtmlAsync(new SetupTrConfigDraftRequest(RadioReferenceSid: request.RadioReferenceSid, HtmlText: request.HtmlText), ct);
         var plain = HtmlToText(html);
-        var systemName = ExtractTitle(plain, request.RadioReferenceSid);
+        var systemName = ExtractTitle(html, request.RadioReferenceSid);
         var siteNames = InferSiteRows(plain);
         if (siteNames.Count == 0)
             siteNames = InferSiteNames(plain);
@@ -51,7 +55,7 @@ public sealed partial class SetupTrConfigBuilderService
             throw new InvalidOperationException("No RadioReference site rows were found for this SID.");
 
         var diagnostics = $"Found {sites.Count} RadioReference site(s). Select one or more before continuing.";
-        return new SetupTrConfigSitesDto(systemName, sites, diagnostics);
+        return new SetupTrConfigSitesDto(request.RadioReferenceSid.Trim(), systemName, sites, diagnostics);
     }
 
     public async Task<SetupTrConfigDraftDto> DraftAsync(SetupTrConfigDraftRequest request, CancellationToken ct)
@@ -60,7 +64,7 @@ public sealed partial class SetupTrConfigBuilderService
         var sampleRate = request.SampleRate > 0 ? request.SampleRate : TemplateSampleRate(template) ?? DefaultSampleRate;
         var html = await LoadHtmlAsync(request, ct);
         var siteFilters = SiteFilters(request.SiteNameList, request.SiteNames);
-        var devices = NormalizeDevices(request.SdrDevices, request.SdrSerials, sampleRate);
+        var devices = NormalizeDevices(request.SdrDevices, sampleRate);
         var plan = BuildSourcePlan(html, request.RadioReferenceSid, siteFilters, devices, sampleRate);
 
         var configJson = BuildConfigJson(plan.Systems, plan.Sources, template);
@@ -68,14 +72,7 @@ public sealed partial class SetupTrConfigBuilderService
         return new SetupTrConfigDraftDto(configJson, plan.Systems, plan.Sources, plan.Warnings, diagnostics);
     }
 
-    public async Task<SetupTrConfigSourcePlanDto> SourcePlanAsync(SetupTrConfigSourcePlanRequest request, CancellationToken ct)
-    {
-        var sampleRate = request.SampleRate > 0 ? request.SampleRate : DefaultSampleRate;
-        var html = await LoadHtmlAsync(new SetupTrConfigDraftRequest(RadioReferenceSid: request.RadioReferenceSid, HtmlText: request.HtmlText), ct);
-        return BuildSourcePlan(html, request.RadioReferenceSid, SiteFilters(request.SiteNameList, request.SiteNames), NormalizeDevices(request.SdrDevices, request.SdrSerials, sampleRate), sampleRate);
-    }
-
-    private static SetupTrConfigSourcePlanDto BuildSourcePlan(string html, string? sid, IReadOnlyList<string> siteFilters, IReadOnlyList<SelectedSdrDevice> devices, int requestedSampleRate)
+    private static SourcePlan BuildSourcePlan(string html, string? sid, IReadOnlyList<string> siteFilters, IReadOnlyList<SelectedSdrDevice> devices, int requestedSampleRate)
     {
         var systems = ParseSites(html, sid, siteFilters).ToList();
         var warnings = new List<string>();
@@ -175,10 +172,13 @@ public sealed partial class SetupTrConfigBuilderService
         if (systemDrafts.Any(s => s.Warning.Contains("control channel", StringComparison.OrdinalIgnoreCase) && s.Warning.Contains("not covered", StringComparison.OrdinalIgnoreCase)))
             warnings.Add("One or more selected sites have uncovered control channels. Do not start a baseline until source coverage is corrected.");
 
-        var systemName = systems.Select(site => site.SystemName).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? ExtractTitle(HtmlToText(html), sid);
-        var diagnostics = $"Planned {coveragePlan.Count} source window(s) for {systems.Count} selected site(s); {requiredPlan.Count} window(s) are required at {requiredSampleRate:N0} sps.";
-        return new SetupTrConfigSourcePlanDto(systemName, systemDrafts, sourceDrafts, requiredPlan.Count, coveragePlan.Count, warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), diagnostics);
+        return new SourcePlan(systemDrafts, sourceDrafts, warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
     }
+
+    private sealed record SourcePlan(
+        IReadOnlyList<SetupTrConfigSystemDto> Systems,
+        IReadOnlyList<SetupTrConfigSourceDto> Sources,
+        IReadOnlyList<string> Warnings);
 
     public async Task<SetupValidationResult> SaveAsync(SetupTrConfigSaveRequest request, CancellationToken ct)
     {
@@ -206,7 +206,10 @@ public sealed partial class SetupTrConfigBuilderService
             }
             await File.WriteAllTextAsync(path, NormalizeText(request.ConfigJson), Encoding.UTF8, ct);
         }
+        if (_provenance != null && !string.IsNullOrWhiteSpace(backup))
+            await _provenance.RecordAsync(backup, "Setup", "Safety backup created before Setup applied a Trunk Recorder configuration.", "TR source and site configuration", ct);
         _config.Setup.TrConfigured = true;
+        await _talkgroups.GenerateTrCsvAsync(ct);
         await SaveConfigAsync(ct);
         return new SetupValidationResult(true, $"Saved TR config to {path}. A timestamped backup was created if a file already existed.", new { path, backup });
     }
@@ -319,7 +322,7 @@ public sealed partial class SetupTrConfigBuilderService
     private static IEnumerable<SiteParseResult> ParseSites(string html, string? sid, IReadOnlyList<string> requestedSites)
     {
         var plain = HtmlToText(html);
-        var systemName = ExtractTitle(plain, sid);
+        var systemName = ExtractTitle(html, sid);
         if (!FrequencyRegex().IsMatch(plain))
             yield break;
 
@@ -407,7 +410,11 @@ public sealed partial class SetupTrConfigBuilderService
                 ["type"] = "p25",
                 ["shortName"] = system.ShortName,
                 ["control_channels"] = system.ControlChannelsMhz.Select(MhzToHz).ToList(),
-                ["talkgroupsFile"] = _config.TrunkRecorder.TalkgroupsPath
+                ["recordUnknown"] = false,
+                ["recordUUVCalls"] = true,
+                ["hideEncrypted"] = true,
+                ["hideUnknownTalkgroups"] = false,
+                ["talkgroupsFile"] = TalkgroupCatalogService.TrCsvPathForSystem(_config.TrunkRecorder.TalkgroupsPath, system.ShortName)
             }).ToList(),
             ["plugins"] = new[]
             {
@@ -416,7 +423,12 @@ public sealed partial class SetupTrConfigBuilderService
                     ["name"] = "callstream",
                     ["library"] = "libcallstream.so",
                     ["host"] = _config.Ingest.CallstreamBind,
-                    ["port"] = _config.Ingest.CallstreamPort
+                    ["port"] = _config.Ingest.CallstreamPort,
+                    ["rf_telemetry"] = new Dictionary<string, object?>
+                    {
+                        ["enabled"] = true,
+                        ["sample_interval_seconds"] = 15
+                    }
                 }
             }
         };
@@ -452,7 +464,7 @@ public sealed partial class SetupTrConfigBuilderService
         root["controlWarnRate"] = -1;
         root["audioStreaming"] = true;
         PatchSources(root, sources, systems);
-        PatchSystems(root, systems);
+        PatchSystems(root, systems, _config.TrunkRecorder.TalkgroupsPath);
         PatchCallstream(root, systems);
         return root.ToJsonString(EngineConfig.JsonOptions());
     }
@@ -484,7 +496,7 @@ public sealed partial class SetupTrConfigBuilderService
         root["sources"] = patched;
     }
 
-    private static void PatchSystems(JsonObject root, IReadOnlyList<SetupTrConfigSystemDto> systems)
+    private static void PatchSystems(JsonObject root, IReadOnlyList<SetupTrConfigSystemDto> systems, string talkgroupsPath)
     {
         var existingSystems = root["systems"] as JsonArray;
         var templateSystem = existingSystems?.OfType<JsonObject>().FirstOrDefault();
@@ -495,8 +507,12 @@ public sealed partial class SetupTrConfigBuilderService
             var system = CloneObject(existingSystems?.ElementAtOrDefault(i) as JsonObject ?? templateSystem);
             system["type"] = "p25";
             system["shortName"] = draft.ShortName;
-            system["talkgroupsFile"] = system["talkgroupsFile"]?.GetValue<string>() ?? "/etc/trunk-recorder/talkgroups.csv";
+            system["talkgroupsFile"] = TalkgroupCatalogService.TrCsvPathForSystem(talkgroupsPath, draft.ShortName);
             system["control_channels"] = LongArray(draft.ControlChannelsMhz.Select(MhzToHz));
+            system["recordUnknown"] = false;
+            system["recordUUVCalls"] = true;
+            system["hideEncrypted"] = true;
+            system["hideUnknownTalkgroups"] = false;
             system.Remove("channels");
             patched.Add(system);
         }
@@ -533,6 +549,10 @@ public sealed partial class SetupTrConfigBuilderService
         callstream["library"] = callstream["library"]?.GetValue<string>() ?? "libcallstream.so";
         callstream["host"] = _config.Ingest.CallstreamBind;
         callstream["port"] = _config.Ingest.CallstreamPort;
+        JsonObject rfTelemetry = [];
+        rfTelemetry["enabled"] = true;
+        rfTelemetry["sample_interval_seconds"] = 15;
+        callstream["rf_telemetry"] = rfTelemetry;
         var clients = new JsonArray();
         JsonObject client = [];
         client["address"] = _config.Ingest.CallstreamBind;
@@ -716,12 +736,23 @@ public sealed partial class SetupTrConfigBuilderService
         return Regex.Replace(text, "\\s+", " ").Trim();
     }
 
-    private static string ExtractTitle(string plain, string? sid)
+    private static string ExtractTitle(string html, string? sid)
     {
-        if (!string.IsNullOrWhiteSpace(sid))
-            return $"RadioReference SID {sid.Trim()}";
-        var title = plain.Split("System", StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
-        return string.IsNullOrWhiteSpace(title) ? "Trunk Recorder System" : title[..Math.Min(title.Length, 60)];
+        var match = Regex.Match(html, "<title[^>]*>(?<title>.*?)</title>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (match.Success)
+        {
+            var title = WebUtility.HtmlDecode(match.Groups["title"].Value);
+            title = Regex.Replace(title, @"\s+", " ").Trim();
+            var marker = title.IndexOf(" Trunking System", StringComparison.OrdinalIgnoreCase);
+            if (marker > 0)
+                return title[..marker].Trim();
+            if (!string.IsNullOrWhiteSpace(title))
+                return title[..Math.Min(title.Length, 80)];
+        }
+
+        return !string.IsNullOrWhiteSpace(sid)
+            ? $"RadioReference SID {sid.Trim()}"
+            : "Trunk Recorder System";
     }
 
     private static string ShortName(string value)
@@ -749,7 +780,7 @@ public sealed partial class SetupTrConfigBuilderService
 
     private static long MhzToHz(double mhz) => (long)Math.Round(mhz * 1_000_000);
 
-    private static IReadOnlyList<SelectedSdrDevice> NormalizeDevices(IReadOnlyList<SetupSdrDeviceDto>? devices, string? serials, int requestedSampleRate)
+    private static IReadOnlyList<SelectedSdrDevice> NormalizeDevices(IReadOnlyList<SetupSdrDeviceDto>? devices, int requestedSampleRate)
     {
         var selected = (devices ?? [])
             .Where(device => !string.IsNullOrWhiteSpace(device.Type) || !string.IsNullOrWhiteSpace(device.Serial) || !string.IsNullOrWhiteSpace(device.DeviceArgs))
@@ -758,10 +789,7 @@ public sealed partial class SetupTrConfigBuilderService
         if (selected.Count > 0)
             return selected;
 
-        var splitSerials = SplitList(serials);
-        if (splitSerials.Count == 0)
-            return [RtlSelectedDevice(0, string.Empty, requestedSampleRate)];
-        return splitSerials.Select((serial, index) => RtlSelectedDevice(index, serial, requestedSampleRate)).ToList();
+        return [RtlSelectedDevice(0, string.Empty, requestedSampleRate)];
     }
 
     private static SelectedSdrDevice NormalizeDevice(SetupSdrDeviceDto device, int ordinal, int requestedSampleRate)
@@ -771,7 +799,7 @@ public sealed partial class SetupTrConfigBuilderService
         var sampleRate = requestedSampleRate > 0
             ? requestedSampleRate
             : type.Equals("Airspy", StringComparison.OrdinalIgnoreCase)
-                ? (defaultRate > 0 ? defaultRate : 3_000_000)
+                ? (defaultRate > 0 ? defaultRate : 6_000_000)
                 : (defaultRate > 0 ? defaultRate : DefaultSampleRate);
         if (type.Equals("Airspy", StringComparison.OrdinalIgnoreCase))
             sampleRate = AirspyRuntimeSampleRate(sampleRate, device.SampleRateOptions);

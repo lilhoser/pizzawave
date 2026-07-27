@@ -38,11 +38,6 @@ public sealed class IncidentPlanExecutorV3
         "detach_create"
     };
 
-    private static readonly HashSet<string> PhaseOneLiveWriteActions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "update_current"
-    };
-
     private static readonly string[] GenericTitles =
     [
         "Fire response",
@@ -158,9 +153,7 @@ public sealed class IncidentPlanExecutorV3
             return operation;
 
         var action = Normalize(operation.PlanAction);
-        var blockedBecause = operation.BlockedBecause;
-        if (!PhaseOneLiveWriteActions.Contains(action))
-            blockedBecause = AppendReason(blockedBecause, $"live_{action}_not_implemented");
+        var blockedBecause = AppendReason(operation.BlockedBecause, "incident_v3_retired_shadow_only");
         if (string.Equals(action, "update_current", StringComparison.OrdinalIgnoreCase) &&
             !IsActiveIncidentTarget(operation.TargetIncidentId))
         {

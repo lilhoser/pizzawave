@@ -45,7 +45,7 @@ public sealed class IncidentEvidencePromptV2Tests
         Assert.Contains("conflicts", json);
         Assert.Contains("narrative", json);
         Assert.Contains("minItems", json);
-        Assert.Contains("pattern", json);
+        Assert.DoesNotContain("pattern", json);
         Assert.Contains("start_char", json);
         Assert.Contains("end_char", json);
     }

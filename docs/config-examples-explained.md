@@ -18,14 +18,14 @@ completed calls to localhost:
 }
 ```
 
-The wizard can patch an existing config and creates a backup before writing.
+Setup can patch an existing config and creates a backup before writing.
 
 ## Source Coverage
 
-Each RTL-SDR source has a center frequency and sample rate. The wizard uses the
+Each SDR source has a center frequency and sample rate. Setup uses the
 configured systems, control channels, available SDRs, and desired sample rate to
-recommend source coverage. If a system cannot be fully covered, the wizard
-should explain what is missing and whether it is safe to continue.
+recommend source coverage. If a system cannot be fully covered, Setup should
+explain what is missing and whether it is safe to continue.
 
 ## Recorders
 
@@ -33,7 +33,7 @@ should explain what is missing and whether it is safe to continue.
 source can handle. Too few recorders can cause missed or failed voice calls even
 when control-channel decode looks acceptable.
 
-PizzaWave-managed setup and Radio Setup Workspace configs size
+PizzaWave-managed Setup configs size
 `digitalRecorders` per source from the voice frequencies actually covered by
 that source window. The generated value uses the covered voice-channel count,
 adds two slots of burst headroom per covered system, rounds up to an even

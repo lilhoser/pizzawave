@@ -27,6 +27,8 @@ def main():
         callstream = {"name": "callstream", "library": "libcallstream.so"}
         plugins.append(callstream)
 
+    callstream["rf_telemetry"] = {"enabled": True, "sample_interval_seconds": 15}
+
     clients = callstream.setdefault("clients", [])
     local = {"address": args.address, "port": args.port}
     clients[:] = [c for c in clients if c.get("address") == args.address or str(c.get("address", "")).startswith("127.")]

@@ -133,6 +133,43 @@ public sealed class CallAudioService
         }
     }
 
+    public static double? TryReadWavDurationSeconds(string path)
+    {
+        try
+        {
+            using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new BinaryReader(stream, Encoding.ASCII, leaveOpen: true);
+            if (stream.Length < 12 || new string(reader.ReadChars(4)) != "RIFF") return null;
+            reader.ReadInt32();
+            if (new string(reader.ReadChars(4)) != "WAVE") return null;
+            var byteRate = 0;
+            long dataSize = -1;
+            while (stream.Position + 8 <= stream.Length)
+            {
+                var chunk = new string(reader.ReadChars(4));
+                var size = reader.ReadInt32();
+                if (size < 0 || stream.Position + size > stream.Length) break;
+                if (chunk == "fmt " && size >= 12)
+                {
+                    reader.ReadInt16();
+                    reader.ReadInt16();
+                    reader.ReadInt32();
+                    byteRate = reader.ReadInt32();
+                    stream.Position += size - 12;
+                }
+                else if (chunk == "data")
+                {
+                    dataSize = size;
+                    break;
+                }
+                else stream.Position += size;
+                if ((size & 1) != 0 && stream.Position < stream.Length) stream.Position++;
+            }
+            return byteRate > 0 && dataSize >= 0 ? dataSize / (double)byteRate : null;
+        }
+        catch { return null; }
+    }
+
     public static bool TryNormalizePcm8kMonoTo16kMono(MemoryStream wav, WavFormat? info, out MemoryStream normalized)
     {
         normalized = null!;

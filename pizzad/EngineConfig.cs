@@ -16,10 +16,12 @@ public sealed class EngineConfig
     public EmbeddingsConfig Embeddings { get; set; } = new();
     public TrunkRecorderConfig TrunkRecorder { get; set; } = new();
     public RfSurveyConfig RfSurvey { get; set; } = new();
+    public SiteSetupConfig SiteSetup { get; set; } = new();
     public AlertConfig Alerts { get; set; } = new();
     public ProfileConfig Profiles { get; set; } = new();
     public LocationConfig Locations { get; set; } = new();
     public SetupConfig Setup { get; set; } = new();
+    public RecoveryConfig Recovery { get; set; } = new();
 
     [JsonIgnore]
     public string ConfigPath { get; set; } = string.Empty;
@@ -76,9 +78,17 @@ public sealed class EngineConfig
         var directory = Path.GetDirectoryName(path) ?? ".";
         Directory.CreateDirectory(directory);
         var tempPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-        File.WriteAllText(tempPath, content);
-        TryPreserveUnixMode(path, tempPath);
-        File.Move(tempPath, path, overwrite: true);
+        try
+        {
+            File.WriteAllText(tempPath, content);
+            TryPreserveUnixMode(path, tempPath);
+            File.Move(tempPath, path, overwrite: true);
+        }
+        catch (UnauthorizedAccessException) when (File.Exists(path))
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            File.WriteAllText(path, content);
+        }
     }
 
     private static void TryPreserveUnixMode(string originalPath, string tempPath)
@@ -104,6 +114,8 @@ public sealed class EngineConfig
         Storage.DatabasePath = ExpandPath(Storage.DatabasePath);
         Storage.AudioRoot = ExpandPath(Storage.AudioRoot);
         Storage.AppDataRoot = ExpandPath(Storage.AppDataRoot);
+        if (Recovery.SupportPackageRetentionDays <= 0) Recovery.SupportPackageRetentionDays = 7;
+        Recovery.SupportPackageRetentionDays = Math.Clamp(Recovery.SupportPackageRetentionDays, 1, 365);
         Auth.TokenFile = ExpandPath(Auth.TokenFile);
         Ingest.CallstreamBind = string.IsNullOrWhiteSpace(Ingest.CallstreamBind) ? "127.0.0.1" : Ingest.CallstreamBind.Trim();
         if (Ingest.CallstreamPort <= 0) Ingest.CallstreamPort = 9123;
@@ -149,12 +161,73 @@ public sealed class EngineConfig
         AiInsights.IncidentRunIntervalSeconds = Math.Clamp(AiInsights.IncidentRunIntervalSeconds, 60, 1800);
         if (AiInsights.IncidentPromptCandidateLimit <= 0) AiInsights.IncidentPromptCandidateLimit = 18;
         AiInsights.IncidentPromptCandidateLimit = Math.Clamp(AiInsights.IncidentPromptCandidateLimit, 6, 40);
+        if (AiInsights.IncidentAnalysisMaximumAgeMinutes <= 0) AiInsights.IncidentAnalysisMaximumAgeMinutes = 60;
+        AiInsights.IncidentAnalysisMaximumAgeMinutes = Math.Clamp(AiInsights.IncidentAnalysisMaximumAgeMinutes, 15, 360);
         if (AiInsights.IncidentV2ShadowCandidateLimit <= 0) AiInsights.IncidentV2ShadowCandidateLimit = 18;
         AiInsights.IncidentV2ShadowCandidateLimit = Math.Clamp(AiInsights.IncidentV2ShadowCandidateLimit, 6, 40);
         if (AiInsights.IncidentV3FrameCandidateLimit <= 0) AiInsights.IncidentV3FrameCandidateLimit = 18;
         AiInsights.IncidentV3FrameCandidateLimit = Math.Clamp(AiInsights.IncidentV3FrameCandidateLimit, 6, 40);
-        if (!AiInsights.IncidentV3PlanExecutorDryRun && !AiInsights.IncidentV3PlanExecutorEnabled)
-            AiInsights.IncidentV3PlanExecutorDryRun = true;
+        if (AiInsights.IncidentEventLinkShadowIntervalSeconds <= 0) AiInsights.IncidentEventLinkShadowIntervalSeconds = 300;
+        AiInsights.IncidentEventLinkShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentEventLinkShadowIntervalSeconds, 60, 1800);
+        if (AiInsights.IncidentEventLinkShadowLookbackMinutes <= 0) AiInsights.IncidentEventLinkShadowLookbackMinutes = 120;
+        AiInsights.IncidentEventLinkShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentEventLinkShadowLookbackMinutes, 30, 720);
+        if (AiInsights.IncidentEventLinkShadowCandidateLimit <= 0) AiInsights.IncidentEventLinkShadowCandidateLimit = 4;
+        AiInsights.IncidentEventLinkShadowCandidateLimit = Math.Clamp(AiInsights.IncidentEventLinkShadowCandidateLimit, 1, IncidentEventStateLinkContractValidator.MaximumCandidateCount);
+        if (AiInsights.IncidentAssociationShadowIntervalSeconds <= 0) AiInsights.IncidentAssociationShadowIntervalSeconds = 300;
+        AiInsights.IncidentAssociationShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentAssociationShadowIntervalSeconds, 60, 1800);
+        if (AiInsights.IncidentAssociationShadowLookbackMinutes <= 0) AiInsights.IncidentAssociationShadowLookbackMinutes = 120;
+        AiInsights.IncidentAssociationShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentAssociationShadowLookbackMinutes, 30, 720);
+        if (AiInsights.IncidentAssociationShadowCandidateLimit <= 0) AiInsights.IncidentAssociationShadowCandidateLimit = 4;
+        AiInsights.IncidentAssociationShadowCandidateLimit = Math.Clamp(AiInsights.IncidentAssociationShadowCandidateLimit, 1, IncidentAssociationContract.MaximumCandidateCount);
+        if (AiInsights.IncidentBatchConstructorShadowIntervalSeconds <= 0) AiInsights.IncidentBatchConstructorShadowIntervalSeconds = 600;
+        AiInsights.IncidentBatchConstructorShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentBatchConstructorShadowIntervalSeconds, 300, 1800);
+        if (AiInsights.IncidentBatchConstructorShadowLookbackMinutes <= 0) AiInsights.IncidentBatchConstructorShadowLookbackMinutes = 120;
+        AiInsights.IncidentBatchConstructorShadowLookbackMinutes = Math.Clamp(AiInsights.IncidentBatchConstructorShadowLookbackMinutes, 30, 360);
+        if (AiInsights.IncidentBatchConstructorShadowBatchSize <= 0) AiInsights.IncidentBatchConstructorShadowBatchSize = 24;
+        AiInsights.IncidentBatchConstructorShadowBatchSize = Math.Clamp(AiInsights.IncidentBatchConstructorShadowBatchSize, 2, IncidentBatchContract.MaximumNewObservationCount);
+        if (AiInsights.IncidentBatchConstructorShadowMinimumBatchSize <= 0) AiInsights.IncidentBatchConstructorShadowMinimumBatchSize = 12;
+        AiInsights.IncidentBatchConstructorShadowMinimumBatchSize = Math.Clamp(AiInsights.IncidentBatchConstructorShadowMinimumBatchSize, 1, AiInsights.IncidentBatchConstructorShadowBatchSize);
+        if (AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds <= 0) AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds = 120;
+        AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds = Math.Clamp(AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds, 5, 900);
+        if (AiInsights.IncidentBatchConstructorShadowCandidateLimit <= 0) AiInsights.IncidentBatchConstructorShadowCandidateLimit = 4;
+        AiInsights.IncidentBatchConstructorShadowCandidateLimit = Math.Clamp(AiInsights.IncidentBatchConstructorShadowCandidateLimit, 1, IncidentBatchContract.MaximumCandidateCount);
+        if (AiInsights.IncidentBatchConstructorShadowObservationIsolated)
+            AiInsights.IncidentBatchConstructorShadowSourceIsolated = true;
+        if (AiInsights.IncidentBatchRelationshipShadowEnabled)
+        {
+            AiInsights.IncidentBatchConstructorShadowObservationIsolated = true;
+            AiInsights.IncidentBatchConstructorShadowSourceIsolated = true;
+        }
+        if (AiInsights.IncidentBatchExhaustiveBatchedIntakeEnabled)
+        {
+            AiInsights.IncidentBatchConstructorShadowObservationIsolated = true;
+            AiInsights.IncidentBatchConstructorShadowSourceIsolated = true;
+            AiInsights.IncidentBatchBatchedStandaloneVerificationEnabled = true;
+        }
+        if (AiInsights.IncidentBatchRollingHypothesisEnabled)
+        {
+            AiInsights.IncidentBatchExhaustiveBatchedIntakeEnabled = false;
+            AiInsights.IncidentBatchBatchedStandaloneVerificationEnabled = false;
+            AiInsights.IncidentBatchRelationshipShadowEnabled = false;
+            AiInsights.IncidentBatchVerificationShadowEnabled = false;
+            AiInsights.IncidentBatchConstructorShadowObservationIsolated = false;
+            AiInsights.IncidentBatchConstructorShadowSourceIsolated = false;
+            // Reserve four of the 24 evidence-record slots for active or
+            // carried-forward hypotheses. A full batch therefore fires at 20
+            // new observations; low traffic waits up to the accepted 10-minute
+            // product window instead of generating tiny requests.
+            AiInsights.IncidentBatchConstructorShadowBatchSize = Math.Min(20, AiInsights.IncidentBatchConstructorShadowBatchSize);
+            AiInsights.IncidentBatchConstructorShadowMinimumBatchSize = AiInsights.IncidentBatchConstructorShadowBatchSize;
+            AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds = Math.Max(600, AiInsights.IncidentBatchConstructorShadowMaximumWaitSeconds);
+            AiInsights.IncidentBatchConstructorShadowCandidateLimit = Math.Min(4, AiInsights.IncidentBatchConstructorShadowCandidateLimit);
+            AiInsights.IncidentBatchConstructorShadowContinuous = true;
+        }
+        if (AiInsights.IncidentBatchVerificationShadowIntervalSeconds <= 0) AiInsights.IncidentBatchVerificationShadowIntervalSeconds = 30;
+        AiInsights.IncidentBatchVerificationShadowIntervalSeconds = Math.Clamp(AiInsights.IncidentBatchVerificationShadowIntervalSeconds, 5, 300);
+        // Incident V3 is retained only as a read-only comparison baseline. Its
+        // semantic executor is retired and must not be enabled by deployed
+        // configuration left over from an earlier experiment.
+        AiInsights.IncidentV3PlanExecutorDryRun = true;
         if (AiInsights.IncidentNewVectorQueryLimit <= 0) AiInsights.IncidentNewVectorQueryLimit = 8;
         AiInsights.IncidentNewVectorQueryLimit = Math.Clamp(AiInsights.IncidentNewVectorQueryLimit, 0, 20);
         if (AiInsights.IncidentActiveVectorQueryLimit <= 0) AiInsights.IncidentActiveVectorQueryLimit = 6;
@@ -189,11 +262,41 @@ public sealed class EngineConfig
         if (RfSurvey.P25ProbeDurationSeconds <= 0) RfSurvey.P25ProbeDurationSeconds = 45;
         RfSurvey.P25ProbeDurationSeconds = Math.Clamp(RfSurvey.P25ProbeDurationSeconds, 10, 300);
         if (RfSurvey.P25ProbeTimeoutSeconds <= 0) RfSurvey.P25ProbeTimeoutSeconds = Math.Max(30, RfSurvey.P25ProbeDurationSeconds + 15);
+        SiteSetup.SiteLabel = SiteSetup.SiteLabel?.Trim() ?? string.Empty;
+        SiteSetup.LocationNotes = SiteSetup.LocationNotes?.Trim() ?? string.Empty;
+        SiteSetup.SourcePlanMode = string.IsNullOrWhiteSpace(SiteSetup.SourcePlanMode) ? "full" : SiteSetup.SourcePlanMode.Trim();
+        SiteSetup.SystemShortNames ??= new();
+        SiteSetup.SourcePlanSystemShortNames ??= new();
+        SiteSetup.Systems ??= new();
+        SiteSetup.SelectedSourceIndexes ??= new();
+        SiteSetup.Sources ??= new();
+        SiteSetup.RfPath ??= new();
+        if (SiteSetup.DesiredVersion <= 0) SiteSetup.DesiredVersion = 1;
         Auth.Mode = string.IsNullOrWhiteSpace(Auth.Mode) ? "token" : Auth.Mode.Trim();
         Alerts.EmailProvider = string.IsNullOrWhiteSpace(Alerts.EmailProvider) ? "gmail" : Alerts.EmailProvider.Trim();
         Alerts.EmailUser ??= string.Empty;
         Alerts.EmailPassword ??= string.Empty;
+        Alerts.AdministrativeEmailRecipients ??= string.Empty;
+        if (Alerts.AdministrativeOutageDelayMinutes <= 0) Alerts.AdministrativeOutageDelayMinutes = 2;
+        Alerts.AdministrativeOutageDelayMinutes = Math.Clamp(Alerts.AdministrativeOutageDelayMinutes, 1, 60);
         Alerts.Rules ??= new();
+        foreach (var rule in Alerts.Rules)
+        {
+            rule.Name = string.IsNullOrWhiteSpace(rule.Name) ? "Alert" : rule.Name.Trim();
+            rule.MatchType = AlertRulePolicy.NormalizeMatchType(rule.MatchType);
+            rule.Talkgroups ??= new();
+            if (rule.Talkgroups.Any(t => t.Id <= 0 || string.IsNullOrWhiteSpace(t.SystemShortName)))
+                throw new InvalidOperationException($"Alert rule '{rule.Name}' has an unsupported unscoped talkgroup. Every talkgroup requires systemShortName and a positive id.");
+            rule.Talkgroups = rule.Talkgroups
+                .Select(t => new AlertTalkgroupRef
+                {
+                    SystemShortName = TalkgroupCatalogService.NormalizeSystemShortName(t.SystemShortName),
+                    Id = t.Id
+                })
+                .GroupBy(AlertRulePolicy.TalkgroupKey, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Last())
+                .ToList();
+        }
         Alerts.Playback ??= new();
         if (Alerts.Playback.CooldownSeconds <= 0) Alerts.Playback.CooldownSeconds = 15;
         if (Alerts.Playback.RepeatCount <= 0) Alerts.Playback.RepeatCount = 1;
@@ -206,10 +309,11 @@ public sealed class EngineConfig
         foreach (var profile in Profiles.Items)
         {
             profile.Name = string.IsNullOrWhiteSpace(profile.Name) ? "Profile" : profile.Name.Trim();
-            profile.AllowedTalkgroups ??= new();
             profile.Talkgroups ??= new();
             foreach (var talkgroup in profile.Talkgroups)
             {
+                talkgroup.SystemShortName = TalkgroupCatalogService.SystemFromKeyOrValue(talkgroup.Key, talkgroup.SystemShortName, talkgroup.Id);
+                talkgroup.Key = TalkgroupCatalogService.CatalogKey(talkgroup.SystemShortName, talkgroup.Id);
                 talkgroup.Category = string.IsNullOrWhiteSpace(talkgroup.Category) ? string.Empty : talkgroup.Category.Trim().ToLowerInvariant();
                 talkgroup.Label = talkgroup.Label?.Trim() ?? string.Empty;
             }
@@ -224,7 +328,9 @@ public sealed class EngineConfig
             if (area.Aliases.Count == 0)
                 area.Aliases.Add(area.SystemShortName);
         }
-        Setup.CurrentStep = string.IsNullOrWhiteSpace(Setup.CurrentStep) ? "stack" : Setup.CurrentStep.Trim();
+        Setup.CurrentStep = string.IsNullOrWhiteSpace(Setup.CurrentStep) ? "tr" : Setup.CurrentStep.Trim();
+        if (Setup.CurrentStep == "stack")
+            Setup.CurrentStep = "tr";
     }
 
     public static JsonSerializerOptions JsonOptions() => new()
@@ -291,6 +397,12 @@ public sealed class StorageConfig
     public string AppDataRoot { get; set; } = "/var/lib/pizzawave/appdata";
 }
 
+public sealed class RecoveryConfig
+{
+    public bool SupportPackageCleanupEnabled { get; set; } = true;
+    public int SupportPackageRetentionDays { get; set; } = 7;
+}
+
 public sealed class IngestConfig
 {
     public string CallstreamBind { get; set; } = "127.0.0.1";
@@ -323,6 +435,7 @@ public sealed class TranscriptionConfig
 public sealed class AiInsightsConfig
 {
     public bool Enabled { get; set; } = true;
+    public bool IncidentAnalysisExecutionEnabled { get; set; } = true;
     public string ExecutionMode { get; set; } = string.Empty;
     public string OpenAiBaseUrl { get; set; } = string.Empty;
     public string OpenAiApiKey { get; set; } = string.Empty;
@@ -337,12 +450,44 @@ public sealed class AiInsightsConfig
     public int MaxQueueDepthForManualSummary { get; set; } = 100;
     public int IncidentRunIntervalSeconds { get; set; } = 300;
     public int IncidentPromptCandidateLimit { get; set; } = 18;
+    public int IncidentAnalysisMaximumAgeMinutes { get; set; } = 60;
     public bool IncidentV2ShadowEnabled { get; set; }
     public int IncidentV2ShadowCandidateLimit { get; set; } = 18;
     public bool IncidentV3FrameShadowEnabled { get; set; }
     public int IncidentV3FrameCandidateLimit { get; set; } = 18;
     public bool IncidentV3PlanExecutorEnabled { get; set; }
     public bool IncidentV3PlanExecutorDryRun { get; set; } = true;
+    public bool IncidentEventLinkShadowEnabled { get; set; }
+    public string IncidentEventLinkShadowRunId { get; set; } = string.Empty;
+    public int IncidentEventLinkShadowIntervalSeconds { get; set; } = 300;
+    public int IncidentEventLinkShadowLookbackMinutes { get; set; } = 120;
+    public int IncidentEventLinkShadowCandidateLimit { get; set; } = 4;
+    public bool IncidentAssociationShadowEnabled { get; set; }
+    public string IncidentAssociationShadowRunId { get; set; } = string.Empty;
+    public int IncidentAssociationShadowIntervalSeconds { get; set; } = 300;
+    public int IncidentAssociationShadowLookbackMinutes { get; set; } = 120;
+    public int IncidentAssociationShadowCandidateLimit { get; set; } = 4;
+    public bool IncidentBatchConstructorShadowEnabled { get; set; }
+    public string IncidentBatchConstructorShadowRunId { get; set; } = string.Empty;
+    public int IncidentBatchConstructorShadowIntervalSeconds { get; set; } = 600;
+    public int IncidentBatchConstructorShadowLookbackMinutes { get; set; } = 120;
+    public int IncidentBatchConstructorShadowBatchSize { get; set; } = 24;
+    public int IncidentBatchConstructorShadowMinimumBatchSize { get; set; } = 12;
+    public int IncidentBatchConstructorShadowMaximumWaitSeconds { get; set; } = 120;
+    public int IncidentBatchConstructorShadowCandidateLimit { get; set; } = 4;
+    public bool IncidentBatchConstructorShadowSourceIsolated { get; set; }
+    public bool IncidentBatchConstructorShadowObservationIsolated { get; set; }
+    public bool IncidentBatchRollingHypothesisEnabled { get; set; }
+    public bool IncidentBatchExhaustiveBatchedIntakeEnabled { get; set; }
+    public bool IncidentBatchBatchedStandaloneVerificationEnabled { get; set; }
+    public bool IncidentBatchRelationshipShadowEnabled { get; set; }
+    public bool IncidentBatchConstructorShadowExclusiveInferenceWindow { get; set; }
+    public bool IncidentBatchConstructorShadowContinuous { get; set; }
+    public long IncidentBatchConstructorShadowStartAfterCallId { get; set; }
+    public bool IncidentBatchVerificationShadowEnabled { get; set; }
+    public int IncidentBatchVerificationShadowIntervalSeconds { get; set; } = 30;
+    public bool IncidentBatchCanaryPersistenceEnabled { get; set; }
+    public bool IncidentBatchProductionOwnershipEnabled { get; set; }
     public int IncidentNewVectorQueryLimit { get; set; } = 8;
     public int IncidentActiveVectorQueryLimit { get; set; } = 6;
     public int EvidenceVerifierRagCandidateLimit { get; set; } = 5;
@@ -377,6 +522,44 @@ public sealed class TrunkRecorderConfig
     public int HealthWindowMinutes { get; set; } = 5;
 }
 
+public sealed class SiteSetupConfig
+{
+    public long DesiredVersion { get; set; } = 1;
+    public string SiteLabel { get; set; } = string.Empty;
+    public string LocationNotes { get; set; } = string.Empty;
+    public List<MonitoredAreaConfig> MonitoredAreas { get; set; } = new();
+    public List<string> SystemShortNames { get; set; } = new();
+    public List<string> SourcePlanSystemShortNames { get; set; } = new();
+    public string SourcePlanMode { get; set; } = "full";
+    public List<RfSurveySystemDto> Systems { get; set; } = new();
+    public List<int> SelectedSourceIndexes { get; set; } = new();
+    public Dictionary<string, int> SourceAssignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<RfSurveySourceDto> Sources { get; set; } = new();
+    public List<SiteSetupRfSelection> RfSelections { get; set; } = new();
+    public RfSurveyPathProfileDto RfPath { get; set; } = new();
+    public DateTime? UpdatedAtUtc { get; set; }
+    public DateTime? LastAppliedAtUtc { get; set; }
+    public string LastAppliedConfigHash { get; set; } = string.Empty;
+    public string LastAppliedSourceAssignmentSummary { get; set; } = string.Empty;
+    public string LastAppliedRfPathSummary { get; set; } = string.Empty;
+    public string LastAppliedTalkgroupPolicyHash { get; set; } = string.Empty;
+    public string LastAppliedTalkgroupPolicyJson { get; set; } = string.Empty;
+    public string LastAppliedDesiredJson { get; set; } = string.Empty;
+}
+
+public sealed class SiteSetupRfSelection
+{
+    public long FrequencyHz { get; set; }
+    public int? SourceIndex { get; set; }
+    public string SourceSerial { get; set; } = string.Empty;
+    public string Gain { get; set; } = string.Empty;
+    public int? SampleRateHz { get; set; }
+    public int? MeasuredSignalOffsetHz { get; set; }
+    public int? ErrorHz { get; set; }
+    public double? SnrDb { get; set; }
+    public double? Confidence { get; set; }
+}
+
 public sealed class RfSurveyConfig
 {
     public string P25ProbeCommandTemplate { get; set; } = string.Empty;
@@ -391,6 +574,9 @@ public sealed class AlertConfig
     public string EmailProvider { get; set; } = "gmail";
     public string EmailUser { get; set; } = string.Empty;
     public string EmailPassword { get; set; } = string.Empty;
+    public bool AdministrativeEmailEnabled { get; set; }
+    public string AdministrativeEmailRecipients { get; set; } = string.Empty;
+    public int AdministrativeOutageDelayMinutes { get; set; } = 2;
     public List<EngineAlertRule> Rules { get; set; } = new();
     public AlertPlaybackConfig Playback { get; set; } = new();
 }
@@ -417,7 +603,13 @@ public sealed class EngineAlertRule
     public string Email { get; set; } = string.Empty;
     public string Frequency { get; set; } = "realtime";
     public bool Autoplay { get; set; } = true;
-    public List<long> Talkgroups { get; set; } = new();
+    public List<AlertTalkgroupRef> Talkgroups { get; set; } = new();
+}
+
+public sealed class AlertTalkgroupRef
+{
+    public string SystemShortName { get; set; } = string.Empty;
+    public long Id { get; set; }
 }
 
 public sealed class ProfileConfig
@@ -436,29 +628,14 @@ public sealed class SetupConfig
     public bool Completed { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
     public int WizardVersion { get; set; } = 1;
-    public string CurrentStep { get; set; } = "stack";
+    public string CurrentStep { get; set; } = "tr";
     public string InstallMode { get; set; } = "reuseExistingTr";
     public string TrConfigMode { get; set; } = "radioReference";
     public string RadioReferenceSid { get; set; } = string.Empty;
     public DateTime? RestoreAppliedAtUtc { get; set; }
-    public bool MigrationMode { get; set; }
-    public DateTime? MigrationStartedAtUtc { get; set; }
-    public DateTime? MigrationResetAtUtc { get; set; }
-    public bool MigrationPreviousCompleted { get; set; }
-    public string MigrationPreviousCurrentStep { get; set; } = string.Empty;
     public bool TrDetected { get; set; }
     public bool TrConfigured { get; set; }
-    public bool TalkgroupsValidated { get; set; }
-    public bool CallstreamValidated { get; set; }
-    public bool TranscriptionValidated { get; set; }
-    public bool MonitoredAreasValidated { get; set; }
-    public bool HealthValidated { get; set; }
-    public bool AiInsightsSkippedOrValidated { get; set; } = true;
-    public bool EmbeddingsSkippedOrValidated { get; set; } = true;
-    public bool AlertsSkippedOrValidated { get; set; } = true;
     public bool InstallOptionalDiagnosticTools { get; set; }
-    public bool DiagnosticToolsSkippedOrInstalled { get; set; } = true;
-    public bool CalibrationSkippedOrCompleted { get; set; } = true;
     public string PendingRestorePath { get; set; } = string.Empty;
     public string PendingRestoreManifestJson { get; set; } = string.Empty;
 }
@@ -473,6 +650,8 @@ public sealed class MonitoredAreaConfig
     public double West { get; set; }
     public double East { get; set; }
     public List<string> Aliases { get; set; } = new();
+    public bool IsOverride { get; set; }
+    public string ContextKey { get; set; } = string.Empty;
 }
 
 public sealed class ProcessingProfile
@@ -483,8 +662,8 @@ public sealed class ProcessingProfile
     public bool IncludeFire { get; set; } = true;
     public bool IncludeEMS { get; set; } = true;
     public bool IncludeTraffic { get; set; } = true;
+    public bool IncludeUtilities { get; set; } = true;
     public bool IncludeOther { get; set; } = true;
-    public List<long> AllowedTalkgroups { get; set; } = new();
     public List<ProfileTalkgroupSetting> Talkgroups { get; set; } = new();
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
@@ -492,6 +671,8 @@ public sealed class ProcessingProfile
 
 public sealed class ProfileTalkgroupSetting
 {
+    public string Key { get; set; } = string.Empty;
+    public string SystemShortName { get; set; } = string.Empty;
     public long Id { get; set; }
     public bool? Enabled { get; set; }
     public string Label { get; set; } = string.Empty;

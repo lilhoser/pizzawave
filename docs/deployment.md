@@ -71,12 +71,12 @@ support is configured.
 127.0.0.1:9123
 ```
 
-The wizard can patch an existing trunk-recorder config and creates a timestamped
+Setup can patch an existing trunk-recorder config and creates a timestamped
 backup before writing. A fresh PizzaWave-managed config omits `captureDir` by
 default because `pizzad` owns the canonical audio store.
 
 If side-loading onto an existing trunk-recorder system, keep the existing config
-until the wizard has backed it up and validated callstream.
+until Setup has backed it up and validated callstream.
 
 ## Imports
 
@@ -91,13 +91,34 @@ jobs with guardrails; imported calls suppress live/email alert notifications.
 
 ## Fast Development Deploys
 
-For rapid iteration during development, the repo includes a tar-based deploy
-helper:
+For rapid iteration during development, the repo includes an automatic direct
+deploy helper. It compares deployable hashes with the live host and selects the
+smallest valid operation.
+
+The standard development command handles backend and frontend changes:
 
 ```powershell
 .\scripts\deploy_pizzad_tar.ps1 -HostName user@host -Rid linux-x64
-.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@192.168.2.42 -SshKey $env:USERPROFILE\.ssh\pizzawave_rpi_ed25519 -Rid linux-arm64
+.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@100.105.110.92 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
 ```
+
+Its paths are:
+
+- no changed deployable inputs: verify live health only;
+- frontend-only change: rebuild when required, upload only `wwwroot`, and do not
+  restart `pizzad`;
+- backend change: publish the requested RID, reuse exact cached artifacts where
+  possible, install the backend, restart `pizzad`, and verify health.
+
+The helper records local cache metadata under ignored `artifacts/` paths and a
+small `.pizzawave-deploy.json` manifest beside the live application. Every
+build, archive, upload, remote install, and health check fails closed and emits
+stage timing.
+
+`-WebOnly` and `-BackendOnly` override automatic selection. `-ForceBuild`
+invalidates local build caches, while `-ForceDeploy` repeats the smallest valid
+deployment. The `deploy_pizzad_web.ps1` wrapper remains available as an explicit
+web-only convenience command.
 
 This is not the preferred release path. Use `.deb` packages for normal deploys.
 

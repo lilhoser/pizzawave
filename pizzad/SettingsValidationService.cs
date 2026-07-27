@@ -342,10 +342,12 @@ public sealed class SettingsValidationService
 
     private object TestAlerts()
     {
-        if (!_config.Alerts.EmailEnabled)
-            return new { ok = true, message = "Email alerts are disabled." };
+        if (!_config.Alerts.EmailEnabled && !_config.Alerts.AdministrativeEmailEnabled)
+            return new { ok = true, message = "Email notifications are disabled." };
         if (string.IsNullOrWhiteSpace(_config.Alerts.EmailUser) || !_credentials.HasAlertEmailPassword())
             return new { ok = false, message = "Email address and app password are required." };
+        if (_config.Alerts.AdministrativeEmailEnabled && string.IsNullOrWhiteSpace(_config.Alerts.AdministrativeEmailRecipients))
+            return new { ok = false, message = "At least one administrator recipient is required for outage email." };
         return new { ok = true, message = $"Email settings are present for {_config.Alerts.EmailProvider}." };
     }
 
