@@ -33,18 +33,29 @@ public static class TrConfigSourceCoverageValidator
                 continue;
             }
 
-            foreach (var controlChannel in system.ControlChannelsHz)
+            var primaryControlChannel = system.ControlChannelsHz[0];
+            var initialSource = sources.FirstOrDefault(source => Covers(source, primaryControlChannel));
+            if (initialSource == null)
             {
-                if (sources.Any(source => Covers(source, controlChannel)))
-                    continue;
-
                 var nearest = sources
-                    .OrderBy(source => DistanceToWindow(source, controlChannel))
+                    .OrderBy(source => DistanceToWindow(source, primaryControlChannel))
                     .FirstOrDefault();
                 blockers.Add(nearest == null
-                    ? $"System {system.ShortName} control channel {FormatHz(controlChannel)} is not covered because no source is configured."
-                    : $"System {system.ShortName} control channel {FormatHz(controlChannel)} is outside all source windows. Nearest source {nearest.Index} usable TR window is {FormatHz(LowHz(nearest))}-{FormatHz(HighHz(nearest))}.");
+                    ? $"System {system.ShortName} control channel {FormatHz(primaryControlChannel)} is not covered because no source is configured."
+                    : $"System {system.ShortName} control channel {FormatHz(primaryControlChannel)} is outside all source windows. Nearest source {nearest.Index} usable TR window is {FormatHz(LowHz(nearest))}-{FormatHz(HighHz(nearest))}.");
+                continue;
             }
+
+            var overflow = system.ControlChannelsHz
+                .Where(controlChannel => !Covers(initialSource, controlChannel))
+                .ToList();
+            if (overflow.Count == 0)
+                continue;
+
+            blockers.Add(
+                $"System {system.ShortName} starts on source {initialSource.Index}, but that source does not cover every configured control channel. " +
+                $"Its usable TR window is {FormatHz(LowHz(initialSource))}-{FormatHz(HighHz(initialSource))}; outside: {string.Join(", ", overflow.Select(FormatHz))}. " +
+                "TR may otherwise reassign the system to another source during control-channel rotation.");
         }
 
         return new TrConfigSourceCoverageValidation(

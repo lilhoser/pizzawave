@@ -94,15 +94,10 @@ public sealed partial class SetupTrConfigBuilderService
             .Distinct()
             .OrderBy(frequency => frequency)
             .ToList();
-        var allControlChannels = systems
-            .SelectMany(site => site.ControlChannelsMhz.Count > 0 ? site.ControlChannelsMhz : site.FrequenciesMhz)
-            .Distinct()
-            .OrderBy(frequency => frequency)
-            .ToList();
         var requiredSampleRate = devices.Count > 0 ? devices.Max(device => device.SampleRate) : requestedSampleRate;
-        var requiredPlan = PlanCoverage(allControlChannels, allControlChannels, RepeatedDevices(requiredSampleRate, allControlChannels.Count), allControlChannels.Count, allFrequencies);
+        var requiredPlan = PlanCoverage(systems, RepeatedDevices(requiredSampleRate, systems.Count), systems.Count, allFrequencies);
         var availableSourceCount = Math.Max(1, devices.Count);
-        var coveragePlan = PlanCoverage(allControlChannels, allControlChannels, devices, availableSourceCount, allFrequencies);
+        var coveragePlan = PlanCoverage(systems, devices, availableSourceCount, allFrequencies);
         var coveredFrequencies = coveragePlan.SelectMany(source => source.Covered).Distinct().ToHashSet();
         var systemDrafts = new List<SetupTrConfigSystemDto>();
 
@@ -110,10 +105,12 @@ public sealed partial class SetupTrConfigBuilderService
         {
             var siteControlChannels = site.ControlChannelsMhz.Count > 0 ? site.ControlChannelsMhz : site.FrequenciesMhz;
             var siteSources = coveragePlan
-                .Where(source => site.FrequenciesMhz.Any(source.Covered.Contains) || siteControlChannels.Any(source.Covered.Contains))
+                .Where(source => source.SystemShortNames.Contains(site.ShortName, StringComparer.OrdinalIgnoreCase))
                 .ToList();
             var omitted = site.FrequenciesMhz.Where(f => !coveredFrequencies.Contains(f)).ToList();
-            var omittedControlChannels = siteControlChannels.Where(f => !coveredFrequencies.Contains(f)).ToList();
+            var omittedControlChannels = siteSources.Count == 0
+                ? siteControlChannels.ToList()
+                : siteControlChannels.Where(f => !siteSources[0].Covered.Contains(f)).ToList();
             var assignedSerials = siteSources.Select(source => source.Device.Serial).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var warningParts = new List<string>();
             if (assignedSerials.Count == 0)
@@ -139,7 +136,7 @@ public sealed partial class SetupTrConfigBuilderService
         var sourceDrafts = coveragePlan.Select((source, index) =>
         {
             var sourceSites = systems
-                .Where(site => site.FrequenciesMhz.Any(source.Covered.Contains) || site.ControlChannelsMhz.Any(source.Covered.Contains))
+                .Where(site => source.SystemShortNames.Contains(site.ShortName, StringComparer.OrdinalIgnoreCase))
                 .Select(site => site.ShortName)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -167,6 +164,13 @@ public sealed partial class SetupTrConfigBuilderService
         }
         if (devices.Count > requiredPlan.Count)
             warnings.Add($"{devices.Count - requiredPlan.Count} SDR device(s) were not needed by the generated site plan.");
+        var widestUsableSpanMhz = devices.Select(device => EffectiveTrSpanMhz(device.SampleRate)).DefaultIfEmpty(EffectiveTrSpanMhz(requestedSampleRate)).Max();
+        foreach (var site in systems)
+        {
+            var controls = (site.ControlChannelsMhz.Count > 0 ? site.ControlChannelsMhz : site.FrequenciesMhz).Distinct().Order().ToList();
+            if (controls.Count > 0 && controls[^1] - controls[0] > widestUsableSpanMhz + 0.000001)
+                warnings.Add($"{site.SiteName} control channels span {controls[^1] - controls[0]:F6} MHz and cannot fit one selected SDR's {widestUsableSpanMhz:F6} MHz usable TR window.");
+        }
         if (systemDrafts.Any(s => s.Warning.Contains("fall outside", StringComparison.OrdinalIgnoreCase)))
             warnings.Add("The generated config continues with the largest possible covered frequency set. Review omitted frequencies before using it.");
         if (systemDrafts.Any(s => s.Warning.Contains("control channel", StringComparison.OrdinalIgnoreCase) && s.Warning.Contains("not covered", StringComparison.OrdinalIgnoreCase)))
@@ -639,59 +643,99 @@ public sealed partial class SetupTrConfigBuilderService
         }
     }
 
-    private static List<CoverageResult> PlanCoverage(IReadOnlyList<double> freqsMhz, IReadOnlyList<double> controlChannelsMhz, IReadOnlyList<SelectedSdrDevice> devices, int? maxSources = null, IReadOnlyList<double>? displayFreqsMhz = null)
+    private static List<CoverageResult> PlanCoverage(IReadOnlyList<SiteParseResult> systems, IReadOnlyList<SelectedSdrDevice> devices, int? maxSources = null, IReadOnlyList<double>? displayFreqsMhz = null)
     {
-        var sorted = freqsMhz.Distinct().OrderBy(f => f).ToList();
-        if (sorted.Count == 0)
+        var groups = systems
+            .Select(system => new ControlChannelGroup(
+                system.ShortName,
+                (system.ControlChannelsMhz.Count > 0 ? system.ControlChannelsMhz : system.FrequenciesMhz)
+                    .Where(frequency => frequency > 0)
+                    .Distinct()
+                    .Order()
+                    .ToList()))
+            .Where(group => group.FrequenciesMhz.Count > 0)
+            .ToList();
+        if (groups.Count == 0)
             return [];
-        var displayFreqs = (displayFreqsMhz is { Count: > 0 } ? displayFreqsMhz : freqsMhz)
+        var displayFreqs = (displayFreqsMhz is { Count: > 0 }
+                ? displayFreqsMhz
+                : systems.SelectMany(system => system.FrequenciesMhz))
             .Distinct()
             .OrderBy(f => f)
             .ToList();
         var orderedDevices = devices.Count > 0
             ? devices.OrderByDescending(device => device.SampleRate).ThenBy(device => device.Index).ToList()
             : RepeatedDevices(DefaultSampleRate, 1).ToList();
-        var sourceCount = Math.Max(1, Math.Min(maxSources ?? orderedDevices.Count, sorted.Count));
-        var remaining = sorted.ToList();
-        var remainingControls = controlChannelsMhz.Distinct().OrderBy(f => f).ToList();
+        var sourceCount = Math.Max(1, Math.Min(maxSources ?? orderedDevices.Count, groups.Count));
+        var remaining = groups.ToList();
         var results = new List<CoverageResult>();
         for (var i = 0; i < sourceCount && remaining.Count > 0 && i < orderedDevices.Count; i++)
         {
-            var coverage = BestCoverage(displayFreqs, sorted, remaining, remainingControls, orderedDevices[i]);
+            var coverage = BestCoverage(displayFreqs, remaining, orderedDevices[i]);
+            if (coverage.SystemShortNames.Count == 0)
+                continue;
             results.Add(coverage);
-            remaining = remaining.Where(f => !coverage.Covered.Contains(f)).ToList();
-            remainingControls = remainingControls.Where(f => !coverage.Covered.Contains(f)).ToList();
+            remaining = remaining
+                .Where(group => !coverage.SystemShortNames.Contains(group.ShortName, StringComparer.OrdinalIgnoreCase))
+                .ToList();
         }
         return results;
     }
 
-    private static CoverageResult BestCoverage(IReadOnlyList<double> displayFreqsMhz, IReadOnlyList<double> candidateFreqsMhz, IReadOnlyList<double> targetFreqsMhz, IReadOnlyList<double> controlChannelsMhz, SelectedSdrDevice device)
+    private static CoverageResult BestCoverage(IReadOnlyList<double> displayFreqsMhz, IReadOnlyList<ControlChannelGroup> groups, SelectedSdrDevice device)
     {
-        var sorted = targetFreqsMhz.Distinct().OrderBy(f => f).ToList();
         var spanMhz = EffectiveTrSpanMhz(device.SampleRate);
-        var bestCoveredTargets = new List<double> { sorted[0] };
-        var bestCoveredControls = controlChannelsMhz.Where(f => Math.Abs(f - sorted[0]) <= 0.000001).ToList();
-        foreach (var candidate in candidateFreqsMhz.Concat(targetFreqsMhz).Distinct().OrderBy(f => f))
+        var candidateStarts = groups
+            .SelectMany(group => new[] { group.FrequenciesMhz[0], group.FrequenciesMhz[^1] - spanMhz })
+            .Distinct()
+            .Order()
+            .ToList();
+        var bestGroups = new List<ControlChannelGroup>();
+        var bestDisplayCount = -1;
+        foreach (var start in candidateStarts)
         {
-            var candidateCovered = sorted.Where(f => f >= candidate && f <= candidate + spanMhz).ToList();
-            if (candidateCovered.Count == 0)
+            var end = start + spanMhz;
+            var coveredGroups = groups
+                .Where(group => group.FrequenciesMhz[0] >= start - 0.000001 && group.FrequenciesMhz[^1] <= end + 0.000001)
+                .ToList();
+            if (coveredGroups.Count == 0)
                 continue;
-            var coveredControls = controlChannelsMhz.Where(f => f >= candidate && f <= candidate + spanMhz).ToList();
-            if (coveredControls.Count > bestCoveredControls.Count ||
-                (coveredControls.Count == bestCoveredControls.Count && candidateCovered.Count > bestCoveredTargets.Count) ||
-                (coveredControls.Count == bestCoveredControls.Count && candidateCovered.Count == bestCoveredTargets.Count && candidateCovered.Last() - candidateCovered.First() < bestCoveredTargets.Last() - bestCoveredTargets.First()))
+            var coveredControls = coveredGroups.Sum(group => group.FrequenciesMhz.Count);
+            var bestControls = bestGroups.Sum(group => group.FrequenciesMhz.Count);
+            var displayCount = displayFreqsMhz.Count(frequency => frequency >= start && frequency <= end);
+            if (coveredControls > bestControls ||
+                (coveredControls == bestControls && coveredGroups.Count > bestGroups.Count) ||
+                (coveredControls == bestControls && coveredGroups.Count == bestGroups.Count && displayCount > bestDisplayCount))
             {
-                bestCoveredTargets = candidateCovered;
-                bestCoveredControls = coveredControls;
+                bestGroups = coveredGroups;
+                bestDisplayCount = displayCount;
             }
         }
-        var min = bestCoveredTargets.First();
-        var max = bestCoveredTargets.Last();
-        var center = MhzToHz((min + max) / 2);
-        var centerMhz = center / 1_000_000.0;
+
+        if (bestGroups.Count == 0)
+            return new CoverageResult(0, device, [], []);
+
+        var requiredLow = bestGroups.Min(group => group.FrequenciesMhz[0]);
+        var requiredHigh = bestGroups.Max(group => group.FrequenciesMhz[^1]);
         var halfSpan = spanMhz / 2.0;
+        var minimumCenter = requiredHigh - halfSpan;
+        var maximumCenter = requiredLow + halfSpan;
+        var midpoint = (requiredLow + requiredHigh) / 2.0;
+        var centerCandidates = displayFreqsMhz
+            .Select(frequency => Math.Clamp(frequency, minimumCenter, maximumCenter))
+            .Append(midpoint)
+            .Append(minimumCenter)
+            .Append(maximumCenter)
+            .Distinct()
+            .ToList();
+        var centerMhz = centerCandidates
+            .OrderByDescending(candidate => displayFreqsMhz.Count(frequency => frequency >= candidate - halfSpan && frequency <= candidate + halfSpan))
+            .ThenBy(candidate => Math.Abs(candidate - midpoint))
+            .First();
+        var center = MhzToHz(centerMhz);
+        centerMhz = center / 1_000_000.0;
         var covered = displayFreqsMhz.Where(f => f >= centerMhz - halfSpan && f <= centerMhz + halfSpan).Distinct().OrderBy(f => f).ToList();
-        return new CoverageResult(center, device, covered);
+        return new CoverageResult(center, device, covered, bestGroups.Select(group => group.ShortName).ToList());
     }
 
     private static double EffectiveTrSpanMhz(int sampleRate) =>
@@ -871,7 +915,9 @@ public sealed partial class SetupTrConfigBuilderService
     [GeneratedRegex(@"(?:^|\s)\d+\s+\(\d+\)\s+\d+\s+\([0-9A-Fa-f]+\)\s+(?<tail>.*?)(?=\s+\d+\s+\(\d+\)\s+\d+\s+\([0-9A-Fa-f]+\)\s+|$)", RegexOptions.IgnoreCase)]
     private static partial Regex RadioReferenceFullSiteRowRegex();
 
-    private sealed record CoverageResult(long CenterHz, SelectedSdrDevice Device, IReadOnlyList<double> Covered);
+    private sealed record CoverageResult(long CenterHz, SelectedSdrDevice Device, IReadOnlyList<double> Covered, IReadOnlyList<string> SystemShortNames);
+
+    private sealed record ControlChannelGroup(string ShortName, IReadOnlyList<double> FrequenciesMhz);
 
     private sealed record SelectedSdrDevice(
         int Index,

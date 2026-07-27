@@ -172,9 +172,53 @@ public sealed class SetupTrConfigBuilderServiceTests
             SdrDevices: [RtlDevice(0, "00000001")],
             SampleRate: 2_400_000), CancellationToken.None);
 
-        Assert.Contains(narrow.Warnings, warning => warning.Contains("need 2 SDR source window", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(narrow.Warnings, warning => warning.Contains("cannot fit one selected SDR", StringComparison.OrdinalIgnoreCase));
         Assert.Empty(wide.Warnings);
         Assert.All(wide.Systems[0].ControlChannelsMhz, control => Assert.Contains(control, wide.Sources[0].CoveredFrequenciesMhz));
+    }
+
+    [Fact]
+    public async Task DraftAsync_KeepsEachSitesControlChannelsOnOneSourceWindow()
+    {
+        var html = """
+            Sites and Frequencies
+            2 (2) 011 (B) North Bradley 769.60000c 771.80000c
+            2 (2) 012 (C) Nearby Site 768.50000c
+            """;
+        var service = CreateService();
+
+        var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
+            RadioReferenceSid: "6355",
+            HtmlText: html,
+            SiteNameList: ["North Bradley", "Nearby Site"],
+            SdrDevices: [RtlDevice(0, "00000001"), RtlDevice(1, "00000002")],
+            SampleRate: 2_400_000), CancellationToken.None);
+
+        var northBradley = Assert.Single(draft.Systems, system => system.SiteName == "North Bradley");
+        var assignedSource = Assert.Single(draft.Sources, source => source.Serial == northBradley.AssignedSerial);
+        Assert.All(northBradley.ControlChannelsMhz, control => Assert.Contains(control, assignedSource.CoveredFrequenciesMhz));
+    }
+
+    [Fact]
+    public async Task DraftAsync_RejectsNorthBradleyPatternThatCannotFitOneRtlWindow()
+    {
+        var html = """
+            Sites and Frequencies
+            2 (2) 011 (B) North Bradley 769.60625c 770.53125c 772.38125c
+            """;
+        var service = CreateService();
+
+        var draft = await service.DraftAsync(new SetupTrConfigDraftRequest(
+            RadioReferenceSid: "6355",
+            HtmlText: html,
+            SiteNameList: ["North Bradley"],
+            SdrDevices: [RtlDevice(0, "00000001"), RtlDevice(1, "00000002")],
+            SampleRate: 2_400_000), CancellationToken.None);
+
+        var system = Assert.Single(draft.Systems);
+        Assert.Empty(system.AssignedSerial);
+        Assert.Contains("control channel", system.Warning, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(draft.Warnings, warning => warning.Contains("cannot fit one selected SDR", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -302,6 +346,43 @@ public sealed class SetupTrConfigBuilderServiceTests
         Assert.Contains("cannot start", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("855.212500", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("769.606250", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(trConfigPath));
+        Directory.Delete(root, recursive: true);
+    }
+
+    [Fact]
+    public async Task SaveAsync_RejectsControlChannelsSplitAcrossSources()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "pizzawave-tr-save-single-source-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var trConfigPath = Path.Combine(root, "config.json");
+        var config = new EngineConfig
+        {
+            ConfigPath = Path.Combine(root, "appsettings.json"),
+            TrunkRecorder = new TrunkRecorderConfig
+            {
+                ConfigPath = trConfigPath,
+                TalkgroupsPath = Path.Combine(root, "talkgroups.csv"),
+                TalkgroupCatalogPath = Path.Combine(root, "talkgroups.json")
+            }
+        };
+        var service = CreateService(config);
+
+        var result = await service.SaveAsync(new SetupTrConfigSaveRequest("""
+            {
+              "sources": [
+                { "center": 770515625, "rate": 2400000, "driver": "osmosdr", "device": "rtl=00000003" },
+                { "center": 772918750, "rate": 2400000, "driver": "osmosdr", "device": "rtl=00000002" }
+              ],
+              "systems": [
+                { "shortName": "north-bradley", "control_channels": [769606250, 770531250, 772381250] }
+              ]
+            }
+            """), CancellationToken.None);
+
+        Assert.False(result.Ok);
+        Assert.Contains("does not cover every configured control channel", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("772.381250", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.False(File.Exists(trConfigPath));
         Directory.Delete(root, recursive: true);
     }

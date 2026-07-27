@@ -32,6 +32,32 @@ public sealed class SiteSetupSourcePlanServiceTests
         Assert.Contains("changed after this projection", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Projection_DoesNotRecommendAPlanThatSplitsOneSitesControlChannels()
+    {
+        var desired = new SiteSetupConfig
+        {
+            DesiredVersion = 7,
+            Systems =
+            [
+                new RfSurveySystemDto("north-bradley", "North Bradley", [769_600_000, 771_800_000], [], "2", "49"),
+                new RfSurveySystemDto("nearby", "Nearby", [768_500_000], [], "2", "50")
+            ],
+            Sources =
+            [
+                new RfSurveySourceDto(0, "rtl=serial:one", "one", "rtl-sdr", 769_625_000, 2_400_000, 0, "auto"),
+                new RfSurveySourceDto(1, "rtl=serial:two", "two", "rtl-sdr", 771_800_000, 2_400_000, 0, "auto")
+            ]
+        };
+
+        var projection = new SiteSetupSourcePlanService().Project(desired);
+
+        var allSites = Assert.Single(projection.Options, option => option.Id == "full:north-bradley|nearby");
+        Assert.False(allSites.Fits);
+        Assert.Contains("one SDR source window", allSites.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(allSites.Id, projection.RecommendedOptionId);
+    }
+
     private static SiteSetupConfig Setup(long version) => new()
     {
         DesiredVersion = version,

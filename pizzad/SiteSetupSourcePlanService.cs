@@ -80,6 +80,15 @@ public sealed class SiteSetupSourcePlanService
                 throw new InvalidOperationException($"Source {pair.Value} is not a valid assignment for {pair.Key} in this projection.");
             assignments[pair.Key] = pair.Value;
         }
+        foreach (var assignment in assignments)
+        {
+            var system = desired.Systems.First(value => string.Equals(value.ShortName, assignment.Key, StringComparison.OrdinalIgnoreCase));
+            var sourcePosition = option.SelectedSourceIndexes.ToList().IndexOf(assignment.Value);
+            var window = sourcePosition >= 0 && sourcePosition < option.Windows.Count ? option.Windows[sourcePosition] : null;
+            var controls = system.ControlChannelsHz.Where(value => value > 0).Distinct().ToList();
+            if (window == null || controls.Any(frequency => frequency < window.LowHz || frequency > window.HighHz))
+                throw new InvalidOperationException($"Source {assignment.Value} does not cover every configured control channel for {assignment.Key}.");
+        }
         return new SiteSetupDesiredPatch
         {
             SourcePlanSystemShortNames = option.SystemShortNames.ToList(),
@@ -109,9 +118,19 @@ public sealed class SiteSetupSourcePlanService
         var selectedSources = sources.Take(windows.Count).Select(source => source.Index).ToList();
         var assignments = BuildAssignments(included, mode, windows, selectedSources);
         var missed = frequencies.Where(frequency => !windows.Any(window => frequency >= window.LowHz && frequency <= window.HighHz)).ToList();
-        var fits = missingControl.Count == 0 && windows.Count > 0 && windows.Count <= sources.Count && missed.Count == 0;
+        var splitControlSystems = included
+            .Where(system =>
+            {
+                var controls = system.ControlChannelsHz.Where(value => value > 0).Distinct().ToList();
+                return controls.Count > 0 && !windows.Any(window => controls.All(frequency => frequency >= window.LowHz && frequency <= window.HighHz));
+            })
+            .Select(system => string.IsNullOrWhiteSpace(system.SiteLabel) ? system.ShortName : system.SiteLabel)
+            .ToList();
+        var fits = missingControl.Count == 0 && splitControlSystems.Count == 0 && windows.Count > 0 && windows.Count <= sources.Count && missed.Count == 0;
         var reason = missingControl.Count > 0
             ? $"No validated control channel for {string.Join(", ", missingControl)}."
+            : splitControlSystems.Count > 0
+                ? $"Every configured control channel for {string.Join(", ", splitControlSystems)} must fit one SDR source window."
             : windows.Count > sources.Count
                 ? $"Needs {windows.Count} SDR source windows; {sources.Count} detected."
                 : mode == "control" ? "Fits control-channel coverage; voice coverage may be incomplete." : "Fits detected SDR hardware.";
