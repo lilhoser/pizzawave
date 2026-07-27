@@ -267,7 +267,10 @@ public sealed class BackupRestoreService
         var safetyBackup = await CreateBackupAsync(new BackupCreateRequestDto("all", passphrase, passphrase), ct);
         await _recoveryResults.AppendAsync("restore", "safety-backup", "completed", $"Verified {safetyBackup.Name}.", false, ct);
 
-        if (!OperatingSystem.IsWindows())
+        var plan = JsonSerializer.Deserialize<BackupRestorePlanDto>(await File.ReadAllTextAsync(planPath, ct), EngineConfig.JsonOptions())
+            ?? throw new InvalidOperationException("Restore plan could not be read.");
+
+        if (!OperatingSystem.IsWindows() && RequiresPrivilegedRestore(plan))
         {
             var helper = FindAdminHelper();
             var psi = new System.Diagnostics.ProcessStartInfo
@@ -293,14 +296,12 @@ public sealed class BackupRestoreService
             return new BackupRestoreApplyResultDto(true, message);
         }
 
-        var plan = JsonSerializer.Deserialize<BackupRestorePlanDto>(await File.ReadAllTextAsync(planPath, ct), EngineConfig.JsonOptions())
-            ?? throw new InvalidOperationException("Restore plan could not be read.");
         foreach (var entry in plan.Entries)
             CopyPlanEntry(entry);
         MarkRestoredConfigApplied(_config.ConfigPath);
-        var windowsMessage = $"Pre-restore backup {safetyBackup.Name} was verified. Restore files were copied. Restart pizzad before using the restored data.";
-        await _recoveryResults.AppendAsync("restore", "apply", "completed", windowsMessage, true, CancellationToken.None);
-        return new BackupRestoreApplyResultDto(true, windowsMessage);
+        var directMessage = $"Pre-restore backup {safetyBackup.Name} was verified. Restore files were copied. Restart pizzad before using the restored data.";
+        await _recoveryResults.AppendAsync("restore", "apply", "completed", directMessage, true, CancellationToken.None);
+        return new BackupRestoreApplyResultDto(true, directMessage);
     }
 
     public Task<BackupRestoreApplyResultDto> ApplyPendingRestoreAsync(CancellationToken ct) =>
@@ -718,6 +719,18 @@ public sealed class BackupRestoreService
         File.Copy(entry.SourcePath, entry.TargetPath, overwrite: true);
         if (entry.TargetPath.EndsWith(".db", StringComparison.OrdinalIgnoreCase))
             DeleteSqliteSidecars(entry.TargetPath);
+    }
+
+    private static bool RequiresPrivilegedRestore(BackupRestorePlanDto plan) =>
+        plan.Entries.Any(entry =>
+            entry.Kind.Equals("qdrant-snapshot", StringComparison.OrdinalIgnoreCase) ||
+            IsProtectedSystemPath(entry.TargetPath));
+
+    private static bool IsProtectedSystemPath(string path)
+    {
+        var full = Path.GetFullPath(path).Replace('\\', '/').TrimEnd('/') + "/";
+        string[] protectedRoots = ["/etc/", "/opt/", "/root/", "/run/", "/srv/", "/usr/", "/var/"];
+        return protectedRoots.Any(root => full.StartsWith(root, StringComparison.Ordinal));
     }
 
     private static void DeleteSqliteSidecars(string databasePath)

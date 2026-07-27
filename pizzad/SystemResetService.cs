@@ -80,8 +80,11 @@ public sealed class SystemResetService
 
             if (clearSiteState)
             {
-                await StopTrunkRecorderAsync(ct);
-                await _recoveryResults.AppendAsync("reset", "trunk-recorder", "stopped", "Trunk Recorder stopped and will remain stopped until Setup apply.", false, ct);
+                if (RequiresSystemServiceControl())
+                {
+                    await StopTrunkRecorderAsync(ct);
+                    await _recoveryResults.AppendAsync("reset", "trunk-recorder", "stopped", "Trunk Recorder stopped and will remain stopped until Setup apply.", false, ct);
+                }
             }
 
             if (clearOperationalData)
@@ -240,6 +243,10 @@ public sealed class SystemResetService
         !OperatingSystem.IsWindows() &&
         (_config.TrunkRecorder.ConfigPath.StartsWith("/etc/", StringComparison.Ordinal) ||
          _config.TrunkRecorder.TalkgroupsPath.StartsWith("/etc/", StringComparison.Ordinal));
+
+    private bool RequiresSystemServiceControl() =>
+        !OperatingSystem.IsWindows() &&
+        (NeedsProtectedTrFileReset() || _config.ConfigPath.StartsWith("/etc/", StringComparison.Ordinal));
 
     private static void ValidateProtectedTrPath(string path)
     {

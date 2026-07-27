@@ -274,7 +274,16 @@ public sealed class SetupTrConfigBuilderServiceTests
         var root = Path.Combine(Path.GetTempPath(), "pizzawave-tr-save-coverage-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         var trConfigPath = Path.Combine(root, "config.json");
-        var config = new EngineConfig { ConfigPath = Path.Combine(root, "appsettings.json"), TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath } };
+        var config = new EngineConfig
+        {
+            ConfigPath = Path.Combine(root, "appsettings.json"),
+            TrunkRecorder = new TrunkRecorderConfig
+            {
+                ConfigPath = trConfigPath,
+                TalkgroupsPath = Path.Combine(root, "talkgroups.csv"),
+                TalkgroupCatalogPath = Path.Combine(root, "talkgroups.json")
+            }
+        };
         var service = CreateService(config);
 
         var result = await service.SaveAsync(new SetupTrConfigSaveRequest("""
@@ -303,7 +312,16 @@ public sealed class SetupTrConfigBuilderServiceTests
         var root = Path.Combine(Path.GetTempPath(), "pizzawave-tr-save-coverage-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         var trConfigPath = Path.Combine(root, "config.json");
-        var config = new EngineConfig { ConfigPath = Path.Combine(root, "appsettings.json"), TrunkRecorder = new TrunkRecorderConfig { ConfigPath = trConfigPath } };
+        var config = new EngineConfig
+        {
+            ConfigPath = Path.Combine(root, "appsettings.json"),
+            TrunkRecorder = new TrunkRecorderConfig
+            {
+                ConfigPath = trConfigPath,
+                TalkgroupsPath = Path.Combine(root, "talkgroups.csv"),
+                TalkgroupCatalogPath = Path.Combine(root, "talkgroups.json")
+            }
+        };
         var service = CreateService(config);
 
         var result = await service.SaveAsync(new SetupTrConfigSaveRequest("""
