@@ -42,6 +42,9 @@ UI.
 - [Insights Behavior](insights-behavior-matrix.md): AI summaries, incidents, and alerts.
 - [Incident Pipeline Architecture](incident-pipeline-architecture.md): authoritative incident definition, dual-model design, and release gates.
 - [Incident Model Training Handoff](incident-model-training-handoff.md): bounded implementation plan for the local membership model and review workflow.
+- [Transmission Ledger Architecture](transmission-ledger-architecture.md): preserve push-to-talk boundaries and radio source evidence from Trunk Recorder through Callstream without making source identity the incident authority.
+- [Callstream Version 2 Shadow Runbook](callstream-v2-shadow-runbook.md): deployment order, frozen transport checks, and rollback boundaries for transmission-aware capture.
+- [Callstream Version 3 Capture Completeness](callstream-v3-capture-completeness.md): preserve grant-versus-update starts, suppress unattached sub-second late-entry fragments, and prevent incomplete beginnings from seeding incidents or radio linkage.
 - [Config Examples](config-examples-explained.md): trunk-recorder/callstream examples.
 - [SDR Setup](getting_started_with_sdrs.md): SDR and trunk-recorder concepts used by Setup.
 - [Email Troubleshooting](email-smtp-troubleshooting.md): SMTP alert setup.

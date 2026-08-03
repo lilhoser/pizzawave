@@ -6,6 +6,20 @@ namespace pizzad.Tests;
 public sealed class AutomaticInsightsServiceMembershipTests
 {
     [Fact]
+    public void ParticipantLinkCandidateEvaluationRunsOnlyWhenItsConsumerIsEnabled()
+    {
+        var config = new AiInsightsConfig();
+        Assert.False(AutomaticInsightsService.ShouldEvaluateParticipantLinkCandidates(config));
+
+        config.IncidentParticipantLinkCandidateEnabled = true;
+        Assert.True(AutomaticInsightsService.ShouldEvaluateParticipantLinkCandidates(config));
+
+        config.IncidentParticipantLinkCandidateEnabled = false;
+        config.IncidentTargetMembershipShadowEnabled = true;
+        Assert.True(AutomaticInsightsService.ShouldEvaluateParticipantLinkCandidates(config));
+    }
+
+    [Fact]
     public void IncidentProcessingSlicesPreserveHistoricalCallsAndBoundEachPrompt()
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -119,6 +133,8 @@ public sealed class AutomaticInsightsServiceMembershipTests
     {
         var service = new AutomaticInsightsService(
             new EngineConfig(),
+            null!,
+            null!,
             null!,
             null!,
             null!,

@@ -44,6 +44,8 @@ public sealed class AutomaticInsightsService : BackgroundService
     private readonly EmbeddingService _embeddings;
     private readonly IncidentReconciliationService _reconciliation;
     private readonly TalkgroupCatalogService _catalog;
+    private readonly ConversationSegmentLinkageService _conversationSegmentLinkage;
+    private readonly IncidentTargetMembershipShadowService _incidentTargetMembershipShadow;
     private readonly ILogger<AutomaticInsightsService> _logger;
     private readonly IncidentRagMatcher _ragMatcher = new();
     private readonly IncidentFrameBuilderV3 _incidentFrameBuilderV3 = new();
@@ -66,6 +68,8 @@ public sealed class AutomaticInsightsService : BackgroundService
         EmbeddingService embeddings,
         IncidentReconciliationService reconciliation,
         TalkgroupCatalogService catalog,
+        ConversationSegmentLinkageService conversationSegmentLinkage,
+        IncidentTargetMembershipShadowService incidentTargetMembershipShadow,
         ILogger<AutomaticInsightsService> logger)
     {
         _config = config;
@@ -74,6 +78,8 @@ public sealed class AutomaticInsightsService : BackgroundService
         _embeddings = embeddings;
         _reconciliation = reconciliation;
         _catalog = catalog;
+        _conversationSegmentLinkage = conversationSegmentLinkage;
+        _incidentTargetMembershipShadow = incidentTargetMembershipShadow;
         _logger = logger;
     }
 
@@ -384,22 +390,52 @@ public sealed class AutomaticInsightsService : BackgroundService
             .ToList();
         var locationRows = await _database.ListCallLocationsAsync(start, end, ct);
         var vectorMatches = await SearchVectorCandidatesAsync(systemShortName, activeIncidents, recent, newCallIds, start, end, ct);
-        var ragCandidates = _ragMatcher.SelectCandidates(systemShortName, activeIncidents, recent, newCallIds, locationRows, vectorMatches);
+        var baselineCandidates = _ragMatcher.SelectCandidates(
+            systemShortName, activeIncidents, recent, newCallIds, locationRows, vectorMatches);
+        var participantContext = ConversationSegmentLinkageContext.Empty;
+        IReadOnlyList<ConversationSegmentLinkEvidence> eligibleParticipantLinks = [];
+        IReadOnlyList<IncidentRagCandidate> participantCandidates = baselineCandidates;
+        ParticipantLinkCandidateShadowComparison? participantShadow = null;
+        if (ShouldEvaluateParticipantLinkCandidates(_config.AiInsights))
+        {
+            participantContext = await _conversationSegmentLinkage.BuildContextAsync(recent, ct);
+            eligibleParticipantLinks = ParticipantLinkCandidateShadowComparer.SelectEligibleLinks(participantContext.Links);
+            participantCandidates = _ragMatcher.SelectCandidates(
+                systemShortName, activeIncidents, recent, newCallIds, locationRows, vectorMatches, eligibleParticipantLinks);
+            participantShadow = ParticipantLinkCandidateShadowComparer.Compare(baselineCandidates, participantCandidates);
+            if (participantShadow.HasDifference)
+            {
+                _logger.LogInformation(
+                    "Participant-link candidate shadow for {System}: {ShadowJson}; production candidate use={ParticipantLinkCandidateEnabled}",
+                    systemShortName,
+                    JsonSerializer.Serialize(participantShadow, EngineConfig.JsonOptions()),
+                    _config.AiInsights.IncidentParticipantLinkCandidateEnabled);
+            }
+        }
+
+        var ragCandidates = ParticipantLinkCandidateShadowComparer.SelectProductionCandidates(
+            baselineCandidates,
+            participantCandidates,
+            _config.AiInsights.IncidentParticipantLinkCandidateEnabled);
         if (ragCandidates.Count == 0 && activeIncidents.Count == 0)
             return 0;
 
         _logger.LogInformation(
-            "Prepared RAG incident candidates for {System}: {NewCandidates} new, {CarryoverCandidates} carryover/RAG, {CandidateCalls} total, {RecentEligibleCalls} eligible calls in rolling state window, {ActiveIncidents} active incident(s)",
+            "Prepared RAG incident candidates for {System}: {NewCandidates} new, {CarryoverCandidates} carryover/RAG, {CandidateCalls} total, {RecentEligibleCalls} eligible calls in rolling state window, {ActiveIncidents} active incident(s), {ObservedParticipantLinks} observed participant link(s), {EligibleParticipantLinks} eligible participant link(s), live candidate use={ParticipantLinkCandidateEnabled}",
             systemShortName,
             ragCandidates.Count(c => newCallIds.Contains(c.Call.Id)),
             ragCandidates.Count(c => !newCallIds.Contains(c.Call.Id)),
             ragCandidates.Count,
             recent.Count,
-            activeIncidents.Count);
+            activeIncidents.Count,
+            participantContext.Links.Count,
+            eligibleParticipantLinks.Count,
+            _config.AiInsights.IncidentParticipantLinkCandidateEnabled);
 
+        int persisted;
         try
         {
-            return await ExtractAndPersistIncidentStateAsync(systemShortName, activeIncidents, recent, ragCandidates, locationRows, start, end, ct, recordTruncationUsage: false);
+            persisted = await ExtractAndPersistIncidentStateAsync(systemShortName, activeIncidents, recent, ragCandidates, locationRows, start, end, ct, recordTruncationUsage: false);
         }
         catch (InsightResponseTruncatedException ex)
         {
@@ -414,7 +450,7 @@ public sealed class AutomaticInsightsService : BackgroundService
                 systemShortName,
                 prioritized.Count,
                 chunkSize);
-            return await ExtractAndPersistIncidentStateInChunksAsync(systemShortName, activeIncidents, recent, prioritized, locationRows, start, end, chunkSize, depth: 1, recoveredFallback: true, new IncidentExtractionFallbackState(), ct);
+            persisted = await ExtractAndPersistIncidentStateInChunksAsync(systemShortName, activeIncidents, recent, prioritized, locationRows, start, end, chunkSize, depth: 1, recoveredFallback: true, new IncidentExtractionFallbackState(), ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested && IsIncidentExtractionTimeout(ex))
         {
@@ -429,9 +465,24 @@ public sealed class AutomaticInsightsService : BackgroundService
                 systemShortName,
                 prioritized.Count,
                 chunkSize);
-            return await ExtractAndPersistIncidentStateInChunksAsync(systemShortName, activeIncidents, recent, prioritized, locationRows, start, end, chunkSize, depth: 1, recoveredFallback: true, new IncidentExtractionFallbackState(), ct);
+            persisted = await ExtractAndPersistIncidentStateInChunksAsync(systemShortName, activeIncidents, recent, prioritized, locationRows, start, end, chunkSize, depth: 1, recoveredFallback: true, new IncidentExtractionFallbackState(), ct);
         }
+        if (_config.AiInsights.IncidentTargetMembershipShadowEnabled && participantShadow is not null)
+        {
+            await _incidentTargetMembershipShadow.TryEnqueueAsync(
+                systemShortName,
+                recent,
+                activeIncidents,
+                participantCandidates,
+                eligibleParticipantLinks,
+                participantShadow,
+                ct);
+        }
+        return persisted;
     }
+
+    public static bool ShouldEvaluateParticipantLinkCandidates(AiInsightsConfig config) =>
+        config.IncidentParticipantLinkCandidateEnabled || config.IncidentTargetMembershipShadowEnabled;
 
     private async Task<int> ExtractAndPersistIncidentStateAsync(
         string systemShortName,
@@ -1680,6 +1731,19 @@ public sealed class AutomaticInsightsService : BackgroundService
             if (finalMembership.Calls.Count != assembly.Calls.Count || finalMembership.Reason.Contains("validator matched", StringComparison.OrdinalIgnoreCase))
                 await AuditIncidentOperationAsync(systemShortName, item, $"accepted:final membership retained {finalMembership.Calls.Count}/{assembly.Calls.Count} assembler call(s): {finalMembership.Reason}", true, finalMembership.Calls, ragById, ct);
             callIds = finalMembership.Calls;
+
+            if (existingIncident is null && !CaptureAdmissionPolicy.CanCreateIncident(callIds))
+            {
+                await AuditIncidentOperationAsync(
+                    systemShortName,
+                    item,
+                    "rejected:no call with an observed channel-assignment start remained in new incident membership",
+                    false,
+                    callIds,
+                    ragById,
+                    ct);
+                continue;
+            }
 
             var key = existingIncident?.IncidentKey ?? IncidentIdentity.BuildServerOwnedKey(systemShortName, callIds.Select(c => c.Id).ToList());
             var category = NormalizeIncidentCategory(item.Category, item.EventClass, title, detail, callIds);
@@ -4634,7 +4698,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         sb.AppendLine("Classify every call below as one of: supporting, related_context, unrelated, contradicts.");
         sb.AppendLine("supporting means the call directly reports, dispatches, locates, continues, or gives outcome/status for this same incident. related_context means useful nearby context but not direct evidence. unrelated means a different event/routine traffic. contradicts means it says the incident did not happen or belongs elsewhere.");
         sb.AppendLine("Do not drop initial dispatch/location calls. Do not require the same category or talkgroup. Use call ids exactly as given.");
-        sb.AppendLine("Candidate flags include extractor_selected, existing_incident_evidence, qdrant_candidate, and rag_candidate. RAG scores are advisory; reject same-topic calls that lack a shared address, unit handoff, vehicle/person, or explicit same-event reference. Routine compliance, contact, status, or admin updates are unrelated unless they share a concrete event anchor with this incident.");
+        sb.AppendLine("Candidate flags include extractor_selected, existing_incident_evidence, qdrant_candidate, rag_candidate, and participant_link. A participant_link means this call and an adjacent call contain the same system-scoped transmitting radio; it is retrieval evidence, not proof of shared incident membership. A radio appearing in many nearby calls may be a common dispatcher or shared console. Reject same-topic or same-radio calls that lack concrete same-event support.");
         sb.AppendLine("For each call, include same_event_evidence using only these tokens when present: exact_location, event_specific_detail, vehicle_identity, person_identity, patient_identity, unit_continuation, explicit_update, explicit_same_event_reference, same_road, same_highway, same_area, same_talkgroup, same_category, same_agency, near_time, semantic_similarity.");
         sb.AppendLine("For each call, include conflicts using only these tokens when present: vehicle_identity_conflict, location_conflict, direction_conflict, person_conflict, patient_conflict, event_type_conflict, no_conflict.");
         sb.AppendLine("For each call, include role using one of: initial_dispatch, scene_update, responder_status, outcome, transport_logistics, hospital_handoff, routine_status, unrelated. Transport logistics and hospital handoffs can support a parent incident, but cannot be the only retained calls in a newly created incident.");
@@ -4654,7 +4718,12 @@ public sealed class AutomaticInsightsService : BackgroundService
             if (selectedIds.Contains(call.Id)) flags.Add("extractor_selected");
             if (existingIds.Contains(call.Id)) flags.Add("existing_incident_evidence");
             if (vectorMatches.TryGetValue(call.Id, out var vector)) flags.Add($"qdrant_candidate:{vector.Score:0.00}");
-            if (ragCandidates.TryGetValue(call.Id, out var rag)) flags.Add($"rag_candidate:{rag.Score:0.00}");
+            if (ragCandidates.TryGetValue(call.Id, out var rag))
+            {
+                flags.Add($"rag_candidate:{rag.Score:0.00}");
+                if (rag.ParticipantLinked)
+                    flags.Add($"participant_link:shared_radios={rag.SharedRadioCount},gap_seconds={rag.ParticipantGapMilliseconds / 1000d:0.0},nearby_segments={rag.SharedRadioNearbySegmentCount}");
+            }
             if (flags.Count == 0) flags.Add("review_candidate");
             var local = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime();
             var geo = BestGeocodeSummary(call.Id, locationRows);
@@ -4690,7 +4759,7 @@ public sealed class AutomaticInsightsService : BackgroundService
         sb.AppendLine("Event type rule: decide the real event type from transcript evidence, not from the radio channel or talkgroup category. A fire talkgroup may dispatch an elevator entrapment, medical assist, alarm, crash, or rescue; do not title it as a fire unless the transcript describes actual fire/smoke/flames/alarm activation.");
         sb.AppendLine("Status: use active for developing/ongoing incidents and concluded when the event appears complete or stale. Do not return concluded incidents that have no supporting calls in this state window.");
         sb.AppendLine("Categories are labels only: choose one from police, fire, ems, traffic, public_works, utilities, other after deciding the incident.");
-        sb.AppendLine("RAG scores are advisory: semantic, geo, and time scores help find candidates, but you must still reject topical/routine matches that do not describe the same real-world event.");
+        sb.AppendLine("RAG scores and participant links are advisory retrieval evidence. A shared radio can connect adjacent calls, but it never proves shared incident membership; common dispatcher or console radios may occur in unrelated calls.");
         sb.AppendLine();
         sb.AppendLine("Active incidents:");
         foreach (var incident in activeIncidents.OrderByDescending(i => i.LastSeen).Take(10).OrderBy(i => i.LastSeen))
@@ -4710,7 +4779,10 @@ public sealed class AutomaticInsightsService : BackgroundService
             var call = candidate.Call;
             var local = DateTimeOffset.FromUnixTimeSeconds(call.StartTime).ToLocalTime();
             var text = Trim(call.Transcription, IncidentTranscriptCharLimit);
-            var line = $"- [id:{CallToken(call.Id)}] [{local:HH:mm:ss}] score={candidate.Score:0.00}; semantic={candidate.TextScore:0.00}; geo={candidate.GeoScore:0.00}; location={candidate.LocationLabel}; {call.SystemShortName} | {Label(call)} | category={call.Category}: {text}";
+            var participant = candidate.ParticipantLinked
+                ? $"; participant_link=shared_radios:{candidate.SharedRadioCount},gap_seconds:{candidate.ParticipantGapMilliseconds / 1000d:0.0},nearby_segments:{candidate.SharedRadioNearbySegmentCount},same_talkgroup:{candidate.ParticipantSameTalkgroup.ToString().ToLowerInvariant()}"
+                : string.Empty;
+            var line = $"- [id:{CallToken(call.Id)}] [{local:HH:mm:ss}] score={candidate.Score:0.00}; semantic={candidate.TextScore:0.00}; geo={candidate.GeoScore:0.00}; location={candidate.LocationLabel}{participant}; {call.SystemShortName} | {Label(call)} | category={call.Category}: {text}";
             if (used + line.Length + Environment.NewLine.Length > IncidentPromptCharLimit)
                 break;
             sb.AppendLine(line);

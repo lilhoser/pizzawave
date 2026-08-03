@@ -15,6 +15,9 @@ public sealed class CallAudioService
     }
 
     public MemoryStream CreateWavStream(byte[] pcmS16Le, int sampleRate)
+        => CreateWavStreamCore(pcmS16Le, sampleRate);
+
+    private static MemoryStream CreateWavStreamCore(byte[] pcmS16Le, int sampleRate)
     {
         const int headerSize = 44;
         var dataSize = pcmS16Le.Length;
@@ -42,6 +45,29 @@ public sealed class CallAudioService
     {
         using var wav = CreateWavStream(payload.PcmS16Le, payload.SampleRate);
         return await Ensure16kMonoPcmAsync(wav, callId, ct);
+    }
+
+    public static bool TryCreatePcm16MonoSlice(MemoryStream wav, int startSample, int sampleCount, out MemoryStream slice)
+    {
+        slice = null!;
+        if (startSample < 0 || sampleCount <= 0)
+            return false;
+
+        var info = TryReadWavFormat(wav);
+        if (info is not { AudioFormat: 1, Channels: 1, BitsPerSample: 16 } || info.SampleRate <= 0 || info.DataOffset < 0)
+            return false;
+
+        var source = wav.ToArray();
+        var byteStart = (long)info.DataOffset + (long)startSample * 2;
+        var byteCount = (long)sampleCount * 2;
+        var dataEnd = (long)info.DataOffset + info.DataSize;
+        if (byteStart < info.DataOffset || byteStart + byteCount > dataEnd || byteStart + byteCount > source.Length || byteCount > int.MaxValue)
+            return false;
+
+        var pcm = new byte[(int)byteCount];
+        Buffer.BlockCopy(source, (int)byteStart, pcm, 0, pcm.Length);
+        slice = CreateWavStreamCore(pcm, info.SampleRate);
+        return true;
     }
 
     public async Task<MemoryStream> Ensure16kMonoPcmAsync(MemoryStream wav, long callId, CancellationToken ct)

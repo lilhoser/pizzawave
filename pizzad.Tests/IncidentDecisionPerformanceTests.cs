@@ -79,6 +79,52 @@ public sealed class IncidentDecisionPerformanceTests
         }
     }
 
+    [Fact]
+    public async Task QualityCheckCountsAllIncidentActionsBeyondDisplayedReasonLimit()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"pizzawave-quality-operations-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var database = new EngineDatabase(new EngineConfig
+            {
+                Storage = new StorageConfig
+                {
+                    DatabasePath = Path.Combine(root, "pizzad.db"),
+                    AudioRoot = root
+                }
+            }, NullLogger<EngineDatabase>.Instance);
+            await database.InitializeAsync(CancellationToken.None);
+            var now = DateTime.UtcNow;
+
+            for (var reasonIndex = 0; reasonIndex < 31; reasonIndex++)
+            {
+                for (var occurrence = 0; occurrence < 3; occurrence++)
+                    await AddAsync(database, now.AddMinutes(-10), true, $"accepted:diagnostic reason {reasonIndex}");
+            }
+
+            await AddAsync(database, now.AddMinutes(-9), true, "accepted:create incident");
+            await AddAsync(database, now.AddMinutes(-8), true, "accepted:create incident; identity:new server-owned incident");
+            await AddAsync(database, now.AddMinutes(-7), true, "accepted:update incident");
+            await AddAsync(database, now.AddMinutes(-6), true, "accepted:server sibling merge repair");
+            await AddAsync(database, now.AddMinutes(-5), false, "rejected:first reason");
+            await AddAsync(database, now.AddMinutes(-4), false, "rejected:second reason");
+
+            var start = new DateTimeOffset(now.AddHours(-1)).ToUnixTimeSeconds();
+            var end = new DateTimeOffset(now.AddMinutes(1)).ToUnixTimeSeconds();
+            var report = await database.GetQualityCheckSnapshotAsync(start, end, CancellationToken.None);
+
+            Assert.Equal(30, report.IncidentOperations.Count);
+            Assert.Equal(2, report.Incidents.Creates);
+            Assert.Equal(2, report.Incidents.Updates);
+            Assert.Equal(2, report.Incidents.Rejects);
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
     private static Task AddAsync(EngineDatabase database, DateTime timestampUtc, bool accepted, string reason) =>
         database.AddIncidentOperationAuditAsync(new IncidentOperationAuditDto(
             0,

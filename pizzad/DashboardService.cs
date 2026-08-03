@@ -222,6 +222,28 @@ public sealed class DashboardService
         return new CategoryGroupDto(label, calls, TalkgroupCatalogService.CatalogKey(parsed.SystemShortName, parsed.Talkgroup), parsed.SystemShortName, parsed.Talkgroup, calls.Count, calls.Select(c => c.StartTime).DefaultIfEmpty(0).Max(), strongCount, calls.Count - strongCount, resolved.Jurisdiction, resolved.AlphaTag, resolved.SystemShortName);
     }
 
+    public async Task<CategoryActivityDto> BuildCategoryActivityAsync(string category, long start, long end, int limit, CancellationToken ct)
+    {
+        category = NormalizeCategory(category);
+        var groups = BuildCategoryGroupsFromStats(await _database.ListTalkgroupCallStatsAsync(start, end, ct), category);
+        var requestedLimit = Math.Clamp(limit, 1, 500);
+        var keys = groups.Select(group => (group.SystemShortName, group.Talkgroup)).Distinct().ToList();
+        var calls = (await _database.ListCallsForTalkgroupsAsync(start, end, keys, requestedLimit, ct))
+            .Select(ApplyDisplayCategory)
+            .Where(call => call.Category == category && Allows(call.Category, call.SystemShortName, call.Talkgroup))
+            .OrderByDescending(call => call.StartTime)
+            .ThenByDescending(call => call.Id)
+            .Take(requestedLimit)
+            .ToList();
+        var metadata = await _database.ListCallMembershipMetadataAsync(calls.Select(call => call.Id).ToList(), ct);
+        var rows = calls.Select(call => new CategoryActivityCallDto(
+            call,
+            metadata.RadioIds.TryGetValue(call.Id, out var radioIds) ? radioIds : [],
+            metadata.IncidentIds.TryGetValue(call.Id, out var incidentIds) ? incidentIds : [])).ToList();
+        var total = groups.Sum(group => group.Count);
+        return new CategoryActivityDto(category, total, total > rows.Count, rows);
+    }
+
     private List<CategoryGroupDto> BuildCategoryGroupsFromStats(IReadOnlyList<TalkgroupCallStatsDto> stats, string category)
     {
         return stats

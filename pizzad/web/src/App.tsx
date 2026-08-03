@@ -11,6 +11,8 @@ import { locationDisplayName, locationKey, locationShortName } from "./features/
 import type { IncidentAssociationReviewGroup, IncidentAssociationReviewReport, IncidentAssociationShadowReport, IncidentBatchShadowReport, IncidentBatchVerificationReport, IncidentDecisionChainPage, IncidentDecisionGroup } from "./types";
 import type { RecoveryOperationResult, RestoreUpload } from "./types";
 import type { LiveRfStatus } from "./types";
+import type { CallTransmissionSession } from "./types";
+import type { CategoryActivity, CategoryActivityCall } from "./types";
 import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, RfTelemetrySummary, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
 import "./style.css";
 
@@ -35,6 +37,7 @@ const waterfallStopUrl = (apiBase: string, surveyId: string) => `${apiBase}/${en
 type Page = "dashboard" | "setup" | "system" | "settings" | typeof categories[number];
 type DashboardMode = "incidents" | "alerts" | "review";
 type CategorySortMode = "name" | "tgid" | "recent" | "frequent";
+type CategoryViewMode = "activity" | "talkgroups" | "unassigned" | "radios";
 type AuthPromptState = { request: AuthTokenRequest; resolve: (token: string | null) => void; token: string; message: string };
 const categoryColors: Record<string, string> = {
   police: "#5aa7ff",
@@ -157,8 +160,14 @@ function App() {
   const [autoplayMuted, setAutoplayMuted] = useState(() => localStorage.getItem("pizzawave-autoplay-muted") === "1");
   const [autoplayMenuOpen, setAutoplayMenuOpen] = useState(false);
   const [activeAutoplay, setActiveAutoplay] = useState<AutoplayContext | null>(null);
-  const [focusedIncidentId, setFocusedIncidentId] = useState<number | null>(null);
-  const [focusedHashTarget, setFocusedHashTarget] = useState("");
+  const [focusedIncidentId, setFocusedIncidentId] = useState<number | null>(() => parseCardHash().incidentId);
+  const [focusedHashTarget, setFocusedHashTarget] = useState(() => parseCardHash().raw);
+  const [linkedCall, setLinkedCall] = useState<EngineCall | null>(null);
+  const [linkedCallLoading, setLinkedCallLoading] = useState(() => {
+    const target = parseCardHash();
+    return Boolean(target.callId && !target.incidentId);
+  });
+  const [linkedCallError, setLinkedCallError] = useState("");
   const [dashboardMode, setDashboardMode] = useState<DashboardMode>("incidents");
   const [pageSearches, setPageSearches] = useState<Record<string, string>>({});
   const [debouncedCategorySearch, setDebouncedCategorySearch] = useState("");
@@ -443,11 +452,35 @@ function App() {
       const target = parseCardHash();
       setFocusedHashTarget(target.raw);
       if (!target.raw) {
+        setLinkedCall(null);
+        setLinkedCallLoading(false);
+        setLinkedCallError("");
         return;
       }
       if (pageRef.current === "settings" && !confirmDiscardUnappliedSettings()) return;
       setPage("dashboard");
       setFocusedIncidentId(target.incidentId);
+      if (target.callId && !target.incidentId) {
+        setLinkedCall(null);
+        setLinkedCallError("");
+        setLinkedCallLoading(true);
+        void api.request<EngineCall>(`/api/v1/calls/${target.callId}`)
+          .then(call => {
+            if (parseCardHash().raw !== target.raw) return;
+            setLinkedCall(call);
+          })
+          .catch(reason => {
+            if (parseCardHash().raw !== target.raw) return;
+            setLinkedCallError(reason instanceof Error ? reason.message : "This call could not be loaded.");
+          })
+          .finally(() => {
+            if (parseCardHash().raw === target.raw) setLinkedCallLoading(false);
+          });
+      } else {
+        setLinkedCall(null);
+        setLinkedCallLoading(false);
+        setLinkedCallError("");
+      }
     };
     applyHash();
     window.addEventListener("hashchange", applyHash);
@@ -830,6 +863,9 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
     resolve(null);
   }
 
+  const focusedCardTarget = parseCardHash(focusedHashTarget);
+  const showingDirectCall = Boolean(focusedCardTarget.callId && !focusedCardTarget.incidentId);
+
   return (
     <div className={`app ${inSetup ? "setup-mode" : ""}`}>
       {authPrompt && <form className="modal-backdrop auth-token-backdrop" onSubmit={submitAuthToken}>
@@ -885,15 +921,16 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         </div>}
         {appNotice && <button type="button" className="pill live-status-warning status-pill-button" title="Dismiss" onClick={() => setAppNotice("")}>{appNotice}</button>}
         {activeAutoplay && <span className="pill playback-status" title={activeAutoplay.label}>Playing "{activeAutoplay.label}"</span>}
-        {alertSettings?.playback?.enabled && <div className="autoplay-menu-wrap">
-          <button type="button" className={autoplayMuted ? "icon-button muted-button" : "icon-button"} title={autoplayMuted ? "Autoplay muted or blocked. Open playback menu." : "Autoplay enabled. Open playback menu."} onClick={() => setAutoplayMenuOpen(v => !v)}>{autoplayMuted ? <BellOff size={16} /> : <Bell size={16} />}</button>
+        <div className="autoplay-menu-wrap">
+          <button type="button" className={!alertSettings?.playback?.enabled || autoplayMuted ? "icon-button muted-button" : "icon-button"} title={!alertSettings?.playback?.enabled ? "Autoplay is disabled in Settings. Open playback menu." : autoplayMuted ? "Autoplay muted or blocked. Open playback menu." : "Autoplay enabled. Open playback menu."} onClick={() => setAutoplayMenuOpen(v => !v)}>{!alertSettings?.playback?.enabled || autoplayMuted ? <BellOff size={16} /> : <Bell size={16} />}</button>
           {autoplayMenuOpen && <div className="autoplay-menu">
+            {!alertSettings?.playback?.enabled && <span className="autoplay-menu-message">Autoplay is disabled in Settings.</span>}
             {activeAutoplay?.kind === "alert" && <button type="button" onClick={() => void openAutoplayTarget("alert")}>Go to alert</button>}
             {(activeAutoplay?.kind === "incident" || activeAutoplay?.kind === "traffic") && <button type="button" onClick={() => void openAutoplayTarget("incident")}>Go to incident</button>}
             {activeAutoplay && <button type="button" onClick={() => { stopAutoplayAudio(); setAutoplayMenuOpen(false); }}>Stop playback</button>}
-            <button type="button" onClick={() => { if (!autoplayMuted) stopAutoplayAudio(); setAutoplayMuted(!autoplayMuted); setAutoplayMenuOpen(false); }}>{autoplayMuted ? "Unmute" : "Mute all"}</button>
+            {alertSettings?.playback?.enabled && <button type="button" onClick={() => { if (!autoplayMuted) stopAutoplayAudio(); setAutoplayMuted(!autoplayMuted); setAutoplayMenuOpen(false); }}>{autoplayMuted ? "Unmute" : "Mute all"}</button>}
           </div>}
-        </div>}
+        </div>
         {ingestPaused && <span className="pill ingest-paused" title={`New live callstream payloads are being dropped. ${engineHealth?.ingest?.reason ?? ""}`}>Ingest paused</span>}
       </header>
       {!inSetup && <aside className="nav">
@@ -916,8 +953,24 @@ function autoplayKind(reason: string): AutoplayContext["kind"] {
         {!setupStatus && <RefreshNotice state={statusResource.state} hasData={false} onRetry={statusResource.refresh} />}
         {inSetup && setupStatus && <SetupWizard status={setupStatus} reload={load} onComplete={() => setPage("setup")} />}
         {setupStatus?.completed && page === "dashboard" && <div className="refresh-page-shell">
-          <RefreshNotice state={dashboardResource.state} hasData={Boolean(dashboard)} onRetry={dashboardResource.refresh} />
-          <DashboardView data={dashboard} rangeHours={rangeHours} reload={refreshDashboardAfterMutation} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={currentSearch} onSearchChange={value => setPageSearches(searches => ({ ...searches, [page]: value }))} hiddenIncidentCount={statusSummary?.hiddenIncidents ?? 0} />
+          {showingDirectCall ? <section className="card direct-call-card" aria-label="Call details">
+            <div className="card-heading-row">
+              <div><h2>Call details</h2></div>
+              <button type="button" onClick={() => {
+                window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+                setFocusedHashTarget("");
+                setLinkedCall(null);
+                setLinkedCallError("");
+                setLinkedCallLoading(false);
+              }}>Back to dashboard</button>
+            </div>
+            {linkedCallLoading && <p className="muted">Loading call...</p>}
+            {linkedCallError && <p className="settings-message">{linkedCallError}</p>}
+            {linkedCall && <CallRow call={linkedCall} talkgroupLabel={linkedCall.talkgroupName} domId={`linked-call-${linkedCall.id}`} />}
+          </section> : <>
+            <RefreshNotice state={dashboardResource.state} hasData={Boolean(dashboard)} onRetry={dashboardResource.refresh} />
+            <DashboardView data={dashboard} rangeHours={rangeHours} reload={refreshDashboardAfterMutation} focusedIncidentId={focusedIncidentId} focusedHashTarget={focusedHashTarget} clearFocusedIncident={() => setFocusedIncidentId(null)} clearFocusedHashTarget={() => setFocusedHashTarget("")} mode={dashboardMode} setMode={setDashboardMode} searchQuery={currentSearch} onSearchChange={value => setPageSearches(searches => ({ ...searches, [page]: value }))} hiddenIncidentCount={statusSummary?.hiddenIncidents ?? 0} />
+          </>}
         </div>}
         {setupStatus?.completed && categories.includes(page as any) && <div className="refresh-page-shell">
           <RefreshNotice state={categoryResource.state} hasData={Boolean(category)} onRetry={categoryResource.refresh} />
@@ -3439,6 +3492,68 @@ function PlayableAudio({ src }: { src?: string | null }) {
   return <audio controls preload="metadata" src={src} onError={() => setFailed(true)} />;
 }
 
+function transmissionOffset(offsetMs: number) {
+  if (offsetMs <= 0) return "Recording start";
+  return `${(offsetMs / 1000).toFixed(offsetMs < 10000 ? 1 : 0)} seconds after recording start`;
+}
+
+function CallRadioActivityView({ session }: { session: CallTransmissionSession }) {
+  if (!session.available) return <p className="transmission-message">{session.message}</p>;
+  const hasExactAudio = session.audioMappingStatus === "exact_live" || session.audioMappingStatus === "exact_reconstructed";
+  return <div className="transmission-session">
+    <p className="transmission-message">Radio IDs identify transmitters, not dispatcher or responder roles.</p>
+    {!session.beginsChannelAssignment && <p className="transmission-message warning">The recording began after the original channel assignment. The beginning of the first transmission may be missing.</p>}
+    <div className="transmission-list">{session.transmissions.map(row => {
+      const receptionDetail = `Receiver diagnostics: ${row.errorCount} decoder error${row.errorCount === 1 ? "" : "s"} and ${row.spikeCount} decoder-error spike${row.spikeCount === 1 ? "" : "s"}. These counters do not represent separate calls or transmissions.`;
+      return <div className="transmission-row" key={row.sequence}>
+        <div className="transmission-row-copy">
+          <strong>{row.sourceId == null ? "Radio not identified" : `Radio ${row.sourceId}`}</strong>
+          {row.startStatus === "possibly_incomplete" && <span className="warning-text">Beginning may be missing</span>}
+          <span>{transmissionOffset(row.offsetMs)} ({new Date(row.startTimeMs).toLocaleTimeString()}) · {(row.durationMs / 1000).toFixed(1)} seconds · talkgroup {row.talkgroup}</span>
+          {(row.errorCount > 0 || row.spikeCount > 0) && <span className="warning-text" title={receptionDetail}>Possible reception damage</span>}
+        </div>
+        {hasExactAudio
+          ? <PlayableAudio src={`/api/v1/calls/${session.callId}/transmissions/${row.sequence}/audio`} />
+          : <span className="muted">Separate audio is unavailable for this transmission.</span>}
+    </div>; })}</div>
+  </div>;
+}
+
+function CallRadioActivity({ callId, knownRadioIds = [] }: { callId: number; knownRadioIds?: number[] }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [session, setSession] = useState<CallTransmissionSession | null>(null);
+  useEffect(() => {
+    if (!open || session || loading) return;
+    let cancelled = false;
+    setSession(null);
+    setLoading(true); setError("");
+    void api.request<CallTransmissionSession>(`/api/v1/calls/${callId}/transmissions`)
+      .then(value => { if (!cancelled) setSession(value); })
+      .catch(reason => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : "Radio activity could not be loaded.");
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [callId, open]);
+  const summary = loading
+    ? "Radio details"
+    : error
+      ? "Radio details unavailable"
+      : session?.available
+        ? `${session.transmissionCount} transmission${session.transmissionCount === 1 ? "" : "s"} · ${session.identifiedRadioCount} identified radio${session.identifiedRadioCount === 1 ? "" : "s"}${session.unknownSourceCount > 0 ? ` · ${session.unknownSourceCount} unidentified` : ""}`
+        : knownRadioIds.length
+          ? `${knownRadioIds.length} identified radio${knownRadioIds.length === 1 ? "" : "s"} · expand for transmissions`
+          : "Radio details";
+  return <details className="transmission-details" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>{summary}</summary>
+    {loading && <p className="transmission-message">Loading radio details...</p>}
+    {error && <p className="transmission-message error">{error}</p>}
+    {session && <CallRadioActivityView session={session} />}
+  </details>;
+}
+
 type DashboardIncidentListItem = { kind: "incident"; incident: Incident } | { kind: "alert"; alert: AlertMatch };
 type PendingCardFocus = CardHashTarget & { key: string; page: number };
 
@@ -3570,16 +3685,17 @@ function LocationIncidentPanel({ location, incidents, onClose, searchQuery }: { 
     <div className="location-panel-head">
       <div>
         <strong title={locationDisplayName(location)}>{locationShortName(location)}</strong>
-        <span>{location.areaLabel} / {location.count} call{location.count === 1 ? "" : "s"} / latest {relativeTime(location.lastHeard)}</span>
+        <span>{location.areaLabel} · {incidents.length} incident{incidents.length === 1 ? "" : "s"} · {standaloneCalls.length} unassigned call{standaloneCalls.length === 1 ? "" : "s"} · latest {relativeTime(location.lastHeard)}</span>
       </div>
       <button aria-label="Close location detail" onClick={onClose}>x</button>
     </div>
     {incidents.length > 0
       ? <div className="incident-explorer">{sortIncidents(incidents).map(incident => <IncidentCard incident={incident} searchQuery={searchQuery} key={incident.id} />)}</div>
       : <div className="card"><p className="muted">No incident currently contains these exact source calls.</p></div>}
-    {standaloneCalls.length > 0 && <div className="location-source-calls">
-      {standaloneCalls.map(call => <LocationSourceCall call={call} searchQuery={searchQuery} key={call.callId} />)}
-    </div>}
+    {standaloneCalls.length > 0 && <details className="location-unassigned-calls">
+      <summary>{standaloneCalls.length} call{standaloneCalls.length === 1 ? "" : "s"} not assigned to an incident</summary>
+      <div className="location-source-calls">{standaloneCalls.map(call => <LocationSourceCall call={call} searchQuery={searchQuery} key={call.callId} />)}</div>
+    </details>}
   </div>;
 }
 
@@ -3767,19 +3883,15 @@ function LocationAlertPanel({ location, alerts, onClose, reload, searchQuery }: 
 
 function LocationSourceCall({ call, searchQuery = "" }: { call: LocationHeat["sourceCalls"][number]; searchQuery?: string }) {
   const category = call.category || "other";
-  const title = [label(category), call.talkgroupName || "Unknown TG"].filter(Boolean).join(" / ");
-  return <div id={`call-${call.callId}`} className={`location-source-call category-${category}`}>
-    <div className="location-source-call-head">
-      <strong><HighlightedText text={title} query={searchQuery} /> <CopyCardLink targetId={`call-${call.callId}`} label="Copy call link" /></strong>
-      <span>{relativeTime(call.rawTimestamp)}</span>
-    </div>
-    <div className="muted">Call {call.callId}</div>
-    <p><HighlightedText text={call.transcript || "No transcript stored for this source call."} query={searchQuery} /></p>
-    <PlayableAudio src={call.audioUrl} />
-  </div>;
+  return <CompactCallRow callId={call.callId} timestamp={call.rawTimestamp} category={category} talkgroup={call.talkgroupName || "Unknown talkgroup"} transcript={call.transcript} audioUrl={call.audioUrl} searchQuery={searchQuery} />;
 }
 
 function CategoryView({ data, rangeHours, searchQuery, onSearchChange, profileState, setProfileState, reload, onOpenProfiles }: { data: CategoryPage | null; rangeHours: number; searchQuery: string; onSearchChange: (value: string) => void; profileState: ProfileState | null; setProfileState: React.Dispatch<React.SetStateAction<ProfileState | null>>; reload: () => Promise<void>; onOpenProfiles: (settings?: ProfileTalkgroupSetting[]) => void }) {
+  const [viewMode, setViewModeState] = useState<CategoryViewMode>(() => normalizeCategoryViewMode(localStorage.getItem("pizzawave-category-view")));
+  const [systemFilter, setSystemFilter] = useState("all");
+  const [talkgroupFilter, setTalkgroupFilter] = useState("all");
+  const [qualityFilter, setQualityFilter] = useState<"all" | "usable" | "weak">("all");
+  const [visibleActivityCount, setVisibleActivityCount] = useState(60);
   const [sortMode, setSortModeState] = useState<CategorySortMode>(() => normalizeCategorySort(localStorage.getItem("pizzawave-category-sort")));
   const [hideWeakCalls, setHideWeakCallsState] = useState(() => localStorage.getItem("pizzawave-hide-weak-category-calls") !== "0");
   const [selectionMode, setSelectionMode] = useState(false);
@@ -3787,6 +3899,16 @@ function CategoryView({ data, rangeHours, searchQuery, onSearchChange, profileSt
   const [selectedTalkgroupKeys, setSelectedTalkgroupKeys] = useState<Set<string>>(() => new Set());
   const [selectionOrderKeys, setSelectionOrderKeys] = useState<string[]>([]);
   const [hidingSelected, setHidingSelected] = useState(false);
+  const activityResource = usePersistentRefresh({
+    key: `category-activity|${data?.category ?? "none"}|${rangeHours}`,
+    enabled: Boolean(data),
+    load: () => api.request<CategoryActivity>(`/api/v1/categories/${data?.category}/activity?${rangeQuery(rangeHours)}&limit=500`)
+  });
+  function setViewMode(value: CategoryViewMode) {
+    setViewModeState(value);
+    setVisibleActivityCount(60);
+    localStorage.setItem("pizzawave-category-view", value);
+  }
   const activeProfile = profileState?.profiles.find(profile => profile.id === profileState.activeProfileId);
   function setSortMode(value: CategorySortMode) {
     setSortModeState(value);
@@ -3857,19 +3979,30 @@ function CategoryView({ data, rangeHours, searchQuery, onSearchChange, profileSt
     : autoSortedGroups;
   const filteredGroups = sortedGroups.filter(group => matchesCategoryGroupSearch(group, searchQuery));
   const selectedCount = filteredGroups.filter(group => selectedTalkgroupKeys.has(categoryGroupKey(group))).length;
+  const activityCalls = activityResource.data?.category === data.category ? activityResource.data.calls : [];
+  const systems = [...new Set(activityCalls.map(row => row.call.systemShortName).filter(Boolean))].sort();
+  const talkgroups = [...new Map(activityCalls.map(row => [categoryActivityTalkgroupKey(row), row.call.talkgroupName || `TG ${row.call.talkgroup}`])).entries()].sort((left, right) => left[1].localeCompare(right[1]));
+  const filteredActivity = activityCalls.filter(row => {
+    if (systemFilter !== "all" && row.call.systemShortName !== systemFilter) return false;
+    if (talkgroupFilter !== "all" && categoryActivityTalkgroupKey(row) !== talkgroupFilter) return false;
+    if (qualityFilter === "usable" && !isStrongCall(row.call)) return false;
+    if (qualityFilter === "weak" && isStrongCall(row.call)) return false;
+    return matchesCallSearch(row.call, searchQuery) || row.radioIds.some(id => String(id).includes(searchQuery.trim()));
+  });
+  const unassignedCalls = filteredActivity.filter(row => row.incidentIds.length === 0);
   return <div className="category-page category-mode-page" data-category={data.category}>
     <section className="pane category-pane raw-category">
       <div className="category-header">
         <div className="category-title-row">
-          <h2>{label(data.category)} Calls by Talkgroup</h2>
-          <div className="segmented category-sort-toggle" role="group" aria-label="Sort talkgroups">
-            <button type="button" disabled={selectionMode} title={selectionMode ? "Exit talkgroup selection to change sorting." : undefined} className={sortMode === "name" ? "active" : ""} onClick={() => setSortMode("name")}>Name</button>
-            <button type="button" disabled={selectionMode} title={selectionMode ? "Exit talkgroup selection to change sorting." : undefined} className={sortMode === "tgid" ? "active" : ""} onClick={() => setSortMode("tgid")}>TG ID</button>
-            <button type="button" disabled={selectionMode} title={selectionMode ? "Exit talkgroup selection to change sorting." : undefined} className={sortMode === "recent" ? "active" : ""} onClick={() => setSortMode("recent")}>Recent</button>
-            <button type="button" disabled={selectionMode} title={selectionMode ? "Exit talkgroup selection to change sorting." : undefined} className={sortMode === "frequent" ? "active" : ""} onClick={() => setSortMode("frequent")}>Frequent</button>
+          <h2>{label(data.category)} calls</h2>
+          <div className="segmented category-view-toggle" role="group" aria-label="Category view">
+            <button type="button" className={viewMode === "activity" ? "active" : ""} onClick={() => setViewMode("activity")}>Activity</button>
+            <button type="button" className={viewMode === "talkgroups" ? "active" : ""} onClick={() => setViewMode("talkgroups")}>Talkgroups</button>
+            <button type="button" className={viewMode === "unassigned" ? "active" : ""} onClick={() => setViewMode("unassigned")}>Unassigned{activityResource.data && !activityResource.data.limited ? ` (${unassignedCalls.length})` : ""}</button>
+            <button type="button" className={viewMode === "radios" ? "active" : ""} onClick={() => setViewMode("radios")}>Radios</button>
           </div>
           <PageSearch value={searchQuery} onChange={onSearchChange} placeholder={`Search ${label(data.category)} calls`} />
-          <div className="autoplay-menu-wrap category-more-menu-wrap">
+          {viewMode === "talkgroups" && <div className="autoplay-menu-wrap category-more-menu-wrap">
             <button type="button" aria-label="More category options" onClick={() => setCategoryMenuOpen(value => !value)}>More <ChevronDown size={14} /></button>
             {categoryMenuOpen && <div className="autoplay-menu category-more-menu">
               <label className="category-quality-toggle">
@@ -3878,16 +4011,86 @@ function CategoryView({ data, rangeHours, searchQuery, onSearchChange, profileSt
               </label>
               <button type="button" onClick={() => { toggleSelectionMode(autoSortedGroups); setCategoryMenuOpen(false); }}>{selectionMode ? "Exit talkgroup selection" : "Select talkgroups"}</button>
             </div>}
-          </div>
+          </div>}
         </div>
       </div>
-      {selectionMode && <div className="category-selection-bar">
+      {viewMode !== "talkgroups" && <div className="category-activity-filters">
+        <label>System<select value={systemFilter} onChange={event => setSystemFilter(event.currentTarget.value)}><option value="all">All systems</option>{systems.map(system => <option value={system} key={system}>{system}</option>)}</select></label>
+        <label>Talkgroup<select value={talkgroupFilter} onChange={event => setTalkgroupFilter(event.currentTarget.value)}><option value="all">All talkgroups</option>{talkgroups.map(([key, name]) => <option value={key} key={key}>{name}</option>)}</select></label>
+        <label>Transcript<select value={qualityFilter} onChange={event => setQualityFilter(event.currentTarget.value as typeof qualityFilter)}><option value="all">Any quality</option><option value="usable">Usable</option><option value="weak">Weak or missing</option></select></label>
+        {activityResource.data?.limited && <span className="muted">Showing the latest {activityResource.data.calls.length.toLocaleString()} of {activityResource.data.totalCalls.toLocaleString()} calls.</span>}
+      </div>}
+      {viewMode === "talkgroups" && selectionMode && <div className="category-selection-bar">
         <span>{selectedCount.toLocaleString()} talkgroup{selectedCount === 1 ? "" : "s"} selected</span>
         <button type="button" className="danger-button" disabled={!selectedCount || hidingSelected} onClick={() => void hideSelectedTalkgroups(filteredGroups)}>{hidingSelected ? "Hiding..." : "Hide selected from profile"}</button>
         <button type="button" disabled={hidingSelected} onClick={clearSelection}>Cancel</button>
       </div>}
-      <CategoryCallGroups groups={filteredGroups} category={data.category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} selectionMode={selectionMode} selectedTalkgroupKeys={selectedTalkgroupKeys} onToggleSelected={setTalkgroupSelected} />
+      {viewMode === "talkgroups" && <>
+        <div className="segmented category-sort-toggle" role="group" aria-label="Sort talkgroups">
+          <button type="button" disabled={selectionMode} className={sortMode === "name" ? "active" : ""} onClick={() => setSortMode("name")}>Name</button>
+          <button type="button" disabled={selectionMode} className={sortMode === "tgid" ? "active" : ""} onClick={() => setSortMode("tgid")}>TG ID</button>
+          <button type="button" disabled={selectionMode} className={sortMode === "recent" ? "active" : ""} onClick={() => setSortMode("recent")}>Recent</button>
+          <button type="button" disabled={selectionMode} className={sortMode === "frequent" ? "active" : ""} onClick={() => setSortMode("frequent")}>Frequent</button>
+        </div>
+        <CategoryCallGroups groups={filteredGroups} category={data.category} rangeHours={rangeHours} searchQuery={searchQuery} hideWeakCalls={hideWeakCalls} selectionMode={selectionMode} selectedTalkgroupKeys={selectedTalkgroupKeys} onToggleSelected={setTalkgroupSelected} />
+      </>}
+      {viewMode !== "talkgroups" && activityResource.state.loading && !activityResource.data && <div className="card"><p className="muted">Loading calls...</p></div>}
+      {viewMode !== "talkgroups" && activityResource.state.error && !activityResource.data && <div className="card"><p className="error">Calls could not be loaded. {activityResource.state.error}</p><button type="button" onClick={() => void activityResource.refresh()}>Retry</button></div>}
+      {viewMode === "activity" && activityResource.data && <CategoryActivityList calls={filteredActivity} visibleCount={visibleActivityCount} setVisibleCount={setVisibleActivityCount} searchQuery={searchQuery} />}
+      {viewMode === "unassigned" && activityResource.data && <CategoryActivityList calls={unassignedCalls} visibleCount={visibleActivityCount} setVisibleCount={setVisibleActivityCount} searchQuery={searchQuery} emptyText="No loaded calls are waiting outside an incident." />}
+      {viewMode === "radios" && activityResource.data && <CategoryRadioGroups calls={filteredActivity} searchQuery={searchQuery} />}
     </section>
+  </div>;
+}
+
+function normalizeCategoryViewMode(value: string | null): CategoryViewMode {
+  return value === "talkgroups" || value === "unassigned" || value === "radios" ? value : "activity";
+}
+
+function categoryActivityTalkgroupKey(row: CategoryActivityCall) {
+  return `${row.call.systemShortName.toLowerCase()}|${row.call.talkgroup}`;
+}
+
+function activityTimeSection(timestamp: number) {
+  const date = new Date(timestamp * 1000);
+  const now = new Date();
+  if (Date.now() - date.getTime() < 60 * 60 * 1000) return "Last hour";
+  if (date.toDateString() === now.toDateString()) return "Earlier today";
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
+}
+
+function CategoryActivityList({ calls, visibleCount, setVisibleCount, searchQuery, emptyText = "No calls match this view." }: { calls: CategoryActivityCall[]; visibleCount: number; setVisibleCount: React.Dispatch<React.SetStateAction<number>>; searchQuery: string; emptyText?: string }) {
+  const visible = calls.slice(0, visibleCount);
+  if (!visible.length) return <div className="card"><p className="muted">{emptyText}</p></div>;
+  const sections = [...new Map(visible.map(row => [activityTimeSection(row.call.startTime), [] as CategoryActivityCall[]])).entries()];
+  for (const row of visible) sections.find(([name]) => name === activityTimeSection(row.call.startTime))?.[1].push(row);
+  return <div className="category-activity-list">
+    {sections.map(([name, rows]) => <section className="category-time-section" key={name}>
+      <h3>{name}</h3>
+      <div className="incident-call-list">{rows.map(row => <CategoryActivityCallRow row={row} searchQuery={searchQuery} key={row.call.id} />)}</div>
+    </section>)}
+    {calls.length > visible.length && <button type="button" className="category-show-more" onClick={() => setVisibleCount(count => count + 60)}>Show 60 more ({(calls.length - visible.length).toLocaleString()} remaining)</button>}
+  </div>;
+}
+
+function CategoryActivityCallRow({ row, searchQuery }: { row: CategoryActivityCall; searchQuery: string }) {
+  const call = row.call;
+  return <CompactCallRow callId={call.id} timestamp={call.startTime} category={call.category} talkgroup={call.talkgroupName || `TG ${call.talkgroup}`} transcript={call.transcription} audioUrl={call.audioPath ? `/api/v1/calls/${call.id}/audio` : ""} radioIds={row.radioIds} incidentIds={row.incidentIds} searchQuery={searchQuery} />;
+}
+
+function CategoryRadioGroups({ calls, searchQuery }: { calls: CategoryActivityCall[]; searchQuery: string }) {
+  const groups = new Map<number, CategoryActivityCall[]>();
+  for (const row of calls) for (const radioId of row.radioIds) groups.set(radioId, [...(groups.get(radioId) ?? []), row]);
+  const sorted = [...groups.entries()].sort((left, right) => Math.max(...right[1].map(row => row.call.startTime)) - Math.max(...left[1].map(row => row.call.startTime)));
+  return <div className="category-radio-view">
+    <p className="category-radio-note"><Radio size={16} /> Radio IDs identify transmitters. They do not guarantee a particular person or role. A call with several identified radios appears under each radio.</p>
+    {sorted.map(([radioId, rows]) => <details className="category-radio-group" key={radioId}>
+      <summary><strong>Radio {radioId}</strong><span>{rows.length} call{rows.length === 1 ? "" : "s"} · latest {relativeTime(Math.max(...rows.map(row => row.call.startTime)))}</span></summary>
+      <div className="incident-call-list">{rows.map(row => <CategoryActivityCallRow row={row} searchQuery={searchQuery} key={`${radioId}-${row.call.id}`} />)}</div>
+    </details>)}
+    {!sorted.length && <div className="card"><p className="muted">No identified radio IDs match this view.</p></div>}
   </div>;
 }
 
@@ -4035,13 +4238,14 @@ function IncidentCard({ incident, associationReviews = [], onAssociationReviewed
   >
     <IncidentSummary incident={incident} associationReviewCount={associationReviews.length} linkedLocation={linkedLocation} onShowLocation={onShowLocation} stripeCategories={stripeCategories} onDismissAlert={onDismissAlert} onTogglePlayback={toggleIncidentPlayback} isPlaying={playingCallId !== null} searchQuery={searchQuery} />
     {localOpen && <>
-      <div className="incident-expanded-meta">{incident.calls.length} source call{incident.calls.length === 1 ? "" : "s"} / {Math.round(incident.confidence * 100)}% confidence</div>
-      {incident.detail && <p className="incident-detail-text"><HighlightedText text={incident.detail} query={searchQuery} /></p>}
+      {incident.detail && <p className="incident-conversation-summary"><HighlightedText text={incident.detail} query={searchQuery} /></p>}
       {associationReviews.length > 0 && <div className="incident-association-reviews">
         {associationReviews.map(group => <AssociationReviewGroupCard group={group} anchorIncidentId={incident.id} onReviewed={onAssociationReviewed} searchQuery={searchQuery} key={group.proposalKey} />)}
       </div>}
       <div className="incident-call-list">
-        {incident.calls.map(c => <IncidentSourceCall call={c} incidentId={incident.id} playing={playingCallId === c.callId} searchQuery={searchQuery} key={c.callId} />)}
+        {[...incident.calls]
+          .sort((a, b) => a.rawTimestamp - b.rawTimestamp || a.callId - b.callId)
+          .map(c => <IncidentSourceCall call={c} incidentId={incident.id} playing={playingCallId === c.callId} searchQuery={searchQuery} key={c.callId} />)}
       </div>
     </>}
   </details>;
@@ -4095,22 +4299,89 @@ function confirmDiscardUnappliedSettings() {
   return ok;
 }
 
+function InlineCallAudio({ src, label: audioLabel }: { src?: string | null; label: string }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    function stop() {
+      const audio = audioRef.current;
+      if (!audio) return;
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    window.addEventListener("pizzawave-stop-incident-playback", stop);
+    return () => {
+      window.removeEventListener("pizzawave-stop-incident-playback", stop);
+      stop();
+    };
+  }, []);
+  if (!src) return null;
+  function toggle(event: React.MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!audio.paused) {
+      audio.pause();
+      audio.currentTime = 0;
+      return;
+    }
+    window.dispatchEvent(new Event("pizzawave-stop-incident-playback"));
+    audio.currentTime = 0;
+    void audio.play().catch(() => setPlaying(false));
+  }
+  return <>
+    <button type="button" className={playing ? "inline-call-play active" : "inline-call-play"} aria-label={playing ? `Stop ${audioLabel}` : `Play ${audioLabel}`} title={playing ? "Stop this call" : "Play this call"} onClick={toggle}>{playing ? <Square size={13} /> : <Play size={14} />}</button>
+    <audio ref={audioRef} className="incident-conversation-audio" preload="metadata" src={src} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setPlaying(false)} />
+  </>;
+}
+
 function IncidentSourceCall({ call, incidentId, playing, searchQuery = "" }: { call: Incident["calls"][number]; incidentId: number; playing?: boolean; searchQuery?: string }) {
-  const category = call.category || "other";
+  const category = normalizeUiCategory(call.category);
   const transcript = call.transcript?.trim();
   const talkgroup = call.talkgroupName?.trim() || "Unknown talkgroup";
-  const system = call.systemShortName?.trim();
+  const timestamp = new Date(call.rawTimestamp * 1000);
   return <div id={`call-${call.callId}`} className={`incident-call category-${category}${playing ? " playing" : ""}`}>
-    <div className="incident-call-head">
-      <span><HighlightedText text={talkgroup} query={searchQuery} /> <CopyCardLink targetId={`call-${call.callId}`} hashTarget={`incident-${incidentId}:call-${call.callId}`} label="Copy call link" /></span>
-      <span>{label(category)} / Call {call.callId}</span>
+    <div className="incident-call-row-header">
+      <span className="incident-call-category">{label(category)}</span>
+      <strong className="incident-call-talkgroup"><HighlightedText text={talkgroup} query={searchQuery} /></strong>
+      <span className="incident-call-row-actions">
+        <CopyCardLink targetId={`call-${call.callId}`} hashTarget={`incident-${incidentId}:call-${call.callId}`} label="Copy call link" />
+        <InlineCallAudio src={call.audioUrl} label={`${talkgroup} audio`} />
+      </span>
     </div>
-    <div className="incident-call-meta">
-      {system && <span>{system}</span>}
-      <span>{new Date(call.rawTimestamp * 1000).toLocaleString()}</span>
+    <div className="incident-call-content">
+      <div className="incident-conversation-line">
+        <time className="incident-call-time" dateTime={timestamp.toISOString()} title={timestamp.toLocaleString()}>{timestamp.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</time>
+        <span className="incident-conversation-transcript"><HighlightedText text={transcript || "No transcript stored for this source call."} query={searchQuery} /></span>
+      </div>
+      <CallRadioActivity callId={call.callId} />
     </div>
-    <div className="transcript-block"><HighlightedText text={transcript || "No transcript stored for this source call."} query={searchQuery} /></div>
-    <PlayableAudio src={call.audioUrl} />
+  </div>;
+}
+
+function CompactCallRow({ callId, timestamp: unixTimestamp, category: rawCategory, talkgroup, transcript, audioUrl, radioIds = [], incidentIds = [], searchQuery = "", hashTarget }: { callId: number; timestamp: number; category: string; talkgroup: string; transcript?: string | null; audioUrl?: string | null; radioIds?: number[]; incidentIds?: number[]; searchQuery?: string; hashTarget?: string }) {
+  const category = normalizeUiCategory(rawCategory);
+  const timestamp = new Date(unixTimestamp * 1000);
+  return <div id={`call-${callId}`} className={`incident-call compact-call-row category-${category}`}>
+    <div className="incident-call-row-header">
+      <span className="incident-call-category">{label(category)}</span>
+      <strong className="incident-call-talkgroup"><HighlightedText text={talkgroup || "Unknown talkgroup"} query={searchQuery} /></strong>
+      <span className="incident-call-row-actions">
+        <CopyCardLink targetId={`call-${callId}`} hashTarget={hashTarget} label="Copy call link" />
+        <InlineCallAudio src={audioUrl} label={`${talkgroup || "Call"} audio`} />
+      </span>
+    </div>
+    <div className="incident-call-content">
+      <div className="incident-conversation-line">
+        <time className="incident-call-time" dateTime={timestamp.toISOString()} title={timestamp.toLocaleString()}>{timestamp.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</time>
+        <span className="incident-conversation-transcript"><HighlightedText text={transcript?.trim() || "No transcript stored for this call."} query={searchQuery} /></span>
+      </div>
+      <div className="compact-call-membership">
+        {incidentIds.length > 0 && <span>In incident {incidentIds.map(id => `#${id}`).join(", ")}</span>}
+        <CallRadioActivity callId={callId} knownRadioIds={radioIds} />
+      </div>
+    </div>
   </div>;
 }
 
@@ -4119,6 +4390,10 @@ function IncidentSummary({ incident, associationReviewCount = 0, linkedLocation,
     .flatMap(call => (call.alertRules ?? "").split(","))
     .map(rule => rule.trim())
     .filter(Boolean)));
+  const siteNames = Array.from(new Set((incident.calls ?? [])
+    .map(call => call.systemShortName?.trim())
+    .filter((site): site is string => Boolean(site))));
+  const siteLabel = siteNames.length ? siteNames.join(" + ") : "Unknown site";
   async function dismissAlert(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
     event.stopPropagation();
@@ -4134,7 +4409,7 @@ function IncidentSummary({ incident, associationReviewCount = 0, linkedLocation,
         <span className="incident-title"><HighlightedText text={incident.title} query={searchQuery} /></span>
       </span>
     </span>
-    <span className="incident-summary-side">
+      <span className="incident-summary-side">
       <span className="incident-summary-meta">
         {linkedLocation && <button type="button" className="geo-badge" title={`Show ${linkedLocation.locationText} on map`} onClick={event => { event.preventDefault(); event.stopPropagation(); onShowLocation?.(locationKey(linkedLocation)); }}>Map</button>}
         {hasAlertMatch(incident) && <span className={hasActiveAlert(incident) ? "alert-badge active" : "alert-badge"} title={alertRules.join(", ") || "Alert match"}>{hasActiveAlert(incident) ? "Active alert" : "Alert"}</span>}
@@ -4144,6 +4419,13 @@ function IncidentSummary({ incident, associationReviewCount = 0, linkedLocation,
         {incident.status === "merged" && incident.mergedIntoIncidentId > 0 && <span className="pill" title={`This incident was combined into incident ${incident.mergedIntoIncidentId}.`}>Combined</span>}
         {incident.status && incident.status !== "active" && incident.status !== "merged" && <span className="pill">{label(incident.status)}</span>}
         <span className="incident-time">{relativeIncidentTime(incident)}</span>
+      </span>
+    </span>
+    <span className="incident-summary-action-row">
+      <span className="incident-summary-facts">
+        <span>{incident.calls.length} source call{incident.calls.length === 1 ? "" : "s"}</span>
+        <span>{Math.round(incident.confidence * 100)}% confidence</span>
+        <span>{siteLabel}</span>
       </span>
       <span className="incident-summary-actions">
         <CopyCardLink targetId={`incident-${incident.id}`} label="Copy incident link" />
@@ -4212,13 +4494,13 @@ function CollapsibleCallGroup({ group, category, rangeHours, searchQuery, hideWe
   </details>;
 }
 
-function CallRow({ call, talkgroupLabel, searchQuery = "" }: { call: EngineCall; talkgroupLabel?: string; searchQuery?: string }) {
+function CallRow({ call, talkgroupLabel, searchQuery = "", domId }: { call: EngineCall; talkgroupLabel?: string; searchQuery?: string; domId?: string }) {
   const status = call.qualityReason && call.qualityReason !== "ok" ? `${call.transcriptionStatus}: ${call.qualityReason}` : call.transcriptionStatus;
   const transcript = call.transcription?.trim();
   const missingText = call.transcriptionStatus === "pending"
     ? "Pending transcription"
     : `No transcript available (${status || "not transcribed"}).`;
-  return <div id={`call-${call.id}`} className={`call category-${call.category}`}><div className="call-head"><strong><HighlightedText text={talkgroupLabel || call.talkgroupName || `TG ${call.talkgroup}`} query={searchQuery} /> <CopyCardLink targetId={`call-${call.id}`} label="Copy call link" /></strong><span>{new Date(call.startTime * 1000).toLocaleString()}</span><span>{status}</span>{call.isImported && <span className="pill">Imported</span>}</div><div><HighlightedText text={transcript || missingText} query={searchQuery} /></div><PlayableAudio src={call.audioPath ? `/api/v1/calls/${call.id}/audio` : ""} /></div>;
+  return <CompactCallRow callId={call.id} timestamp={call.startTime} category={call.category} talkgroup={talkgroupLabel || call.talkgroupName || `TG ${call.talkgroup}`} transcript={transcript || missingText} audioUrl={call.audioPath ? `/api/v1/calls/${call.id}/audio` : ""} searchQuery={searchQuery} />;
 }
 
 function CopyCardLink({ targetId, hashTarget, label }: { targetId: string; hashTarget?: string; label: string }) {

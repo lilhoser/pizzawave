@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "trial": "exact-incident-membership-ot-20260801",
+  "responses": [
+    {
+      "reviewId": "candidate_1589590",
+      "incidentId": 7904,
+      "candidateCallId": 1589590,
+      "modelDecision": "include",
+      "reviewerDecision": "include",
+      "incidentAlreadyMixed": false,
+      "candidateAlreadyMixed": true
+    },
+    {
+      "reviewId": "candidate_1589728",
+      "incidentId": 7903,
+      "candidateCallId": 1589728,
+      "modelDecision": "do_not_include",
+      "reviewerDecision": "unsure",
+      "incidentAlreadyMixed": false,
+      "candidateAlreadyMixed": false
+    },
+    {
+      "reviewId": "candidate_1589854",
+      "incidentId": 7905,
+      "candidateCallId": 1589854,
+      "modelDecision": "include",
+      "reviewerDecision": "unsure",
+      "incidentAlreadyMixed": true,
+      "candidateAlreadyMixed": false
+    },
+    {
+      "reviewId": "candidate_1590618",
+      "incidentId": 7908,
+      "candidateCallId": 1590618,
+      "modelDecision": "do_not_include",
+      "reviewerDecision": "do_not_include",
+      "incidentAlreadyMixed": true,
+      "candidateAlreadyMixed": false
+    },
+    {
+      "reviewId": "candidate_1591358",
+      "incidentId": 7909,
+      "candidateCallId": 1591358,
+      "modelDecision": "do_not_include",
+      "reviewerDecision": "do_not_include",
+      "incidentAlreadyMixed": false,
+      "candidateAlreadyMixed": false
+    }
+  ],
+  "completed": true,
+  "savedAtUtc": "2026-08-01T12:40:49.411Z"
+}

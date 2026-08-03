@@ -20,10 +20,76 @@ public sealed record EngineCall
     public string Transcription { get; init; } = string.Empty;
     public string TranscriptionStatus { get; init; } = "pending";
     public string QualityReason { get; init; } = "ok";
+    public string ChannelAssignmentStart { get; init; } = "unknown";
+    public bool BeginsChannelAssignment { get; init; } = true;
+    public bool CanSeedIncident { get; init; } = true;
+    public string CaptureDisposition { get; init; } = "legacy";
+    public long? ContinuationOfCallId { get; init; }
     public bool IsImported { get; init; }
     public bool IsAlertMatch { get; init; }
     public string RawMetadataJson { get; init; } = "{}";
 }
+
+public sealed record CallTransmissionRecord
+{
+    public long Id { get; init; }
+    public long CallId { get; init; }
+    public int Sequence { get; init; }
+    public long? SourceId { get; init; }
+    public string SourceIdProvenance { get; init; } = "unknown";
+    public long Talkgroup { get; init; }
+    public long StartTimeMs { get; init; }
+    public long StopTimeMs { get; init; }
+    public int? StartSample { get; init; }
+    public int SampleCount { get; init; }
+    public double Frequency { get; init; }
+    public int TdmaSlot { get; init; }
+    public long ErrorCount { get; init; }
+    public long SpikeCount { get; init; }
+    public string AudioMappingStatus { get; init; } = "unavailable";
+    public string StartStatus { get; init; } = "unknown";
+}
+
+public sealed record CallTransmissionDto
+{
+    public int Sequence { get; init; }
+    public long? SourceId { get; init; }
+    public string SourceIdProvenance { get; init; } = "unknown";
+    public long Talkgroup { get; init; }
+    public long StartTimeMs { get; init; }
+    public long StopTimeMs { get; init; }
+    public long OffsetMs { get; init; }
+    public long DurationMs { get; init; }
+    public int? StartSample { get; init; }
+    public int SampleCount { get; init; }
+    public double Frequency { get; init; }
+    public int TdmaSlot { get; init; }
+    public long ErrorCount { get; init; }
+    public long SpikeCount { get; init; }
+    public string StartStatus { get; init; } = "unknown";
+}
+
+public sealed record CallTransmissionSessionDto
+{
+    public long CallId { get; init; }
+    public string SystemShortName { get; init; } = string.Empty;
+    public long Talkgroup { get; init; }
+    public string TalkgroupName { get; init; } = string.Empty;
+    public bool Available { get; init; }
+    public string AudioMappingStatus { get; init; } = "unavailable";
+    public string ChannelAssignmentStart { get; init; } = "unknown";
+    public bool BeginsChannelAssignment { get; init; }
+    public string CaptureDisposition { get; init; } = "legacy";
+    public int TransmissionCount { get; init; }
+    public int IdentifiedRadioCount { get; init; }
+    public int UnknownSourceCount { get; init; }
+    public long StartTimeMs { get; init; }
+    public long StopTimeMs { get; init; }
+    public string FullAudioUrl { get; init; } = string.Empty;
+    public string Message { get; init; } = string.Empty;
+    public IReadOnlyList<CallTransmissionDto> Transmissions { get; init; } = [];
+}
+
 
 public sealed record TranscriptionResult(string Text, TranscriptionMetadata Metadata)
 {
@@ -254,6 +320,17 @@ public sealed record CategoryPageDto(
     IReadOnlyList<CategoryGroupDto> Groups,
     IReadOnlyList<CategoryInsightDto> Insights,
     IReadOnlyList<IncidentDto> Incidents);
+
+public sealed record CategoryActivityCallDto(
+    EngineCall Call,
+    IReadOnlyList<long> RadioIds,
+    IReadOnlyList<long> IncidentIds);
+
+public sealed record CategoryActivityDto(
+    string Category,
+    int TotalCalls,
+    bool Limited,
+    IReadOnlyList<CategoryActivityCallDto> Calls);
 
 public sealed record IncidentDto
 {

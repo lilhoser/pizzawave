@@ -161,6 +161,30 @@ public sealed class EngineConfig
         AiInsights.IncidentRunIntervalSeconds = Math.Clamp(AiInsights.IncidentRunIntervalSeconds, 60, 1800);
         if (AiInsights.IncidentPromptCandidateLimit <= 0) AiInsights.IncidentPromptCandidateLimit = 18;
         AiInsights.IncidentPromptCandidateLimit = Math.Clamp(AiInsights.IncidentPromptCandidateLimit, 6, 40);
+        if (AiInsights.IncidentParticipantLinkWindowSeconds <= 0) AiInsights.IncidentParticipantLinkWindowSeconds = 3600;
+        AiInsights.IncidentParticipantLinkWindowSeconds = Math.Clamp(AiInsights.IncidentParticipantLinkWindowSeconds, 30, 3600);
+        AiInsights.IncidentMembershipSemanticShadowRunId = AiInsights.IncidentMembershipSemanticShadowRunId?.Trim() ?? string.Empty;
+        AiInsights.IncidentMembershipSemanticShadowBaseUrl = AiInsights.IncidentMembershipSemanticShadowBaseUrl?.Trim() ?? string.Empty;
+        AiInsights.IncidentMembershipSemanticShadowApiKey ??= string.Empty;
+        AiInsights.IncidentMembershipSemanticShadowModel = AiInsights.IncidentMembershipSemanticShadowModel?.Trim() ?? string.Empty;
+        if (AiInsights.IncidentMembershipSemanticShadowBaselineSourceLimit <= 0) AiInsights.IncidentMembershipSemanticShadowBaselineSourceLimit = 5;
+        AiInsights.IncidentMembershipSemanticShadowBaselineSourceLimit = Math.Clamp(
+            AiInsights.IncidentMembershipSemanticShadowBaselineSourceLimit, 1, IncidentMembershipOutputLimits.MaximumSources - 1);
+        if (AiInsights.IncidentMembershipSemanticShadowAddedSourceLimit <= 0) AiInsights.IncidentMembershipSemanticShadowAddedSourceLimit = 1;
+        AiInsights.IncidentMembershipSemanticShadowAddedSourceLimit = Math.Clamp(
+            AiInsights.IncidentMembershipSemanticShadowAddedSourceLimit, 1,
+            IncidentMembershipOutputLimits.MaximumSources - AiInsights.IncidentMembershipSemanticShadowBaselineSourceLimit);
+        AiInsights.IncidentTargetMembershipShadowRunId = AiInsights.IncidentTargetMembershipShadowRunId?.Trim() ?? string.Empty;
+        if (AiInsights.IncidentTargetMembershipShadowMinimumIntervalSeconds <= 0) AiInsights.IncidentTargetMembershipShadowMinimumIntervalSeconds = 300;
+        AiInsights.IncidentTargetMembershipShadowMinimumIntervalSeconds = Math.Clamp(AiInsights.IncidentTargetMembershipShadowMinimumIntervalSeconds, 60, 1800);
+        if (AiInsights.IncidentTargetMembershipShadowDelaySeconds < 0) AiInsights.IncidentTargetMembershipShadowDelaySeconds = 0;
+        AiInsights.IncidentTargetMembershipShadowDelaySeconds = Math.Clamp(AiInsights.IncidentTargetMembershipShadowDelaySeconds, 0, 300);
+        if (AiInsights.IncidentTargetMembershipShadowMaximumPackages <= 0) AiInsights.IncidentTargetMembershipShadowMaximumPackages = 25;
+        AiInsights.IncidentTargetMembershipShadowMaximumPackages = Math.Clamp(AiInsights.IncidentTargetMembershipShadowMaximumPackages, 1, 100);
+        if (AiInsights.IncidentTargetMembershipShadowMaximumPendingCalls <= 0) AiInsights.IncidentTargetMembershipShadowMaximumPendingCalls = 250;
+        AiInsights.IncidentTargetMembershipShadowMaximumPendingCalls = Math.Clamp(AiInsights.IncidentTargetMembershipShadowMaximumPendingCalls, 1, 5000);
+        if (AiInsights.IncidentTargetMembershipShadowMaximumCompletedAgeMinutes <= 0) AiInsights.IncidentTargetMembershipShadowMaximumCompletedAgeMinutes = 15;
+        AiInsights.IncidentTargetMembershipShadowMaximumCompletedAgeMinutes = Math.Clamp(AiInsights.IncidentTargetMembershipShadowMaximumCompletedAgeMinutes, 1, 120);
         if (AiInsights.IncidentAnalysisMaximumAgeMinutes <= 0) AiInsights.IncidentAnalysisMaximumAgeMinutes = 60;
         AiInsights.IncidentAnalysisMaximumAgeMinutes = Math.Clamp(AiInsights.IncidentAnalysisMaximumAgeMinutes, 15, 360);
         if (AiInsights.IncidentV2ShadowCandidateLimit <= 0) AiInsights.IncidentV2ShadowCandidateLimit = 18;
@@ -450,6 +474,24 @@ public sealed class AiInsightsConfig
     public int MaxQueueDepthForManualSummary { get; set; } = 100;
     public int IncidentRunIntervalSeconds { get; set; } = 300;
     public int IncidentPromptCandidateLimit { get; set; } = 18;
+    public bool IncidentParticipantLinkCandidateEnabled { get; set; }
+    public int IncidentParticipantLinkWindowSeconds { get; set; } = 3600;
+    public bool IncidentMembershipSemanticShadowEnabled { get; set; }
+    public string IncidentMembershipSemanticShadowRunId { get; set; } = string.Empty;
+    public long IncidentMembershipSemanticShadowEndUnix { get; set; }
+    public string IncidentMembershipSemanticShadowBaseUrl { get; set; } = string.Empty;
+    public string IncidentMembershipSemanticShadowApiKey { get; set; } = string.Empty;
+    public string IncidentMembershipSemanticShadowModel { get; set; } = string.Empty;
+    public int IncidentMembershipSemanticShadowBaselineSourceLimit { get; set; } = 5;
+    public int IncidentMembershipSemanticShadowAddedSourceLimit { get; set; } = 1;
+    public bool IncidentTargetMembershipShadowEnabled { get; set; }
+    public string IncidentTargetMembershipShadowRunId { get; set; } = string.Empty;
+    public long IncidentTargetMembershipShadowEndUnix { get; set; }
+    public int IncidentTargetMembershipShadowMinimumIntervalSeconds { get; set; } = 300;
+    public int IncidentTargetMembershipShadowDelaySeconds { get; set; } = 30;
+    public int IncidentTargetMembershipShadowMaximumPackages { get; set; } = 25;
+    public int IncidentTargetMembershipShadowMaximumPendingCalls { get; set; } = 250;
+    public int IncidentTargetMembershipShadowMaximumCompletedAgeMinutes { get; set; } = 15;
     public int IncidentAnalysisMaximumAgeMinutes { get; set; } = 60;
     public bool IncidentV2ShadowEnabled { get; set; }
     public int IncidentV2ShadowCandidateLimit { get; set; } = 18;

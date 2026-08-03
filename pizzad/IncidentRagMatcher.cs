@@ -19,7 +19,12 @@ public sealed record IncidentRagCandidate(
     string LocationGeocodeQuery = "",
     string LocationGeocodeDisplayName = "",
     double LocationLatitude = 0,
-    double LocationLongitude = 0);
+    double LocationLongitude = 0,
+    bool ParticipantLinked = false,
+    int SharedRadioCount = 0,
+    long ParticipantGapMilliseconds = 0,
+    int SharedRadioNearbySegmentCount = 0,
+    bool ParticipantSameTalkgroup = false);
 
 public sealed class IncidentRagMatcher
 {
@@ -45,14 +50,17 @@ public sealed class IncidentRagMatcher
         IReadOnlyList<EngineCall> recentCalls,
         IReadOnlyCollection<long> newCallIds,
         IReadOnlyList<CallLocationDashboardRow> locationRows,
-        IReadOnlyDictionary<long, VectorSearchMatchDto>? vectorMatches = null)
+        IReadOnlyDictionary<long, VectorSearchMatchDto>? vectorMatches = null,
+        IReadOnlyList<ConversationSegmentLinkEvidence>? participantLinks = null)
     {
         vectorMatches ??= new Dictionary<long, VectorSearchMatchDto>();
+        participantLinks ??= [];
         var locations = locationRows
             .Where(l => string.Equals(l.SystemShortName, systemShortName, StringComparison.OrdinalIgnoreCase))
             .GroupBy(l => l.CallId)
             .ToDictionary(g => g.Key, g => BestLocation(g), EqualityComparer<long>.Default);
         var activeCallIds = activeIncidents.SelectMany(i => i.Calls.Select(c => c.CallId)).ToHashSet();
+        var participantEvidence = BuildParticipantEvidence(activeCallIds, newCallIds, participantLinks);
         var candidates = new Dictionary<long, IncidentRagCandidate>();
         var rows = recentCalls
             .Where(c => !activeCallIds.Contains(c.Id))
@@ -94,7 +102,7 @@ public sealed class IncidentRagMatcher
 
         var newRows = rows
             .Where(r => newCallIds.Contains(r.Call.Id))
-            .Where(IsNewIncidentSeed)
+            .Where(row => row.Call.CanSeedIncident && IsNewIncidentSeed(row))
             .OrderBy(r => r.Call.StartTime)
             .Take(MaxNewSeedCalls)
             .ToList();
@@ -130,6 +138,35 @@ public sealed class IncidentRagMatcher
             {
                 AddBest(candidates, match);
             }
+        }
+
+        foreach (var (callId, evidence) in participantEvidence)
+        {
+            var row = rows.FirstOrDefault(item => item.Call.Id == callId);
+            if (row is null) continue;
+            AddBest(candidates, new IncidentRagCandidate(
+                row.Call,
+                0.15,
+                0,
+                0,
+                Math.Max(0, 1 - evidence.GapMilliseconds / 3_600_000d),
+                0.15,
+                $"participant linkage; shared_radios={evidence.SharedRadioCount}; gap_ms={evidence.GapMilliseconds}; nearby_segments={evidence.MostFrequentSharedRadioSegmentCount}",
+                row.LocationLabel,
+                row.LocationIsHighConfidenceGeocode,
+                row.LocationGeocodeConfidence,
+                row.LocationGeocodeProvider,
+                row.LocationGeocodePrecision,
+                row.LocationSource,
+                row.LocationGeocodeQuery,
+                row.LocationGeocodeDisplayName,
+                row.LocationLatitude,
+                row.LocationLongitude,
+                true,
+                evidence.SharedRadioCount,
+                evidence.GapMilliseconds,
+                evidence.MostFrequentSharedRadioSegmentCount,
+                evidence.SameTalkgroup));
         }
 
         var selectedNew = candidates.Values
@@ -211,8 +248,66 @@ public sealed class IncidentRagMatcher
 
     private static void AddBest(Dictionary<long, IncidentRagCandidate> candidates, IncidentRagCandidate candidate)
     {
-        if (!candidates.TryGetValue(candidate.Call.Id, out var existing) || candidate.Score > existing.Score)
+        if (!candidates.TryGetValue(candidate.Call.Id, out var existing))
+        {
             candidates[candidate.Call.Id] = candidate;
+            return;
+        }
+
+        var preferred = candidate.Score > existing.Score ? candidate : existing;
+        var participant = candidate.ParticipantLinked ? candidate : existing;
+        if (!participant.ParticipantLinked) return;
+        candidates[candidate.Call.Id] = preferred with
+        {
+            ParticipantLinked = true,
+            SharedRadioCount = Math.Max(existing.SharedRadioCount, candidate.SharedRadioCount),
+            ParticipantGapMilliseconds = existing.ParticipantLinked && candidate.ParticipantLinked
+                ? Math.Min(existing.ParticipantGapMilliseconds, candidate.ParticipantGapMilliseconds)
+                : participant.ParticipantGapMilliseconds,
+            SharedRadioNearbySegmentCount = Math.Max(existing.SharedRadioNearbySegmentCount, candidate.SharedRadioNearbySegmentCount),
+            ParticipantSameTalkgroup = existing.ParticipantSameTalkgroup || candidate.ParticipantSameTalkgroup,
+            Reason = preferred.Reason.Contains("participant linkage", StringComparison.OrdinalIgnoreCase)
+                ? preferred.Reason
+                : preferred.Reason + "; participant linkage"
+        };
+    }
+
+    private static IReadOnlyDictionary<long, ParticipantCandidateEvidence> BuildParticipantEvidence(
+        IReadOnlySet<long> activeCallIds,
+        IReadOnlyCollection<long> newCallIds,
+        IReadOnlyList<ConversationSegmentLinkEvidence> links)
+    {
+        var anchors = activeCallIds.Concat(newCallIds).ToHashSet();
+        var evidence = new Dictionary<long, ParticipantCandidateEvidence>();
+        foreach (var link in links)
+        {
+            if (!anchors.Contains(link.EarlierCallId) && !anchors.Contains(link.LaterCallId))
+                continue;
+            if (!activeCallIds.Contains(link.EarlierCallId))
+                AddParticipantEvidence(evidence, link.EarlierCallId, link);
+            if (!activeCallIds.Contains(link.LaterCallId))
+                AddParticipantEvidence(evidence, link.LaterCallId, link);
+        }
+        return evidence;
+    }
+
+    private static void AddParticipantEvidence(Dictionary<long, ParticipantCandidateEvidence> evidence, long callId, ConversationSegmentLinkEvidence link)
+    {
+        var candidate = new ParticipantCandidateEvidence(
+            link.SharedRadioCount,
+            link.GapMilliseconds,
+            link.MostFrequentSharedRadioSegmentCount,
+            link.SameTalkgroup);
+        if (!evidence.TryGetValue(callId, out var existing))
+        {
+            evidence[callId] = candidate;
+            return;
+        }
+        evidence[callId] = new(
+            Math.Max(existing.SharedRadioCount, candidate.SharedRadioCount),
+            Math.Min(existing.GapMilliseconds, candidate.GapMilliseconds),
+            Math.Max(existing.MostFrequentSharedRadioSegmentCount, candidate.MostFrequentSharedRadioSegmentCount),
+            existing.SameTalkgroup || candidate.SameTalkgroup);
     }
 
     private static CandidateLocation BestLocation(IEnumerable<CallLocationDashboardRow> rows)
@@ -352,4 +447,10 @@ public sealed class IncidentRagMatcher
         double LocationLatitude,
         double LocationLongitude,
         bool HasVectorMatch);
+
+    private sealed record ParticipantCandidateEvidence(
+        int SharedRadioCount,
+        long GapMilliseconds,
+        int MostFrequentSharedRadioSegmentCount,
+        bool SameTalkgroup);
 }

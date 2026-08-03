@@ -1,16 +1,45 @@
 # Incident Pipeline Architecture
 
-Status: authoritative product and implementation direction, 2026-07-27.
+Status: closed production decision, updated 2026-08-03.
 
-The current production incident pipeline remains active on OT and RPI until the
-replacement described here passes its frozen evaluation and shadow gates. The
-July experiments are historical evidence, not competing architectures. They
-are archived under [`archive/incident-pipeline-2026-07`](archive/incident-pipeline-2026-07/README.md).
+## Final production decision
+
+PizzaWave will keep the existing Qwen-driven incident pipeline as the supported
+production implementation. Qwen proposes incident membership and presentation;
+application code retains source ownership, validates membership, rejects
+conflicts, preserves the durable work queue, and fails closed on malformed or
+failed requests. This is an intentionally practical decision: the pipeline is
+not perfect, but it is operating continuously and its limitations are better
+understood than those of the attempted replacements.
+
+The proposed specialized local membership model is deferred indefinitely. The
+preserved evidence contains only 18 directly reviewed call relationships and
+eight reviewed newer examples, far short of the corpus required to train and
+evaluate a replacement honestly. It is not a release dependency.
+
+Radio-source linkage remains supporting evidence in the transmission ledger and
+review tools. It is not enabled as a production candidate source because the
+bounded observation produced only two eligible cases from 664 calls and
+improved no incident. When both its production and observation settings are
+disabled, PizzaWave skips that candidate-building work entirely.
+
+No further general incident-pipeline experiments are planned. Reopen this
+decision only for a concrete production defect with a reproducible saved case
+and a bounded acceptance test.
+
+The current production incident pipeline remains active on OT and RPI. The
+deferred replacement material below is preserved so a future project does not
+have to rediscover its safety constraints, but no replacement release is now
+scheduled. The July experiments are historical evidence and are archived under
+[`archive/incident-pipeline-2026-07`](archive/incident-pipeline-2026-07/README.md).
 
 ## Product contract
 
-An incident represents one real-world event assembled from one or more radio
-observations. A transmission is evidence, not automatically an incident.
+An incident represents one real-world event assembled from one or more calls.
+Internally, each call is a conversation segment containing one or more radio
+transmissions. The call remains the canonical incident-membership unit; a
+transmission is supporting evidence, not a separate membership object or an
+incident.
 
 The replacement must:
 
@@ -29,13 +58,27 @@ The replacement must:
 - automate routine decisions. Human review is for a bounded ambiguous tail,
   not every incident.
 
+The upstream evidence contract must preserve decoder-delimited transmissions,
+radio source identifiers when available, and their parent conversation segment
+(the user-facing call). The
+implementation direction is defined in
+[`transmission-ledger-architecture.md`](transmission-ledger-architecture.md).
+This additional structure improves retrieval and review, but it does not make
+radio identity a deterministic incident-membership rule.
+
 No address, phrase, category, talkgroup, radio system, quality label, regex,
 taxonomy, compatibility table, embedding score, or hand-tuned score may decide
 incident membership. Retrieval may reduce context but is not proof.
 
-## Decided model roles
+## Deferred replacement design
 
-The production design has two model roles.
+The sections below preserve the accepted design for a possible future
+specialized replacement. They are not the active delivery plan and do not block
+the supported Qwen pipeline.
+
+## Deferred model roles
+
+The deferred replacement design has two model roles.
 
 ### Local membership model
 

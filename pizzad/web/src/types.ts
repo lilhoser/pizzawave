@@ -179,6 +179,42 @@ export type EngineCall = {
   isImported: boolean;
   isAlertMatch: boolean;
 };
+export type CallTransmission = {
+  sequence: number;
+  sourceId?: number | null;
+  sourceIdProvenance: string;
+  talkgroup: number;
+  startTimeMs: number;
+  stopTimeMs: number;
+  offsetMs: number;
+  durationMs: number;
+  startSample?: number | null;
+  sampleCount: number;
+  frequency: number;
+  tdmaSlot: number;
+  errorCount: number;
+  spikeCount: number;
+  startStatus: string;
+};
+export type CallTransmissionSession = {
+  callId: number;
+  systemShortName: string;
+  talkgroup: number;
+  talkgroupName: string;
+  available: boolean;
+  audioMappingStatus: string;
+  channelAssignmentStart: string;
+  beginsChannelAssignment: boolean;
+  captureDisposition: string;
+  transmissionCount: number;
+  identifiedRadioCount: number;
+  unknownSourceCount: number;
+  startTimeMs: number;
+  stopTimeMs: number;
+  fullAudioUrl: string;
+  message: string;
+  transmissions: CallTransmission[];
+};
 export type CategoryPage = {
   category: string;
   groupBy: string;
@@ -186,6 +222,8 @@ export type CategoryPage = {
   insights: CategoryInsight[];
   incidents: Incident[];
 };
+export type CategoryActivityCall = { call: EngineCall; radioIds: number[]; incidentIds: number[] };
+export type CategoryActivity = { category: string; totalCalls: number; limited: boolean; calls: CategoryActivityCall[] };
 export type Job = {
   id: number;
   type: string;

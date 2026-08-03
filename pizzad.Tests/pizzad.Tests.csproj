@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\pizzad\pizzad.csproj" />
+    <ProjectReference Include="..\utilities\IncidentTrainingEvidenceInventory\IncidentTrainingEvidenceInventory.csproj" />
   </ItemGroup>
 
   <ItemGroup>

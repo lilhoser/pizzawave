@@ -114,6 +114,41 @@ public sealed class IncidentRagMatcherTests
         Assert.Equal("new call seed", row.Reason);
     }
 
+    [Fact]
+    public void SelectCandidates_DoesNotUseLateEntryCallAsANewIncidentSeed()
+    {
+        var matcher = new IncidentRagMatcher();
+        var call = Call(10, 2000, "Tree down blocking the road near station 4.") with
+        {
+            CanSeedIncident = false,
+            ChannelAssignmentStart = "update"
+        };
+
+        var result = matcher.SelectCandidates("test", [], [call], [10], []);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void SelectCandidates_IncludesAdjacentCallsLinkedByACommonSystemScopedRadio()
+    {
+        var matcher = new IncidentRagMatcher();
+        var calls = new[]
+        {
+            Call(20, 3000, "Routine acknowledgement with no useful event details."),
+            Call(21, 3020, "Brief follow-up with different words and no location.")
+        };
+        var links = new[]
+        {
+            new ConversationSegmentLinkEvidence(20, 21, 1, 10_000, 2, true)
+        };
+
+        var result = matcher.SelectCandidates("test", [], calls, [21], [], participantLinks: links);
+
+        Assert.Contains(result, row => row.Call.Id == 20 && row.ParticipantLinked && row.SharedRadioCount == 1);
+        Assert.Contains(result, row => row.Call.Id == 21 && row.ParticipantLinked && row.ParticipantSameTalkgroup);
+    }
+
     private static EngineCall Call(long id, long start, string text) => new()
     {
         Id = id,

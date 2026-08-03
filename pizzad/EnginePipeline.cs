@@ -205,16 +205,29 @@ public sealed class EnginePipeline
         if (!imported)
             _liveTrActivity.MarkLiveCall(DateTime.UtcNow);
 
-        var call = BuildPendingCall(payload, imported);
+        long? strictContinuationCallId = null;
+        if (CaptureAdmissionPolicy.NeedsStrictContinuationLookup(payload.Metadata))
+            strictContinuationCallId = await _database.FindStrictContinuationCallAsync(payload.Metadata, 3000, ct);
+        var admission = CaptureAdmissionPolicy.Decide(payload.Metadata, strictContinuationCallId);
+        var call = BuildPendingCall(payload, imported, admission);
         var callId = await _database.UpsertCallAsync(call, ct);
 
-        var audioPath = await PersistAudioAsync(payload, call, callId, ct);
+        var audioPath = admission.PersistAudio
+            ? await PersistAudioAsync(payload, call, callId, ct)
+            : string.Empty;
         call = call with { Id = callId, AudioPath = audioPath };
         await _database.UpsertCallAsync(call, ct);
+        await _database.ReplaceCallTransmissionsAsync(callId, payload.Metadata, ct, admission.PersistAudio);
 
-        await _events.PublishAsync("call_ingested", new { callId, imported }, ct);
+        await _events.PublishAsync("call_ingested", new
+        {
+            callId,
+            imported,
+            captureDisposition = admission.Disposition,
+            continuationOfCallId = admission.ContinuationOfCallId
+        }, ct);
 
-        if (CanTranscribe())
+        if (admission.Transcribe && CanTranscribe())
         {
             if (imported)
             {
@@ -229,7 +242,9 @@ public sealed class EnginePipeline
         }
         else
         {
-            _logger.LogInformation("Stored call {CallId} without transcription queue because setup/transcription is not ready", callId);
+            _logger.LogInformation(
+                "Stored call {CallId} without transcription queue; capture disposition={CaptureDisposition}, transcription ready={TranscriptionReady}",
+                callId, admission.Disposition, CanTranscribe());
         }
         return callId;
     }
@@ -783,7 +798,7 @@ public sealed class EnginePipeline
         return Path.GetRelativePath(_config.Storage.AudioRoot, absolutePath).Replace('\\', '/');
     }
 
-    private EngineCall BuildPendingCall(CallstreamPayload payload, bool imported)
+    private EngineCall BuildPendingCall(CallstreamPayload payload, bool imported, CaptureAdmissionDecision admission)
     {
         var metadata = payload.Metadata;
         var start = metadata.StartTime;
@@ -791,7 +806,7 @@ public sealed class EnginePipeline
         var system = metadata.SystemShortName;
         var talkgroup = metadata.Talkgroup;
         var callstreamCallId = metadata.CallId;
-        var source = metadata.Source;
+        var source = metadata.SystemNumber;
         var frequency = metadata.Frequency;
         var resolved = _talkgroups.Resolve(system, talkgroup);
         var unique = $"{system}|{talkgroup}|{start}|{stop}|{callstreamCallId}|{frequency}";
@@ -807,7 +822,13 @@ public sealed class EnginePipeline
             TalkgroupName = resolved.Label,
             Frequency = frequency,
             Category = resolved.Category,
-            TranscriptionStatus = "pending",
+            TranscriptionStatus = admission.Transcribe ? "pending" : "excluded",
+            QualityReason = admission.Transcribe ? "ok" : admission.Disposition,
+            ChannelAssignmentStart = metadata.ChannelAssignmentStart,
+            BeginsChannelAssignment = metadata.SchemaVersion < 3 || metadata.BeginsChannelAssignment,
+            CanSeedIncident = admission.CanSeedIncident,
+            CaptureDisposition = admission.Disposition,
+            ContinuationOfCallId = admission.ContinuationOfCallId,
             IsImported = imported,
             RawMetadataJson = payload.RawMetadataJson
         };

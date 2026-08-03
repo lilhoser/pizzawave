@@ -74,7 +74,9 @@ public sealed class SystemInformationUiContractTests
         Assert.Contains("onClose={closeLocationPanel}", app, StringComparison.Ordinal);
         Assert.Contains("if (resetToken <= 0)", map, StringComparison.Ordinal);
         Assert.DoesNotContain("[map, positionKey, focusedKey, rows]", map, StringComparison.Ordinal);
-        Assert.Contains("<span>${cluster.count.toLocaleString()}</span>", map, StringComparison.Ordinal);
+        Assert.Contains("markerHtml(cluster, mixed)", map, StringComparison.Ordinal);
+        Assert.Contains("map-heat-ring", map, StringComparison.Ordinal);
+        Assert.Contains("mixed ? \"supernode\"", map, StringComparison.Ordinal);
         Assert.Contains("return incidentIds.size;", map, StringComparison.Ordinal);
         Assert.DoesNotContain("incidentIds.size + standaloneCallIds.size", map, StringComparison.Ordinal);
         Assert.Equal(1, map.Split("<Tooltip", StringSplitOptions.None).Length - 1);

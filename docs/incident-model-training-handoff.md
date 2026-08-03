@@ -1,4 +1,8 @@
-# Local Incident Membership Model: Project Handoff
+# Local Incident Membership Model: Deferred Project Handoff
+
+Status: deferred indefinitely on 2026-08-03. This is preserved design material,
+not an active PizzaWave delivery plan. The supported production decision is in
+[`incident-pipeline-architecture.md`](incident-pipeline-architecture.md).
 
 This is the implementation handoff for the next dedicated Codex session. Read
 [`incident-pipeline-architecture.md`](incident-pipeline-architecture.md) first.
@@ -121,3 +125,33 @@ Stop and report rather than tail-chasing when:
 Model and hardware research after a passing deployment is a separate follow-up.
 Qwen 35B on Paxan is the current presentation target; a hardware purchase is
 not a prerequisite for beginning this project.
+
+## Evidence inventory completed on 2026-08-02
+
+`utilities/IncidentTrainingEvidenceInventory` now verifies and inventories the
+preserved archive without opening any file under `heldout-sealed`. It also keeps
+raw material, direct human reviews, and repeated model experiment output in
+separate counts so model reruns cannot be mistaken for independent labels.
+
+The verified archive contains:
+
+- 417 unique development calls in five time blocks, including one empty block;
+- 387 calls with at least one transcript and audio references for all 417;
+- 18 unique call-pair reviews covering 36 calls;
+- 11 `same_event`, 2 `not_same_event`, and 5 `unresolved` reviews;
+- no duplicate reviewed pairs, missing review cases, or missing review audio;
+- 381 development calls with no direct human relationship review.
+
+The local August evidence adds 105 unique candidate-plus-existing-incident
+examples after removing 21 duplicate rows from three snapshots. Those examples
+preserve current incident context and radio-link summary evidence. Only eight
+have direct reviewer answers so far. They are useful challenge and teacher
+material, but they are not complete end-to-end incident-construction labels,
+and current incident membership is not ground truth.
+
+This is enough evidence to seed and verify a low-effort pilot review workflow.
+It is not enough to fine-tune a routine membership model. The next data step is
+to snapshot ordinary complete call windows with current radio-source evidence,
+have Qwen draft the grouping offline, and ask a reviewer only to correct the
+draft. The sealed evaluation material must remain unopened until that workflow
+and its acceptance measures are fixed.

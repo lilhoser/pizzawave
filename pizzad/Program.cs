@@ -36,6 +36,8 @@ builder.Services.AddSingleton<EngineAlertService>();
 builder.Services.AddSingleton<TalkgroupCatalogService>();
 builder.Services.AddSingleton<TalkgroupResolver>();
 builder.Services.AddSingleton<CallAudioService>();
+builder.Services.AddSingleton<TransmissionLedgerService>();
+builder.Services.AddSingleton<ConversationSegmentLinkageService>();
 builder.Services.AddSingleton<PoliceCodeService>();
 builder.Services.AddSingleton<TranscriptLocationService>();
 builder.Services.AddSingleton<SiteSetupSourcePlanService>();
@@ -46,6 +48,7 @@ builder.Services.AddSingleton<IncidentReconciliationService>();
 builder.Services.AddSingleton<RemoteBandwidthEstimatorService>();
 builder.Services.AddHttpClient<GeocodingService>();
 builder.Services.AddSingleton<AutomaticInsightsService>();
+builder.Services.AddSingleton<IncidentTargetMembershipShadowService>();
 builder.Services.AddSingleton<IncidentAssociationShadowService>();
 builder.Services.AddSingleton<IncidentBatchConstructorShadowService>();
 builder.Services.AddSingleton<IncidentBatchVerificationShadowService>();
@@ -91,6 +94,7 @@ builder.Services.AddSingleton<RfSurveyService>();
 builder.Services.AddSingleton<RfSurveyInsightService>();
 builder.Services.AddHostedService<CallstreamListener>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AutomaticInsightsService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentTargetMembershipShadowService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentAssociationShadowService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentBatchConstructorShadowService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentBatchVerificationShadowService>());
@@ -710,8 +714,17 @@ app.MapGet("/api/v1/categories/{category}", async (HttpContext context, string c
     var range = new TimeRangeQuery(start, end).Resolve();
     return Results.Ok(await dashboard.BuildCategoryPageAsync(category, groupBy ?? "time", range.Start, range.End, q ?? string.Empty, context.RequestAborted));
 })
-.WithName("Category")
-.WithOpenApi();
+  .WithName("Category")
+  .WithOpenApi();
+
+app.MapGet("/api/v1/categories/{category}/activity", async (HttpContext context, string category, int? limit, long? start, long? end, AuthService authService, DashboardService dashboard) =>
+  {
+      if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+      var range = new TimeRangeQuery(start, end).Resolve();
+      return Results.Ok(await dashboard.BuildCategoryActivityAsync(category, range.Start, range.End, limit ?? 500, context.RequestAborted));
+  })
+  .WithName("CategoryActivity")
+  .WithOpenApi();
 
 app.MapGet("/api/v1/categories/{category}/talkgroups/{talkgroup:long}/calls", async (HttpContext context, string category, long talkgroup, int? limit, long? start, long? end, AuthService authService, DashboardService dashboard) =>
 {
@@ -739,6 +752,42 @@ app.MapGet("/api/v1/calls/{id:long}", async (HttpContext context, long id, AuthS
     return call == null ? Results.NotFound() : Results.Ok(call);
 })
 .WithName("CallById")
+.WithOpenApi();
+
+app.MapGet("/api/v1/calls/{id:long}/transmissions", async (HttpContext context, long id, AuthService authService, EngineDatabase database, TransmissionLedgerService ledger, EngineConfig cfg, TalkgroupCatalogService catalog) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var call = await database.GetCallAsync(id, context.RequestAborted);
+    if (call != null && !DownstreamProfilePolicy.Allows(cfg, catalog, call)) return Results.NotFound();
+    if (call == null) return Results.NotFound();
+    return Results.Ok(await ledger.GetSessionAsync(id, context.RequestAborted));
+})
+.WithName("CallTransmissions")
+.WithOpenApi();
+
+app.MapGet("/api/v1/calls/{id:long}/transmissions/{sequence:int}/audio", async (HttpContext context, long id, int sequence, AuthService authService, EngineDatabase database, EngineConfig cfg, TalkgroupCatalogService catalog) =>
+{
+    if (!authService.IsReadAllowed(context)) return Results.Unauthorized();
+    var call = await database.GetCallAsync(id, context.RequestAborted);
+    if (call != null && !DownstreamProfilePolicy.Allows(cfg, catalog, call)) return Results.NotFound();
+    if (call == null || string.IsNullOrWhiteSpace(call.AudioPath)) return Results.NotFound();
+    var transmission = (await database.GetCallTransmissionsAsync(id, context.RequestAborted)).SingleOrDefault(row => row.Sequence == sequence);
+    if (transmission?.StartSample == null || transmission.SampleCount <= 0 || transmission.AudioMappingStatus is not ("exact_live" or "exact_reconstructed"))
+        return Results.NotFound();
+
+    var root = Path.GetFullPath(cfg.Storage.AudioRoot);
+    var path = Path.GetFullPath(Path.Combine(root, call.AudioPath));
+    var relative = Path.GetRelativePath(root, path);
+    if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || !File.Exists(path))
+        return Results.NotFound();
+    await using var file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+    var wav = new MemoryStream();
+    await file.CopyToAsync(wav, context.RequestAborted);
+    return CallAudioService.TryCreatePcm16MonoSlice(wav, transmission.StartSample.Value, transmission.SampleCount, out var slice)
+        ? Results.File(slice.ToArray(), "audio/wav")
+        : Results.NotFound();
+})
+.WithName("CallTransmissionAudio")
 .WithOpenApi();
 
 app.MapGet("/api/v1/calls/{id:long}/audio", async (HttpContext context, long id, AuthService authService, EngineDatabase database, EngineConfig cfg, TalkgroupCatalogService catalog) =>

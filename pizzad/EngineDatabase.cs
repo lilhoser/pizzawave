@@ -54,11 +54,15 @@ public sealed partial class EngineDatabase
             INSERT INTO calls (
                 unique_key, start_time, stop_time, source, system_short_name, callstream_call_id,
                 talkgroup, talkgroup_name, frequency, category, audio_path, transcription,
-                transcription_status, quality_reason, is_imported, is_alert_match, raw_metadata_json, created_at_utc, updated_at_utc)
+                transcription_status, quality_reason, channel_assignment_start, begins_channel_assignment,
+                can_seed_incident, capture_disposition, continuation_of_call_id,
+                is_imported, is_alert_match, raw_metadata_json, created_at_utc, updated_at_utc)
             VALUES (
                 $unique_key, $start_time, $stop_time, $source, $system_short_name, $callstream_call_id,
                 $talkgroup, $talkgroup_name, $frequency, $category, $audio_path, $transcription,
-                $transcription_status, $quality_reason, $is_imported, $is_alert_match, $raw_metadata_json, $now, $now)
+                $transcription_status, $quality_reason, $channel_assignment_start, $begins_channel_assignment,
+                $can_seed_incident, $capture_disposition, $continuation_of_call_id,
+                $is_imported, $is_alert_match, $raw_metadata_json, $now, $now)
             ON CONFLICT(unique_key) DO UPDATE SET
                 talkgroup_name=excluded.talkgroup_name,
                 category=excluded.category,
@@ -66,6 +70,11 @@ public sealed partial class EngineDatabase
                 transcription=excluded.transcription,
                 transcription_status=excluded.transcription_status,
                 quality_reason=excluded.quality_reason,
+                channel_assignment_start=excluded.channel_assignment_start,
+                begins_channel_assignment=excluded.begins_channel_assignment,
+                can_seed_incident=excluded.can_seed_incident,
+                capture_disposition=excluded.capture_disposition,
+                continuation_of_call_id=excluded.continuation_of_call_id,
                 is_alert_match=excluded.is_alert_match,
                 updated_at_utc=excluded.updated_at_utc
             RETURNING id;
@@ -85,12 +94,172 @@ public sealed partial class EngineDatabase
         Add(command, "$transcription", call.Transcription);
         Add(command, "$transcription_status", call.TranscriptionStatus);
         Add(command, "$quality_reason", call.QualityReason);
+        Add(command, "$channel_assignment_start", call.ChannelAssignmentStart);
+        Add(command, "$begins_channel_assignment", call.BeginsChannelAssignment ? 1 : 0);
+        Add(command, "$can_seed_incident", call.CanSeedIncident ? 1 : 0);
+        Add(command, "$capture_disposition", call.CaptureDisposition);
+        Add(command, "$continuation_of_call_id", call.ContinuationOfCallId);
         Add(command, "$is_imported", call.IsImported ? 1 : 0);
         Add(command, "$is_alert_match", call.IsAlertMatch ? 1 : 0);
         Add(command, "$raw_metadata_json", call.RawMetadataJson);
         Add(command, "$now", now);
         var result = await command.ExecuteScalarAsync(ct);
         return Convert.ToInt64(result);
+    }
+
+    public async Task ReplaceCallTransmissionsAsync(long callId, CallstreamMetadata metadata, CancellationToken ct, bool audioPersisted = true)
+    {
+        if (metadata.SchemaVersion < 2)
+            return;
+
+        await using var connection = OpenConnection();
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = (SqliteTransaction)transaction;
+            delete.CommandText = "DELETE FROM call_transmissions WHERE call_id=$call_id;";
+            Add(delete, "$call_id", callId);
+            await delete.ExecuteNonQueryAsync(ct);
+        }
+
+        for (var sequence = 0; sequence < metadata.Transmissions.Count; sequence++)
+        {
+            var row = metadata.Transmissions[sequence];
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = (SqliteTransaction)transaction;
+            insert.CommandText = """
+                INSERT INTO call_transmissions (
+                    call_id, sequence, source_id, source_id_provenance, talkgroup,
+                    start_time_ms, stop_time_ms, start_sample, sample_count, frequency,
+                    tdma_slot, error_count, spike_count, audio_mapping_status, start_status, created_at_utc)
+                VALUES (
+                    $call_id, $sequence, $source_id, $source_id_provenance, $talkgroup,
+                    $start_time_ms, $stop_time_ms, $start_sample, $sample_count, $frequency,
+                    $tdma_slot, $error_count, $spike_count, $audio_mapping_status, $start_status, $created_at_utc);
+                """;
+            Add(insert, "$call_id", callId);
+            Add(insert, "$sequence", sequence);
+            Add(insert, "$source_id", row.SourceId);
+            Add(insert, "$source_id_provenance", row.SourceIdProvenance);
+            Add(insert, "$talkgroup", row.Talkgroup);
+            Add(insert, "$start_time_ms", row.StartTimeMs);
+            Add(insert, "$stop_time_ms", row.StopTimeMs);
+            Add(insert, "$start_sample", audioPersisted ? row.StartSample : null);
+            Add(insert, "$sample_count", row.SampleCount);
+            Add(insert, "$frequency", row.Frequency);
+            Add(insert, "$tdma_slot", row.TdmaSlot);
+            Add(insert, "$error_count", row.ErrorCount);
+            Add(insert, "$spike_count", row.SpikeCount);
+            Add(insert, "$audio_mapping_status", audioPersisted ? metadata.AudioMappingStatus : "unavailable");
+            Add(insert, "$start_status", row.StartStatus);
+            Add(insert, "$created_at_utc", DateTime.UtcNow.ToString("O"));
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+
+        await transaction.CommitAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<CallTransmissionRecord>> GetCallTransmissionsAsync(long callId, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, call_id, sequence, source_id, source_id_provenance, talkgroup,
+                   start_time_ms, stop_time_ms, start_sample, sample_count, frequency,
+                   tdma_slot, error_count, spike_count, audio_mapping_status, start_status
+            FROM call_transmissions
+            WHERE call_id=$call_id
+            ORDER BY sequence;
+            """;
+        Add(command, "$call_id", callId);
+        var rows = new List<CallTransmissionRecord>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new()
+            {
+                Id = reader.GetInt64(0),
+                CallId = reader.GetInt64(1),
+                Sequence = reader.GetInt32(2),
+                SourceId = reader.IsDBNull(3) ? null : reader.GetInt64(3),
+                SourceIdProvenance = reader.GetString(4),
+                Talkgroup = reader.GetInt64(5),
+                StartTimeMs = reader.GetInt64(6),
+                StopTimeMs = reader.GetInt64(7),
+                StartSample = reader.IsDBNull(8) ? null : reader.GetInt32(8),
+                SampleCount = reader.GetInt32(9),
+                Frequency = reader.GetDouble(10),
+                TdmaSlot = reader.GetInt32(11),
+                ErrorCount = reader.GetInt64(12),
+                SpikeCount = reader.GetInt64(13),
+                AudioMappingStatus = reader.GetString(14),
+                StartStatus = reader.GetString(15)
+            });
+        }
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<ConversationSegmentParticipantRecord>> ListConversationSegmentParticipantsAsync(long start, long end, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT c.id, c.system_short_name, t.source_id,
+                   MIN(t.start_time_ms), MAX(t.stop_time_ms), COUNT(*)
+            FROM calls c
+            JOIN call_transmissions t ON t.call_id=c.id
+            WHERE c.start_time >= $start AND c.start_time <= $end
+              AND t.source_id IS NOT NULL
+              AND t.source_id > 0
+              AND t.start_status <> 'possibly_incomplete'
+            GROUP BY c.id, c.system_short_name, t.source_id
+            ORDER BY c.start_time, c.id, MIN(t.sequence);
+            """;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
+        var rows = new List<ConversationSegmentParticipantRecord>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new(
+                reader.GetInt64(0),
+                reader.GetString(1),
+                reader.GetInt64(2),
+                reader.GetInt64(3),
+                reader.GetInt64(4),
+                reader.GetInt32(5)));
+        }
+        return rows;
+    }
+
+    public async Task<long?> FindStrictContinuationCallAsync(CallstreamMetadata metadata, int maximumGapMilliseconds, CancellationToken ct)
+    {
+        var first = metadata.Transmissions.FirstOrDefault();
+        if (first?.SourceId is null || metadata.ChannelAssignmentStart != "update")
+            return null;
+
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT c.id
+            FROM calls c
+            JOIN call_transmissions t ON t.call_id=c.id
+            WHERE lower(c.system_short_name)=lower($system)
+              AND c.talkgroup=$talkgroup
+              AND t.source_id=$source_id
+              AND t.start_status = 'observed_boundary'
+              AND t.stop_time_ms <= $fragment_start_ms
+              AND $fragment_start_ms - t.stop_time_ms <= $maximum_gap_ms
+            ORDER BY t.stop_time_ms DESC, c.id DESC
+            LIMIT 1;
+            """;
+        Add(command, "$system", metadata.SystemShortName);
+        Add(command, "$talkgroup", metadata.Talkgroup);
+        Add(command, "$source_id", first.SourceId);
+        Add(command, "$fragment_start_ms", first.StartTimeMs);
+        Add(command, "$maximum_gap_ms", Math.Max(0, maximumGapMilliseconds));
+        var result = await command.ExecuteScalarAsync(ct);
+        return result is null or DBNull ? null : Convert.ToInt64(result);
     }
 
     public Task UpdateCallTranscriptionAsync(long callId, string transcription, string status, string qualityReason, bool isAlertMatch, CancellationToken ct) =>
@@ -1916,6 +2085,96 @@ public sealed partial class EngineDatabase
         return calls;
     }
 
+    public async Task<List<EngineCall>> ListCallsForTalkgroupsAsync(long start, long end, IReadOnlyList<(string SystemShortName, long Talkgroup)> talkgroups, int limit, CancellationToken ct)
+    {
+        if (talkgroups.Count == 0)
+            return [];
+
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        var predicates = new List<string>(talkgroups.Count);
+        for (var index = 0; index < talkgroups.Count; index++)
+        {
+            var systemParameter = $"$system_{index}";
+            var talkgroupParameter = $"$talkgroup_{index}";
+            predicates.Add($"(COALESCE(NULLIF(system_short_name, ''), '') = {systemParameter} AND talkgroup = {talkgroupParameter})");
+            Add(command, systemParameter, talkgroups[index].SystemShortName?.Trim() ?? string.Empty);
+            Add(command, talkgroupParameter, talkgroups[index].Talkgroup);
+        }
+        command.CommandText = $"""
+            SELECT * FROM calls
+            WHERE start_time >= $start AND start_time <= $end
+              AND ({string.Join(" OR ", predicates)})
+            ORDER BY start_time DESC, id DESC
+            LIMIT $limit;
+            """;
+        Add(command, "$start", start);
+        Add(command, "$end", end);
+        Add(command, "$limit", Math.Clamp(limit, 1, 1000));
+        var calls = new List<EngineCall>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            calls.Add(ReadCall(reader));
+        return calls;
+    }
+
+    public async Task<(IReadOnlyDictionary<long, IReadOnlyList<long>> RadioIds, IReadOnlyDictionary<long, IReadOnlyList<long>> IncidentIds)> ListCallMembershipMetadataAsync(IReadOnlyList<long> callIds, CancellationToken ct)
+    {
+        if (callIds.Count == 0)
+            return (new Dictionary<long, IReadOnlyList<long>>(), new Dictionary<long, IReadOnlyList<long>>());
+
+        await using var connection = OpenConnection();
+        var distinctCallIds = callIds.Distinct().ToList();
+        var parameters = distinctCallIds.Select((_, index) => $"$call_{index}").ToList();
+        var radioIds = new Dictionary<long, List<long>>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"""
+                SELECT call_id, source_id
+                FROM call_transmissions
+                WHERE call_id IN ({string.Join(",", parameters)}) AND source_id IS NOT NULL AND source_id > 0
+                GROUP BY call_id, source_id
+                ORDER BY call_id, source_id;
+                """;
+            for (var index = 0; index < parameters.Count; index++)
+                Add(command, parameters[index], distinctCallIds[index]);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var callId = reader.GetInt64(0);
+                if (!radioIds.TryGetValue(callId, out var values))
+                    radioIds[callId] = values = [];
+                values.Add(reader.GetInt64(1));
+            }
+        }
+
+        var incidentIds = new Dictionary<long, List<long>>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"""
+                SELECT call_id, incident_id
+                FROM incident_calls
+                WHERE call_id IN ({string.Join(",", parameters)})
+                GROUP BY call_id, incident_id
+                ORDER BY call_id, incident_id;
+                """;
+            for (var index = 0; index < parameters.Count; index++)
+                Add(command, parameters[index], distinctCallIds[index]);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var callId = reader.GetInt64(0);
+                if (!incidentIds.TryGetValue(callId, out var values))
+                    incidentIds[callId] = values = [];
+                values.Add(reader.GetInt64(1));
+            }
+        }
+
+        return (
+            radioIds.ToDictionary(row => row.Key, row => (IReadOnlyList<long>)row.Value),
+            incidentIds.ToDictionary(row => row.Key, row => (IReadOnlyList<long>)row.Value));
+    }
+
     public async Task<List<EngineCall>> ListCategoryTalkgroupCallsAsync(long start, long end, string category, string? systemShortName, long talkgroup, int limit, CancellationToken ct)
     {
         await using var connection = OpenConnection();
@@ -3372,9 +3631,33 @@ public sealed partial class EngineDatabase
                 ParseDateOrNull(reader.GetString(4))),
             ct);
 
-        var creates = operationRows.Where(r => r.Accepted && r.Reason.Contains("create incident", StringComparison.OrdinalIgnoreCase)).Sum(r => r.Count);
-        var updates = operationRows.Where(r => r.Accepted && r.Reason.Contains("update incident", StringComparison.OrdinalIgnoreCase)).Sum(r => r.Count);
-        var rejects = operationRows.Where(r => !r.Accepted).Sum(r => r.Count);
+        var operationTotals = await ReadSingleAsync(connection, """
+            SELECT
+                COALESCE(SUM(CASE
+                    WHEN accepted != 0 AND reason LIKE '%create incident%' THEN 1
+                    ELSE 0
+                END), 0) AS creates,
+                COALESCE(SUM(CASE
+                    WHEN accepted != 0 AND (
+                        reason LIKE '%update incident%'
+                        OR reason LIKE 'accepted:server sibling merge repair%'
+                    ) THEN 1
+                    ELSE 0
+                END), 0) AS updates,
+                COALESCE(SUM(CASE WHEN accepted = 0 THEN 1 ELSE 0 END), 0) AS rejects
+            FROM incident_operation_audit
+            WHERE timestamp_utc >= $start AND timestamp_utc <= $end;
+            """,
+            command =>
+            {
+                Add(command, "$start", startUtc.ToString("O"));
+                Add(command, "$end", endUtc.ToString("O"));
+            },
+            reader => (
+                Creates: reader.GetInt64(0),
+                Updates: reader.GetInt64(1),
+                Rejects: reader.GetInt64(2)),
+            ct);
         var incidentAggregate = await ReadSingleAsync(connection, """
             SELECT COUNT(*) AS incidents, COALESCE(AVG(incident_score), 0) AS average_score
             FROM incidents
@@ -3412,9 +3695,9 @@ public sealed partial class EngineDatabase
         var incidents = new QualityCheckIncidentSummaryDto(
             incidentAggregate.Incidents,
             incidentAggregate.AverageScore,
-            creates,
-            updates,
-            rejects,
+            operationTotals.Creates,
+            operationTotals.Updates,
+            operationTotals.Rejects,
             recentIncidents);
 
         return new QualityCheckSnapshotDto(DateTime.UtcNow, start, end, calls, callsByCategory, transcriptQuality, ai, evidenceVerifier, incidents, operationRows);
@@ -4759,6 +5042,13 @@ public sealed partial class EngineDatabase
         Transcription = reader.GetString(reader.GetOrdinal("transcription")),
         TranscriptionStatus = reader.GetString(reader.GetOrdinal("transcription_status")),
         QualityReason = reader.GetString(reader.GetOrdinal("quality_reason")),
+        ChannelAssignmentStart = reader.GetString(reader.GetOrdinal("channel_assignment_start")),
+        BeginsChannelAssignment = reader.GetInt64(reader.GetOrdinal("begins_channel_assignment")) != 0,
+        CanSeedIncident = reader.GetInt64(reader.GetOrdinal("can_seed_incident")) != 0,
+        CaptureDisposition = reader.GetString(reader.GetOrdinal("capture_disposition")),
+        ContinuationOfCallId = reader.IsDBNull(reader.GetOrdinal("continuation_of_call_id"))
+            ? null
+            : reader.GetInt64(reader.GetOrdinal("continuation_of_call_id")),
         IsImported = reader.GetInt64(reader.GetOrdinal("is_imported")) != 0,
         IsAlertMatch = reader.GetInt64(reader.GetOrdinal("is_alert_match")) != 0,
         RawMetadataJson = reader.GetString(reader.GetOrdinal("raw_metadata_json"))
@@ -5203,6 +5493,12 @@ public sealed partial class EngineDatabase
         await AddColumnIfMissingAsync(connection, "incident_operation_audit", "candidate_trace_key", "TEXT NOT NULL DEFAULT ''", ct);
         await ExecuteNonQueryAsync(connection, "UPDATE jobs SET updated_at_utc=COALESCE(NULLIF(finished_at_utc, ''), NULLIF(started_at_utc, ''), created_at_utc) WHERE updated_at_utc='';", ct);
         await AddColumnIfMissingAsync(connection, "calls", "quality_reason", "TEXT NOT NULL DEFAULT 'ok'", ct);
+        await AddColumnIfMissingAsync(connection, "calls", "channel_assignment_start", "TEXT NOT NULL DEFAULT 'unknown'", ct);
+        await AddColumnIfMissingAsync(connection, "calls", "begins_channel_assignment", "INTEGER NOT NULL DEFAULT 1", ct);
+        await AddColumnIfMissingAsync(connection, "calls", "can_seed_incident", "INTEGER NOT NULL DEFAULT 1", ct);
+        await AddColumnIfMissingAsync(connection, "calls", "capture_disposition", "TEXT NOT NULL DEFAULT 'legacy'", ct);
+        await AddColumnIfMissingAsync(connection, "calls", "continuation_of_call_id", "INTEGER", ct);
+        await AddColumnIfMissingAsync(connection, "call_transmissions", "start_status", "TEXT NOT NULL DEFAULT 'unknown'", ct);
         await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS idx_calls_system_tg_start ON calls(system_short_name, talkgroup, start_time DESC);", ct);
         await ExecuteNonQueryAsync(connection, "CREATE INDEX IF NOT EXISTS idx_calls_quality_start ON calls(quality_reason, start_time DESC);", ct);
         await AddColumnIfMissingAsync(connection, "tr_health_samples", "decode_rate_total", "REAL NOT NULL DEFAULT 0", ct);
@@ -5559,6 +5855,11 @@ public sealed partial class EngineDatabase
             transcription TEXT NOT NULL DEFAULT '',
             transcription_status TEXT NOT NULL DEFAULT 'pending',
             quality_reason TEXT NOT NULL DEFAULT 'ok',
+            channel_assignment_start TEXT NOT NULL DEFAULT 'unknown',
+            begins_channel_assignment INTEGER NOT NULL DEFAULT 1,
+            can_seed_incident INTEGER NOT NULL DEFAULT 1,
+            capture_disposition TEXT NOT NULL DEFAULT 'legacy',
+            continuation_of_call_id INTEGER,
             is_imported INTEGER NOT NULL DEFAULT 0,
             is_alert_match INTEGER NOT NULL DEFAULT 0,
             raw_metadata_json TEXT NOT NULL DEFAULT '{}',
@@ -5572,6 +5873,33 @@ public sealed partial class EngineDatabase
         CREATE INDEX IF NOT EXISTS idx_calls_system_start ON calls(system_short_name, start_time DESC);
         CREATE INDEX IF NOT EXISTS idx_calls_system_tg_start ON calls(system_short_name, talkgroup, start_time DESC);
         CREATE INDEX IF NOT EXISTS idx_calls_quality_start ON calls(quality_reason, start_time DESC);
+
+        CREATE TABLE IF NOT EXISTS call_transmissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            call_id INTEGER NOT NULL,
+            sequence INTEGER NOT NULL,
+            source_id INTEGER,
+            source_id_provenance TEXT NOT NULL DEFAULT 'unknown',
+            talkgroup INTEGER NOT NULL,
+            start_time_ms INTEGER NOT NULL,
+            stop_time_ms INTEGER NOT NULL,
+            start_sample INTEGER,
+            sample_count INTEGER NOT NULL,
+            frequency REAL NOT NULL DEFAULT 0,
+            tdma_slot INTEGER NOT NULL DEFAULT 0,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            spike_count INTEGER NOT NULL DEFAULT 0,
+            audio_mapping_status TEXT NOT NULL DEFAULT 'unavailable',
+            start_status TEXT NOT NULL DEFAULT 'unknown',
+            created_at_utc TEXT NOT NULL,
+            FOREIGN KEY(call_id) REFERENCES calls(id) ON DELETE CASCADE,
+            UNIQUE(call_id, sequence)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_call_transmissions_call_time
+            ON call_transmissions(call_id, start_time_ms);
+        CREATE INDEX IF NOT EXISTS idx_call_transmissions_source_time
+            ON call_transmissions(source_id, start_time_ms) WHERE source_id IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS call_annotations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

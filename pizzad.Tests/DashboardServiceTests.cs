@@ -222,6 +222,37 @@ public sealed class DashboardServiceTests
     }
 
     [Fact]
+    public async Task CategoryActivity_BatchesRadioAndIncidentMembership()
+    {
+        using var temp = new TempStore();
+        var config = temp.CreateConfig();
+        var database = new EngineDatabase(config, NullLogger<EngineDatabase>.Instance);
+        await database.InitializeAsync(CancellationToken.None);
+        var catalog = new TalkgroupCatalogService(config, NullLogger<TalkgroupCatalogService>.Instance);
+        var start = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds();
+        var callId = await database.UpsertCallAsync(Call("radio-call", start + 10, "site-a", 101, "Dispatch", "police"), CancellationToken.None);
+        await database.ReplaceCallTransmissionsAsync(callId, new CallstreamMetadata(
+            2, start, start + 5, start * 1000, (start + 5) * 1000, "site-a", callId, 101, 0, 854_000_000, 8000, "exact_live", [],
+            [new(2031599, "trunk-recorder", 101, start * 1000, (start + 2) * 1000, 0, 16000, 854_000_000, 0, 0, 0)]), CancellationToken.None);
+        var incidentId = await database.UpsertManagedIncidentAsync(new IncidentDto
+        {
+            IncidentKey = "test:radio-activity",
+            Title = "Test incident",
+            FirstSeen = start + 10,
+            LastSeen = start + 10,
+            Calls = [new IncidentCallDto(callId, start + 10, "unit test", "")]
+        }, CancellationToken.None);
+
+        var activity = await Service(config, database, catalog).BuildCategoryActivityAsync("police", start, start + 300, 100, CancellationToken.None);
+
+        var row = Assert.Single(activity.Calls);
+        Assert.Equal(callId, row.Call.Id);
+        Assert.Equal([2031599L], row.RadioIds);
+        Assert.Equal([incidentId], row.IncidentIds);
+        Assert.False(activity.Limited);
+    }
+
+    [Fact]
     public async Task TopAudioTalkgroups_UsesPersistedQualityReasonForRepetitiveCounts()
     {
         using var temp = new TempStore();

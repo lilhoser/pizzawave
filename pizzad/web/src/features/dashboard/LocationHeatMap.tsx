@@ -22,6 +22,7 @@ type HeatCluster = {
   longitude: number;
   count: number;
   category: string;
+  categoryCounts: Record<string, number>;
 };
 
 const clusterDistancePixels = 54;
@@ -58,9 +59,10 @@ function HeatNodes({ rows, incidents, focusedKey, onFocusKey, onSelectLocation }
     const active = Boolean(focusedKey && cluster.rows.some(row => locationKey(row) === focusedKey));
     const size = Math.min(58, 28 + Math.log2(cluster.count + 1) * 8);
     const clustered = cluster.rows.length > 1;
+    const mixed = Object.keys(cluster.categoryCounts).length > 1;
     const icon = divIcon({
-      className: `map-heat-node category-${cluster.category}${clustered ? " clustered" : ""}${active ? " active" : ""}`,
-      html: `<span>${cluster.count.toLocaleString()}</span>`,
+      className: `map-heat-node category-${mixed ? "supernode" : cluster.category}${clustered ? " clustered" : ""}${active ? " active" : ""}`,
+      html: markerHtml(cluster, mixed),
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2]
     });
@@ -150,7 +152,8 @@ function buildClusters(rows: LocationHeat[], incidents: Incident[], map: Leaflet
   const zoom = map.getZoom();
   return clusterGroups(rows, map, zoom).map(group => {
     const count = clusterNodeCount(group, incidents);
-    const categories = new Set(group.map(row => row.category || "other"));
+    const categoryCounts = clusterCategoryCounts(group, incidents);
+    const categories = Object.keys(categoryCounts);
     const weight = group.reduce((sum, row) => sum + Math.max(1, locationNodeCount(row, incidents)), 0);
     return {
       key: group.map(locationKey).sort().join("||"),
@@ -158,9 +161,50 @@ function buildClusters(rows: LocationHeat[], incidents: Incident[], map: Leaflet
       latitude: group.reduce((sum, row) => sum + row.latitude * Math.max(1, locationNodeCount(row, incidents)), 0) / weight,
       longitude: group.reduce((sum, row) => sum + row.longitude * Math.max(1, locationNodeCount(row, incidents)), 0) / weight,
       count,
-      category: categories.size === 1 ? [...categories][0] : "mixed"
+      category: categories.length === 1 ? categories[0] : "supernode",
+      categoryCounts
     };
   });
+}
+
+function clusterCategoryCounts(rows: LocationHeat[], incidents: Incident[]) {
+  const linkedIds = new Set(rows.flatMap(row => (row.incidentLinks ?? []).map(link => link.incidentId)));
+  if (linkedIds.size) {
+    return incidents.filter(incident => linkedIds.has(incident.id)).reduce<Record<string, number>>((counts, incident) => {
+      const callCounts = (incident.calls ?? []).reduce<Record<string, number>>((values, call) => {
+        const category = call.category || incident.category || "other";
+        values[category] = (values[category] ?? 0) + 1;
+        return values;
+      }, {});
+      const category = Object.entries(callCounts).sort((left, right) => right[1] - left[1])[0]?.[0] || incident.category || "other";
+      counts[category] = (counts[category] ?? 0) + 1;
+      return counts;
+    }, {});
+  }
+  return rows.reduce<Record<string, number>>((counts, row) => {
+    const category = row.category || "other";
+    counts[category] = (counts[category] ?? 0) + Math.max(1, locationNodeCount(row, incidents));
+    return counts;
+  }, {});
+}
+
+const markerColors: Record<string, string> = {
+  police: "#5aa7ff", fire: "#ff6b5a", ems: "#54d68a", traffic: "#f7c948", utilities: "#35c2a1", other: "#b58cff"
+};
+
+function markerHtml(cluster: HeatCluster, mixed: boolean) {
+  if (!mixed)
+    return `<span class="map-heat-core">${cluster.count.toLocaleString()}</span>`;
+  const entries = Object.entries(cluster.categoryCounts).sort((left, right) => right[1] - left[1]);
+  const total = entries.reduce((sum, [, count]) => sum + count, 0) || 1;
+  let cursor = 0;
+  const stops = entries.map(([category, count]) => {
+    const start = cursor;
+    cursor += count / total * 100;
+    return `${markerColors[category] ?? markerColors.other} ${start.toFixed(2)}% ${cursor.toFixed(2)}%`;
+  }).join(",");
+  const bubbles = entries.map(([category, count], index) => `<span class="map-heat-category-bubble category-${category}" style="--bubble-offset:${(index - (entries.length - 1) / 2) * 22}px" title="${category}: ${count}">${count}</span>`).join("");
+  return `<span class="map-heat-ring" style="--category-ring:conic-gradient(${stops})"><span class="map-heat-core">${cluster.count.toLocaleString()}</span>${bubbles}</span>`;
 }
 
 function clusterGroups(rows: LocationHeat[], map: LeafletMap, zoom: number) {
@@ -200,7 +244,7 @@ function mergeClusterRows(rows: LocationHeat[]): LocationHeat {
     count: rows.reduce((sum, row) => sum + row.count, 0),
     intensity: Math.max(...rows.map(row => row.intensity)),
     lastHeard: Math.max(...rows.map(row => row.lastHeard)),
-    category: categories.size === 1 ? [...categories][0] : "other",
+    category: categories.size === 1 ? [...categories][0] : "supernode",
     callIds: [...new Set(rows.flatMap(row => row.callIds ?? []))],
     incidentTitles: [...new Set(rows.flatMap(row => row.incidentTitles ?? []))],
     incidentLinks,
