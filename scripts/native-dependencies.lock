@@ -1,0 +1,11 @@
+# PizzaWave native dependency source lock.
+# Keep these full commit IDs. setup_trunk_recorder.sh never builds moving branches.
+TRUNK_RECORDER_REPOSITORY="https://github.com/TrunkRecorder/trunk-recorder.git"
+TRUNK_RECORDER_COMMIT="ebe770d018d5590ac43417af7e3b33c25379f4f7"
+CALLSTREAM_REPOSITORY="https://github.com/lilhoser/callstream.git"
+CALLSTREAM_COMMIT="6a46546bde7728fb870ebcdc7ed64979b42247ea"
+
+# This temporary compatibility patch is removed when the corresponding upstream
+# Trunk Recorder commit is available and the pin above has advanced to it.
+TRUNK_RECORDER_PATCH="patches/trunk-recorder-started-from-update.patch"
+TRUNK_RECORDER_PATCH_SHA256="da0431d76cc62e24584818742653c3d3bd4bdf8c908849f08da1d42e7025193b"

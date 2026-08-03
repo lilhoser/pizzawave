@@ -1,0 +1,144 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7769f065..ccdfcb37 100755
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -25,6 +25,8 @@ cmake_minimum_required(VERSION 3.12)
+ 
+ project(Trunk-Recorder LANGUAGES CXX C VERSION "5.2.0")
+ 
++include(CTest)
++
+ 
+ configure_file(cmake.h.in "${PROJECT_BINARY_DIR}/cmake.h" @ONLY)
+ add_definitions(-DMANUAL_GITINFO="${MANUAL_GITINFO}")
+@@ -404,6 +406,11 @@ endforeach()
+ 
+ add_executable(trunk-recorder trunk-recorder/main.cc) # ${trunk_recorder_sources})
+ 
++if(BUILD_TESTING)
++  add_executable(call_started_from_update_tests tests/call_started_from_update_tests.cc)
++  add_test(NAME call_started_from_update_tests COMMAND call_started_from_update_tests)
++endif()
++
+ target_link_libraries(trunk-recorder git trunk_recorder_library gnuradio-op25_repeater   ${CMAKE_DL_LIBS} ssl crypto ${CURL_LIBRARIES} ${Boost_LIBRARIES} ${GNURADIO_PMT_LIBRARIES} ${GNURADIO_RUNTIME_LIBRARIES} ${GNURADIO_FILTER_LIBRARIES} ${GNURADIO_DIGITAL_LIBRARIES} ${GNURADIO_ANALOG_LIBRARIES} ${GNURADIO_AUDIO_LIBRARIES} ${GNURADIO_UHD_LIBRARIES} ${UHD_LIBRARIES} ${GNURADIO_BLOCKS_LIBRARIES} ${GNURADIO_OSMOSDR_LIBRARIES} ) # gRPC::grpc++_reflection protobuf::libprotobuf)
+ 
+ #target_link_libraries(trunk-recorder PRIVATE nlohmann_json::nlohmann_json )
+diff --git a/tests/call_started_from_update_tests.cc b/tests/call_started_from_update_tests.cc
+new file mode 100644
+index 00000000..4801f144
+--- /dev/null
++++ b/tests/call_started_from_update_tests.cc
+@@ -0,0 +1,7 @@
++#include "../trunk-recorder/call_start_provenance.h"
++
++int main() {
++  if (call_detail::started_from_update(GRANT)) return 1;
++  if (!call_detail::started_from_update(UPDATE)) return 1;
++  return 0;
++}
+diff --git a/trunk-recorder/call.h b/trunk-recorder/call.h
+index 239fd0bb..8a9ac7d9 100644
+--- a/trunk-recorder/call.h
++++ b/trunk-recorder/call.h
+@@ -93,6 +93,7 @@ public:
+   virtual bool get_conversation_mode() = 0;
+   virtual System *get_system() = 0;
+   virtual std::vector<Transmission> get_transmissions() = 0;
++  virtual bool get_started_from_update() = 0;
+ };
+ 
+ #endif
+diff --git a/trunk-recorder/call_concluder/call_concluder.cc b/trunk-recorder/call_concluder/call_concluder.cc
+index 577429b0..2fe2edb9 100644
+--- a/trunk-recorder/call_concluder/call_concluder.cc
++++ b/trunk-recorder/call_concluder/call_concluder.cc
+@@ -793,6 +793,7 @@ int create_call_json(Call_Data_t &call_info) {
+       {"recorder_num",          int(call_info.recorder_num)},
+       {"tdma_slot",             int(call_info.tdma_slot)},
+       {"phase2_tdma",           int(call_info.phase2_tdma)},
++      {"started_from_update",   call_info.started_from_update},
+       {"start_time",            call_info.start_time},
+       {"stop_time",             call_info.stop_time},
+       {"start_time_ms",         call_info.start_time_ms},
+@@ -1085,6 +1086,7 @@ Call_Data_t Call_Concluder::create_call_data(Call *call, System *sys, const Conf
+   call_info.duplex               = call->get_duplex();
+   call_info.tdma_slot            = call->get_tdma_slot();
+   call_info.phase2_tdma          = call->get_phase2_tdma();
++  call_info.started_from_update  = call->get_started_from_update();
+   call_info.transmission_list    = call->get_transmissions();
+   call_info.sys_num              = sys->get_sys_num();
+   call_info.short_name           = sys->get_short_name();
+diff --git a/trunk-recorder/call_impl.cc b/trunk-recorder/call_impl.cc
+index 4d244e10..e7bf9400 100644
+--- a/trunk-recorder/call_impl.cc
++++ b/trunk-recorder/call_impl.cc
+@@ -99,11 +99,7 @@ Call_impl::Call_impl(TrunkMessage message, System *s, Config c) {
+   mode = message.mode;
+   is_analog = false;
+   priority = message.priority;
+-  if (message.message_type == GRANT) {
+-    was_update = false;
+-  } else {
+-    was_update = true;
+-  }
++  was_update = call_detail::started_from_update(message.message_type);
+   set_freq(message.freq);
+   add_source(message.source);
+   this->update_talkgroup_display();
+@@ -130,6 +126,9 @@ void Call_impl::stop_call() {
+ long Call_impl::get_call_num() {
+   return call_num;
+ }
++bool Call_impl::get_started_from_update() {
++  return was_update;
++}
+ void Call_impl::conclude_call() {
+ 
+   // BOOST_LOG_TRIVIAL(info) << "conclude_call()";
+diff --git a/trunk-recorder/call_impl.h b/trunk-recorder/call_impl.h
+index 01c79b0d..dd12fa85 100644
+--- a/trunk-recorder/call_impl.h
++++ b/trunk-recorder/call_impl.h
+@@ -12,6 +12,7 @@ class Recorder;
+ class System;
+ 
+ #include "call.h"
++#include "call_start_provenance.h"
+ #include "state.h"
+ #include "systems/parser.h"
+ #include "systems/system.h"
+@@ -94,6 +95,7 @@ public:
+   bool get_conversation_mode();
+   System *get_system();
+   std::vector<Transmission> get_transmissions();
++  bool get_started_from_update();
+ 
+ protected:
+   State state;
+diff --git a/trunk-recorder/call_start_provenance.h b/trunk-recorder/call_start_provenance.h
+new file mode 100644
+index 00000000..3377e20b
+--- /dev/null
++++ b/trunk-recorder/call_start_provenance.h
+@@ -0,0 +1,12 @@
++#ifndef CALL_START_PROVENANCE_H
++#define CALL_START_PROVENANCE_H
++
++#include "systems/parser.h"
++
++namespace call_detail {
++constexpr bool started_from_update(MessageType message_type) {
++  return message_type != GRANT;
++}
++}  // namespace call_detail
++
++#endif
+diff --git a/trunk-recorder/global_structs.h b/trunk-recorder/global_structs.h
+index e6952d59..d721af92 100644
+--- a/trunk-recorder/global_structs.h
++++ b/trunk-recorder/global_structs.h
+@@ -181,3 +181,4 @@ struct Call_Data_t {
+   std::vector<int> plugin_retry_list;
+   nlohmann::ordered_json call_json;
++  bool started_from_update = false;
+ };

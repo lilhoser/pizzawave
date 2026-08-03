@@ -1,0 +1,67 @@
+name: Native dependency compatibility
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native-dependencies.yml'
+      - 'scripts/native-dependencies.lock'
+      - 'scripts/prepare_trunk_recorder_source.sh'
+      - 'scripts/setup_trunk_recorder.sh'
+      - 'scripts/patches/**'
+  push:
+    paths:
+      - '.github/workflows/native-dependencies.yml'
+      - 'scripts/native-dependencies.lock'
+      - 'scripts/prepare_trunk_recorder_source.sh'
+      - 'scripts/setup_trunk_recorder.sh'
+      - 'scripts/patches/**'
+  workflow_dispatch:
+
+jobs:
+  clean-combined-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Trunk Recorder build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git pkg-config \
+            libboost-all-dev libssl-dev libcurl4-openssl-dev libsndfile1-dev \
+            gnuradio gnuradio-dev gr-osmosdr \
+            libhackrf-dev librtlsdr-dev libairspy-dev libbladerf-dev libuhd-dev \
+            portaudio19-dev
+
+      - name: Prepare locked source pair and verify patch hashes
+        id: source
+        shell: bash
+        run: |
+          scripts/prepare_trunk_recorder_source.sh --source-root "$RUNNER_TEMP/pizzawave-native"
+          source_dir="$(scripts/prepare_trunk_recorder_source.sh \
+            --source-root "$RUNNER_TEMP/pizzawave-native" --print-source-dir)"
+          echo "source_dir=$source_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Configure and build the combined source tree
+        run: |
+          cmake -S "${{ steps.source.outputs.source_dir }}" \
+            -B "$RUNNER_TEMP/pizzawave-native-build" \
+            -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/pizzawave-native-build" --parallel 2
+
+      - name: Run native tests
+        run: ctest --test-dir "$RUNNER_TEMP/pizzawave-native-build" --output-on-failure
+
+      - name: Verify staged plugin install metadata
+        shell: bash
+        run: |
+          DESTDIR="$RUNNER_TEMP/pizzawave-native-stage" \
+            cmake --install "$RUNNER_TEMP/pizzawave-native-build"
+          plugin="$(find "$RUNNER_TEMP/pizzawave-native-stage" -type f -name libcallstream.so -print -quit)"
+          test -n "$plugin"
+          readelf -d "$plugin" | tee "$RUNNER_TEMP/libcallstream.dynamic.txt"
+          if grep -F "$RUNNER_TEMP/pizzawave-native-build" "$RUNNER_TEMP/libcallstream.dynamic.txt"; then
+            echo "Installed Callstream retains a temporary build-directory RUNPATH." >&2
+            exit 1
+          fi

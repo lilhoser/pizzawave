@@ -56,6 +56,22 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </Content>
+    <Content Include="..\scripts\setup_trunk_recorder.sh" Link="scripts\setup_trunk_recorder.sh">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+    <Content Include="..\scripts\prepare_trunk_recorder_source.sh" Link="scripts\prepare_trunk_recorder_source.sh">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+    <Content Include="..\scripts\native-dependencies.lock" Link="scripts\native-dependencies.lock">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+    <Content Include="..\scripts\patches\*.patch" Link="scripts\patches\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <Target Name="CleanWebUiOutput" BeforeTargets="BuildWebUi" Condition="'$(PIZZAD_SKIP_WEB_BUILD)' != 'true'">

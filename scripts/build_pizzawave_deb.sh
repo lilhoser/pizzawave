@@ -121,6 +121,10 @@ install -m 0755 "$ROOT_DIR/scripts/setup-qdrant.sh" "$PKG_ROOT/usr/lib/pizzawave
 install -m 0755 "$ROOT_DIR/scripts/pizzawave_setup_admin.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/pizzawave_setup_admin.sh"
 install -m 0755 "$ROOT_DIR/scripts/pizzawave_configure_callstream.py" "$PKG_ROOT/usr/lib/pizzawave/scripts/pizzawave_configure_callstream.py"
 install -m 0755 "$ROOT_DIR/scripts/setup_trunk_recorder.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/setup_trunk_recorder.sh"
+install -m 0755 "$ROOT_DIR/scripts/prepare_trunk_recorder_source.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/prepare_trunk_recorder_source.sh"
+install -m 0644 "$ROOT_DIR/scripts/native-dependencies.lock" "$PKG_ROOT/usr/lib/pizzawave/scripts/native-dependencies.lock"
+install -d -m 0755 "$PKG_ROOT/usr/lib/pizzawave/scripts/patches"
+install -m 0644 "$ROOT_DIR/scripts/patches/"*.patch "$PKG_ROOT/usr/lib/pizzawave/scripts/patches/"
 install -m 0755 "$ROOT_DIR/scripts/tr_tune.sh" "$PKG_ROOT/usr/lib/pizzawave/scripts/tr_tune.sh"
 install -m 0755 "$ROOT_DIR/scripts/prime_tr_health.py" "$PKG_ROOT/usr/lib/pizzawave/scripts/prime_tr_health.py"
 

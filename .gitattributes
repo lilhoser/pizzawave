@@ -6,6 +6,8 @@ scripts/pizzawave text eol=lf
 *.py text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+*.lock text eol=lf
+*.patch text eol=lf whitespace=-blank-at-eol
 *.json text eol=lf
 *.ts text eol=lf
 *.tsx text eol=lf

@@ -29,9 +29,9 @@ VAR_LOG="/var/log/trunk-recorder"
 PLUGIN_DIR_NAME="callstream"
 PLUGIN_SO="/usr/local/lib/trunk-recorder/lib${PLUGIN_DIR_NAME}.so"
 BINARY="/usr/local/bin/trunk-recorder"
-TRUNK_REPO="https://github.com/TrunkRecorder/trunk-recorder.git"
-PLUGIN_REPO="https://github.com/lilhoser/callstream.git"
 SCRIPT_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NATIVE_PREPARE_SCRIPT="$SCRIPT_SELF_DIR/prepare_trunk_recorder_source.sh"
+NATIVE_LOCK_FILE="$SCRIPT_SELF_DIR/native-dependencies.lock"
 
 # Detect real user's home (works with sudo)
 if [ -n "${SUDO_USER:-}" ]; then
@@ -42,7 +42,9 @@ else
     REAL_HOME="$HOME"
 fi
 
+SOURCE_ROOT="${REAL_HOME}/tr5/pizzawave-native-sources"
 SOURCE_DIR="${REAL_HOME}/tr5/trunk-recorder"
+BUILD_ROOT="${REAL_HOME}/tr5/pizzawave-native-builds"
 BUILD_DIR="${REAL_HOME}/tr5/trunk-build"
 
 # TMUX live logs viewer
@@ -104,8 +106,17 @@ run_status_audit() {
             echo " MISSING - $f"
         fi
     done
+    echo -e "\nâ†’ Native build provenance:"
+    for f in "$BINARY.provenance.json" "$PLUGIN_SO.provenance.json"; do
+        if [[ -f "$f" ]]; then
+            echo " OK - $f"
+            cat "$f"
+        else
+            echo " MISSING - $f"
+        fi
+    done
     echo -e "\n→ Source & build directories:"
-    for d in "$SOURCE_DIR" "$BUILD_DIR"; do
+    for d in "$SOURCE_DIR" "$BUILD_DIR" "$SOURCE_ROOT" "$BUILD_ROOT"; do
         if [[ -d "$d" ]]; then
             echo " OK - $d exists"
             if [[ -d "$SOURCE_DIR/user_plugins/$PLUGIN_DIR_NAME" ]]; then
@@ -228,8 +239,9 @@ if [[ $DO_CLEAN -eq 0 && $DO_BUILD -eq 0 && $DO_SERVICE -eq 0 && $DO_STATUS -eq 
     DO_SERVICE=1
 fi
 
-# Require config & talkgroups for service/build actions
-if [[ $DO_SERVICE -eq 1 || ( $DO_BUILD -eq 1 && $DO_SERVICE -eq 0 && $DO_CLEAN -eq 0 && $DO_STATUS -eq 0 ) ]]; then
+# Config and talkgroups are service inputs. A build-only action deliberately
+# does not touch the current service configuration.
+if [[ $DO_SERVICE -eq 1 ]]; then
     if [[ -z "$CONFIG_SOURCE" || ! -f "$CONFIG_SOURCE" ]]; then
         echo "Error: --config <path> is required and must exist."
         print_usage
@@ -307,34 +319,59 @@ if [[ $DO_BUILD -eq 1 ]]; then
         libhackrf-dev librtlsdr-dev libairspy-dev libbladerf-dev libuhd-dev \
         portaudio19-dev tmux
 
-    echo "=== Trunk Recorder ==="
-    if [[ ! -d "$SOURCE_DIR" ]]; then
-        git clone "$TRUNK_REPO" "$SOURCE_DIR"
-    else
-        git -C "$SOURCE_DIR" pull --ff-only
+    echo "=== Preparing pinned Trunk Recorder + callstream source ==="
+    if [[ ! -x "$NATIVE_PREPARE_SCRIPT" || ! -f "$NATIVE_LOCK_FILE" ]]; then
+        echo "Error: pinned native dependency helper or lock file is missing from $SCRIPT_SELF_DIR"
+        exit 1
     fi
-
-    echo "=== callstream plugin ==="
-    USER_PLUGINS_DIR="$SOURCE_DIR/user_plugins"
-    PLUGIN_DIR="$USER_PLUGINS_DIR/callstream"
-    mkdir -p "$USER_PLUGINS_DIR"
-    if [[ ! -d "$PLUGIN_DIR" ]]; then
-        git clone "$PLUGIN_REPO" "$PLUGIN_DIR"
-    else
-        git -C "$PLUGIN_DIR" pull --ff-only
-    fi
-
-    # Clean old plugins/ location if exists
-    rm -rf "$SOURCE_DIR/plugins/callstream" 2>/dev/null || true
+    SOURCE_DIR="$("$NATIVE_PREPARE_SCRIPT" --source-root "$SOURCE_ROOT" --print-source-dir)"
+    "$NATIVE_PREPARE_SCRIPT" --source-root "$SOURCE_ROOT"
 
     echo "=== Building ==="
-    mkdir -p "$BUILD_DIR"
+    mkdir -p "$BUILD_ROOT"
+    BUILD_DIR="$(mktemp -d "$BUILD_ROOT/build.XXXXXXXX")"
+    cleanup_build_dir() {
+        rm -rf -- "$BUILD_DIR"
+    }
+    trap cleanup_build_dir EXIT
     cd "$BUILD_DIR"
-    cmake "$SOURCE_DIR"
-    make -j$(nproc)
+    cmake -DBUILD_TESTING=ON "$SOURCE_DIR"
+    make -j"$(nproc)"
+    ctest --output-on-failure
     make install
     ldconfig
-    echo "Build complete."
+
+    if [[ ! -x "$BINARY" || ! -f "$PLUGIN_SO" ]]; then
+        echo "Error: build completed without the expected trunk-recorder binary and callstream plugin."
+        exit 1
+    fi
+    # shellcheck source=native-dependencies.lock
+    source "$NATIVE_LOCK_FILE"
+    PROVENANCE_TMP="$(mktemp)"
+    cat > "$PROVENANCE_TMP" << EOF
+{
+  "schemaVersion": 1,
+  "installedAtUtc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "trunkRecorder": {
+    "repository": "$TRUNK_RECORDER_REPOSITORY",
+    "commit": "$TRUNK_RECORDER_COMMIT",
+    "patch": "$TRUNK_RECORDER_PATCH",
+    "patchSha256": "$TRUNK_RECORDER_PATCH_SHA256",
+    "binarySha256": "$(sha256sum "$BINARY" | awk '{print $1}')"
+  },
+  "callstream": {
+    "repository": "$CALLSTREAM_REPOSITORY",
+    "commit": "$CALLSTREAM_COMMIT",
+    "patch": null,
+    "patchSha256": null,
+    "binarySha256": "$(sha256sum "$PLUGIN_SO" | awk '{print $1}')"
+  }
+}
+EOF
+    install -m 0644 "$PROVENANCE_TMP" "$BINARY.provenance.json"
+    install -m 0644 "$PROVENANCE_TMP" "$PLUGIN_SO.provenance.json"
+    rm -f "$PROVENANCE_TMP"
+    echo "Build complete. Installed provenance: $BINARY.provenance.json and $PLUGIN_SO.provenance.json"
 fi
 
 # ────────────────────────────────────────────────────────────────────────────

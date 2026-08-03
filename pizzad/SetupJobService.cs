@@ -669,11 +669,11 @@ public sealed class SetupJobService : IHostedService
     {
         var script = FindSetupTrScript();
         if (string.IsNullOrWhiteSpace(script))
-            throw new FileNotFoundException("setup_trunk_recorder.sh was not found in /opt/pizzawave/scripts or the application directory.");
+            throw new FileNotFoundException("setup_trunk_recorder.sh was not found in a PizzaWave script directory or the application directory.");
         await LogAsync(jobId, "info", "Backing up existing trunk-recorder files before source-build.", ct);
         await RunAdminHelperAsync(jobId, "backup-existing-tr", ct);
-        await LogAsync(jobId, "info", $"Running {script}", ct);
-        await RunCommandAsync(jobId, "bash", $"-lc \"perl -pi -e 's/\\r$//' '{script}' && chmod +x '{script}' && '{script}'\"", ct);
+        await LogAsync(jobId, "info", $"Running {script} --build with locked native dependency commits and verified patches.", ct);
+        await RunAdminHelperAsync(jobId, "build-tr-source", ct);
         await _database.UpdateJobAsync(jobId, "completed", 6, 6, 0, "TR source-build helper completed.", false, true, ct);
         await _events.PublishAsync("job_updated", new { jobId, status = "completed" }, ct);
     }
@@ -798,6 +798,7 @@ public sealed class SetupJobService : IHostedService
     {
         var candidates = new[]
         {
+            "/usr/lib/pizzawave/scripts/setup_trunk_recorder.sh",
             "/opt/pizzawave/scripts/setup_trunk_recorder.sh",
             Path.Combine(AppContext.BaseDirectory, "scripts", "setup_trunk_recorder.sh"),
             Path.Combine(AppContext.BaseDirectory, "setup_trunk_recorder.sh")

@@ -167,13 +167,22 @@ mkdir -p "$INSTALL_ROOT" "$SCRIPT_ROOT" "$CONFIG_DIR" "$DATA_DIR/audio" "$DATA_D
 find "$INSTALL_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 cp -a "$PUBLISH_DIR"/. "$INSTALL_ROOT"/
 chmod 0755 "$INSTALL_ROOT/pizzad" || true
-for helper in setup_trunk_recorder.sh tr_tune.sh setup-lmstudio.sh setup-faster-whisper.sh pizzawave_setup_admin.sh; do
+for helper in setup_trunk_recorder.sh prepare_trunk_recorder_source.sh tr_tune.sh setup-lmstudio.sh setup-faster-whisper.sh pizzawave_setup_admin.sh; do
   if [[ -f "$SCRIPT_DIR/$helper" ]]; then
     cp "$SCRIPT_DIR/$helper" "$SCRIPT_ROOT/$helper"
     perl -pi -e 's/\r$//' "$SCRIPT_ROOT/$helper"
     chmod 0755 "$SCRIPT_ROOT/$helper"
   fi
 done
+if [[ -f "$SCRIPT_DIR/native-dependencies.lock" ]]; then
+  cp "$SCRIPT_DIR/native-dependencies.lock" "$SCRIPT_ROOT/native-dependencies.lock"
+  chmod 0644 "$SCRIPT_ROOT/native-dependencies.lock"
+fi
+if [[ -d "$SCRIPT_DIR/patches" ]]; then
+  mkdir -p "$SCRIPT_ROOT/patches"
+  cp "$SCRIPT_DIR/patches/"*.patch "$SCRIPT_ROOT/patches/"
+  chmod 0644 "$SCRIPT_ROOT/patches/"*.patch
+fi
 
 if [[ -f "$SCRIPT_ROOT/pizzawave_setup_admin.sh" ]]; then
   cat > /etc/sudoers.d/pizzawave-setup <<'SUDOERS'

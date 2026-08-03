@@ -760,9 +760,29 @@ print(f"Installed auth token at {dest}.")
 PY
 }
 
+build_tr_source() {
+  local candidate
+  for candidate in \
+    /opt/pizzawave/pizzad/scripts/setup_trunk_recorder.sh \
+    /opt/pizzawave/scripts/setup_trunk_recorder.sh \
+    /usr/lib/pizzawave/scripts/setup_trunk_recorder.sh; do
+    if [[ -f "$candidate" ]]; then
+      perl -pi -e 's/\r$//' "$candidate"
+      chmod 0755 "$candidate"
+      "$candidate" --build
+      return
+    fi
+  done
+  echo "setup_trunk_recorder.sh was not found in a PizzaWave install location." >&2
+  exit 1
+}
+
 case "$ACTION" in
   backup-existing-tr)
     backup_existing_tr
+    ;;
+  build-tr-source)
+    build_tr_source
     ;;
   remove-legacy-apps)
     remove_legacy_apps
@@ -825,7 +845,7 @@ case "$ACTION" in
     install_auth_token "$@"
     ;;
   *)
-    echo "Usage: $0 {backup-existing-tr|remove-legacy-apps|stop-tr|start-tr|install-tr-watchdog|record-tr-fault|stop-calibration|restart-tr|restart-qdrant|patch-callstream|detect-sdrs|install-tr-file|read-tr-config-artifact|restart-pizzad|install-sdr-tools|install-diagnostic-tools|install-qdrant|install-pizzad-config|apply-staged-restore|reset-site-files|install-auth-token}" >&2
+    echo "Usage: $0 {backup-existing-tr|build-tr-source|remove-legacy-apps|stop-tr|start-tr|install-tr-watchdog|record-tr-fault|stop-calibration|restart-tr|restart-qdrant|patch-callstream|detect-sdrs|install-tr-file|read-tr-config-artifact|restart-pizzad|install-sdr-tools|install-diagnostic-tools|install-qdrant|install-pizzad-config|apply-staged-restore|reset-site-files|install-auth-token}" >&2
     exit 2
     ;;
 esac
