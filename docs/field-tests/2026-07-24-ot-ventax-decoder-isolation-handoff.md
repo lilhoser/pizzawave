@@ -649,6 +649,92 @@ result upgrades the source-affinity finding from a short mechanistic check to
 strong live evidence that cross-source graph reconstruction caused the prior
 shared-pipeline resets and scheduler hang.
 
+### Hamilton CQPSK loop exact-sample proof and production trial
+
+On 2026-08-04, the slower CQPSK loop candidate was tested as an opt-in,
+per-system Trunk Recorder setting. The candidate used Gardner `gain_mu`
+`0.0125`, Costas alpha `0.004`, and omega-relative limit `0.1`; stock values
+were `0.025`, `0.008`, and `0.1`. Earlier screening on the same spare dongle
+and RF path favored the candidate on Hamilton but did not remove changing-RF
+as a sequential-test confound, so it was not sufficient for production by
+itself.
+
+The exact-sample proof used an OT-native build based on the exact deployed
+source/ABI lineage at commit
+`d64f6d3bf7af924aa6c16936ff2b09bc19908d40`. Experiment commit
+`cdff4e97` added independently configurable live and passive-shadow QPSK loop
+parameters while preserving stock defaults. The installed binary and decoder
+library SHA-256 values were respectively
+`212e0c06deb03453c1832940b31a9b2a2d8e3a6a7f7aa352fb7461feaa84e8f8`
+and
+`ac5d231a4a7a7663497e7555b0d4c90be72232c60920f5445ab2bdbd48bce081`.
+An initial binary built from the wrong older lineage failed at plugin startup;
+the automatic health gate restored the prior executable and config. That
+startup failure is excluded from RF evidence and reinforces the requirement to
+build experiments on the exact production ABI lineage.
+
+The passive phase kept Hamilton production live decoding on stock settings and
+ran the tuned passive shadow from the identical source samples. A strict
+same-IQ gate accepted only seconds where both paths were on 855.2125 MHz and
+their source-input and channelized-sample counters matched. Across 109 accepted
+seconds, stock live averaged 13.25 messages/second and tuned shadow averaged
+15.56; tuned won 62 paired seconds, stock won 29, and 18 tied. Stock recorded
+two zero seconds and a four-second longest run at 0-3 messages/second, compared
+with one zero and a two-second longest low run for tuned. In the neutral subset
+where the pair mean was at most 10, the paths were effectively tied (5.55
+stock versus 5.39 tuned), so this phase supported a bounded trial rather than a
+universal decoder conclusion. The filtered evidence and analysis SHA-256
+values are respectively
+`821060ed85df6fc35865cab426c39f970043f16781d3b40b87415b90833a8dd6`
+and
+`df9f90dbcc451f8aab5176054c7d2f9c2ff84b10adf45df45004ff15bede82c1`.
+
+The bounded production trial ran for 60 minutes beginning at 14:12:09 EDT.
+Only Hamilton live decoding used the tuned loop; its passive shadow remained
+stock. The same-IQ primary-channel gate accepted 1269 seconds. Tuned live
+averaged 22.35 messages/second versus 19.56 for stock shadow and won 796 paired
+seconds; stock won 177 and 296 tied. Tuned had 23 seconds at 0-3 versus 41 for
+stock, with longest low runs of one and three seconds respectively. In the
+neutral pair-mean-at-most-10 subset, tuned averaged 7.63 versus 6.32 for stock.
+Across all Hamilton production telemetry during the hour, 241 samples averaged
+19.68, the minimum was 4, and none were at or below 3. Cleveland remained
+stable across 239 samples at mean 39.97 and minimum 39. Trunk Recorder and
+PizzaWave remained active with zero restart or fatal event, and Cleveland,
+Hamilton, and North Bradley identities remained correct. The full journal,
+paired analysis, and system analysis SHA-256 values are respectively
+`537d7c480778d51b2d7d25ab370490ea96db4445c2944a05f805236aba6693bc`,
+`a72d8e9541cd40831131c4063782bbc9f2a21ebf9bd77249bd54ecec0e3196a7`,
+and
+`3542eeb984277f38dd2e1135ce7b9f0a61de9ade799fb0c7fb4b9e80059c330a`.
+
+The trial supports retaining the slower loop for Hamilton only. It does not
+support changing Trunk Recorder defaults, applying the values to North Bradley
+or Cleveland without their own exact-sample gates, or replacing Trunk Recorder
+with OP25. Source affinity remains a separate necessary protection against
+cross-system graph reconstruction. Exact rollback state is preserved under
+`/var/backups/pizzawave/hamilton-loop-shadow-20260804T180000Z` and
+`/var/backups/pizzawave/hamilton-loop-production-20260804T181200Z`; local
+evidence is under
+`C:\temp\pizzawave-rf\ot-hamilton-loop-production-trial`.
+
+The retained production setting then completed its first overnight observation
+from 14:12:10 EDT on 2026-08-04 through 12:55:37 EDT on 2026-08-05. The strict
+same-IQ, same-primary-channel gate accepted 49813 paired seconds. Tuned live
+averaged 12.17 messages/second versus 9.67 for the stock passive shadow and won
+29768 seconds; stock won 11129 and 8916 tied. Tuned recorded 102 zero seconds
+and 7164 seconds at 0-3 messages/second, compared with 168 and 10164 for stock.
+Both paths had an eight-second longest low run. In the neutral
+pair-mean-at-most-10 subset, tuned averaged 6.48 versus 5.09 for stock. The
+unfiltered RF-analysis window was worse than the preceding equal window, so
+the slower loop is a mitigation rather than a cure for the nighttime channel
+impairment. The compressed journal and paired-analysis SHA-256 values are
+respectively
+`5bb398e972b214ea339c3de0433d05fc07595ef442d08bd323a2e49380333e99`
+and
+`00579587a2b1afd407c648b20fe61ec1346102e7190284aa9f1f28aa542b0e7a`.
+This overnight result removes the remaining Hamilton observation gate and
+supports retaining the site-specific setting.
+
 ## Purchase gate
 
 Buy nothing before Stage 1.
@@ -674,6 +760,7 @@ The durable experiment record is split intentionally:
 | Current conclusions, remaining work, isolation rules, and ownership boundaries | [../work-queue.md](../work-queue.md) |
 | OT antenna facts, no-purchase decision, Ventax host suitability, two-stage variable isolation, independent USB topology, results, and acceptance matrix | This experiment record |
 | Exact-production-source shadow method, three-event gate, OP25 replays, fresh production-binary TR replay, live pipeline counters, and cross-system retune coupling | This experiment record |
+| Hamilton same-dongle screening, exact-sample stock-versus-tuned shadow proof, bounded production trial, retained site-specific setting, and rollback lineage | This experiment record |
 
 The field log now also records previously omitted North Bradley capture
 `1784732918021` with source-verified hashes. Routine healthy monitor polls and
@@ -683,15 +770,19 @@ restart, quota, and exclusion conclusions.
 
 ## Next step
 
-Promote the experimental guard into a reviewed Trunk Recorder change with
-configuration documentation and focused tests, while retaining the current OT
-deployment for observation. PizzaWave owns ensuring that every control channel
-provided during Setup fits the site's chosen source; Trunk Recorder owns safely
-handling control channels it later discovers at runtime. The prior unguarded
-instrumented hour already supplies the control window, so do not deliberately
-restore the demonstrated cross-source graph-rebuild hazard merely to repeat
-it. This is not a retune grace period, and it does not support replacing Trunk
-Recorder's P25 decoder.
+Retain Hamilton's opt-in slower loop. Run the next site-specific gate on North
+Bradley with production left on stock loop values and only its passive
+same-sample shadow using `gain_mu=0.0125` and Costas alpha `0.004`. Observe one
+complete natural nighttime deterioration and recovery, and promote those values
+only if the tuned shadow materially reduces low and zero decoding without
+damaging healthy periods. In parallel, promote the per-system loop settings and
+source-affinity guard as separate reviewed Trunk Recorder changes with
+configuration documentation and focused tests. Do not change global loop
+defaults. PizzaWave owns ensuring that every control channel provided during
+Setup fits the site's chosen source; Trunk Recorder owns safely handling
+control channels it later discovers at runtime. Do not restore the demonstrated
+cross-source graph-rebuild hazard merely to repeat it. These changes are not a
+retune grace period and do not replace Trunk Recorder's P25 decoder.
 
 ## Trunk Recorder source access from Ventax
 
@@ -746,15 +837,17 @@ one of these is true:
   dongle, host/USB path, or decoder;
 - reproducible foreign NAC/site evidence identifies a co-channel source.
 
-The first and third criteria are now satisfied, and the same-production-source
-shadow discriminator has completed. The fresh production-binary replay did not
+The first and third criteria are now satisfied, and both the
+same-production-source shadow discriminator and Hamilton's exact-sample loop
+comparison have completed. The fresh production-binary replay did not
 reproduce the sustained live failure, so replacing the control-channel decoder
-is not supported. Live instrumentation found a shared-scheduler disturbance
-instead: cross-source retunes for one system repeatedly reset accounting and
-depress decoding in an unrelated healthy system. The next boundary is
-eliminating that unnecessary cross-system graph churn while preserving
-configured control-channel lists. Adding gain, filtering, or recovery grace as
-the primary remedy is also not supported by this experiment.
+is not supported. Live instrumentation instead found a shared-scheduler
+disturbance: cross-source retunes for one system repeatedly reset accounting
+and depress decoding in an unrelated healthy system. Source affinity addresses
+that boundary. Separately, Hamilton's same-IQ proof and 60-minute production
+trial support its retained, site-specific slower CQPSK loop. They do not
+support a global default change. Gain, filtering, or recovery grace as the
+primary general remedy remains unsupported.
 
 ## External references
 
