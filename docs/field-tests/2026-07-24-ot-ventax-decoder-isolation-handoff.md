@@ -735,6 +735,44 @@ and
 This overnight result removes the remaining Hamilton observation gate and
 supports retaining the site-specific setting.
 
+### North Bradley same-IQ loop rejection
+
+On 2026-08-05, North Bradley received its required site-specific gate. Live
+production remained on stock CQPSK values while only the fixed-primary passive
+shadow used Gardner `gain_mu=0.0125`, Costas alpha `0.004`, and omega-relative
+limit `0.1`. Source affinity, RF settings, gain, source centers, configured
+control channels, Hamilton, Cleveland, and PizzaWave were unchanged. The exact
+pre-test config, binary, and decoder library are preserved under
+`/var/backups/pizzawave/north-bradley-loop-shadow-20260805T175226Z`.
+
+The experiment began during an already-degraded period, so that opening state
+was not treated as a healthy boundary. Across 3730 strict same-primary,
+same-source-input, and same-channelized-sample seconds, stock live averaged
+2.78 messages/second and reached 42; the tuned shadow averaged 0.98 and never
+exceeded 1. The tuned shadow remained at 0-3 for all 3730 seconds, compared
+with 3272 stock seconds. Stock won 619 paired seconds, the paths tied on 3043,
+and tuned won 68. At 16:39:31 EDT, stock began a 26-second run at or above
+25 messages/second while tuned remained at or below 3. This exceeded the
+predeclared ten-second disqualification gate and ended the test without waiting
+for another deterioration.
+
+The three shadow-only settings were then removed by restoring the exact config
+backup, and Trunk Recorder was restarted once. With both paths back on stock
+values, North Bradley live and shadow immediately acquired the correct
+`BEE00/2A5/2AD`, RFSS 2, site 26 identity and tracked together through 30-39
+messages/second. Trunk Recorder and PizzaWave were active with zero post-restore
+restart, Hamilton retained its site-specific live setting, and source affinity
+remained enabled. The filtered journal and analysis SHA-256 values are
+respectively
+`e1c4c04de146edda01978dad7636e4807a9788783550c4e2ef16e07b1f56bd4c`
+and
+`8baba263ac4b30e5713a238c32d603dd30e01cb0bbf3db48b55092923e3701a8`.
+
+This result rejects copying Hamilton's slower loop values to North Bradley.
+It also validates the site-specific configuration boundary proposed upstream:
+the same loop values can materially help one CQPSK site and prevent another
+site's passive decoder from acquiring the same samples.
+
 ## Purchase gate
 
 Buy nothing before Stage 1.
@@ -760,7 +798,7 @@ The durable experiment record is split intentionally:
 | Current conclusions, remaining work, isolation rules, and ownership boundaries | [../work-queue.md](../work-queue.md) |
 | OT antenna facts, no-purchase decision, Ventax host suitability, two-stage variable isolation, independent USB topology, results, and acceptance matrix | This experiment record |
 | Exact-production-source shadow method, three-event gate, OP25 replays, fresh production-binary TR replay, live pipeline counters, and cross-system retune coupling | This experiment record |
-| Hamilton same-dongle screening, exact-sample stock-versus-tuned shadow proof, bounded production trial, retained site-specific setting, and rollback lineage | This experiment record |
+| Hamilton same-dongle screening, exact-sample stock-versus-tuned shadow proof, bounded production trial, retained site-specific setting, North Bradley same-IQ rejection, and rollback lineage | This experiment record |
 
 The field log now also records previously omitted North Bradley capture
 `1784732918021` with source-verified hashes. Routine healthy monitor polls and
@@ -770,14 +808,13 @@ restart, quota, and exclusion conclusions.
 
 ## Next step
 
-Retain Hamilton's opt-in slower loop. Run the next site-specific gate on North
-Bradley with production left on stock loop values and only its passive
-same-sample shadow using `gain_mu=0.0125` and Costas alpha `0.004`. Observe one
-complete natural nighttime deterioration and recovery, and promote those values
-only if the tuned shadow materially reduces low and zero decoding without
-damaging healthy periods. In parallel, promote the per-system loop settings and
-source-affinity guard as separate reviewed Trunk Recorder changes with
-configuration documentation and focused tests. Do not change global loop
+Retain Hamilton's opt-in slower loop and North Bradley's stock loop. Do not
+reuse loop values across sites without an exact-sample gate. The per-system
+loop-setting proposal is now under upstream review; prepare source affinity as
+a separate reviewed Trunk Recorder change with explicit multi-source semantics,
+configuration documentation, and focused tests. Any further North Bradley loop
+candidate must first beat stock on its retained IQ across both healthy and
+degraded windows before another passive live test. Do not change global loop
 defaults. PizzaWave owns ensuring that every control channel provided during
 Setup fits the site's chosen source; Trunk Recorder owns safely handling
 control channels it later discovers at runtime. Do not restore the demonstrated
