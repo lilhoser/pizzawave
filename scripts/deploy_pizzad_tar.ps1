@@ -249,7 +249,9 @@ if (($HostName -match "(^|@)(192\.168\.1\.173|omicrontheta)(:|$)") -and $Rid -ne
     throw "Refusing to deploy RID '$Rid' to OT ($HostName). OT is x86_64; use -Rid linux-x64."
 }
 
-$backendSourceHash = Get-TreeHash (Join-Path $root "pizzad") @("web", "wwwroot", "node_modules", "bin", "obj")
+$backendTreeHash = Get-TreeHash (Join-Path $root "pizzad") @("web", "wwwroot", "node_modules", "bin", "obj")
+$lmStudioSetupSourceHash = (Get-FileHash -LiteralPath (Join-Path $root "scripts\setup-lmstudio.sh") -Algorithm SHA256).Hash.ToLowerInvariant()
+$backendSourceHash = Get-StringHash "$backendTreeHash`nsetup-lmstudio.sh`t$lmStudioSetupSourceHash`n"
 $remoteManifestText = ssh @sshArgs $HostName "sudo cat /opt/pizzawave/pizzad/.pizzawave-deploy.json 2>/dev/null || true"
 Assert-NativeCommand "remote deployment-state read"
 $remoteManifest = $null
@@ -447,6 +449,11 @@ if sudo test -f /opt/pizzawave/pizzad/scripts/pizzawave_setup_admin.sh; then
   sudo install -d -m 0755 /usr/lib/pizzawave/scripts
   sudo perl -pi -e 's/\r$//' /opt/pizzawave/pizzad/scripts/pizzawave_setup_admin.sh
   sudo install -m 0755 -o root -g root /opt/pizzawave/pizzad/scripts/pizzawave_setup_admin.sh /usr/lib/pizzawave/scripts/pizzawave_setup_admin.sh
+fi
+if sudo test -f /opt/pizzawave/pizzad/scripts/setup-lmstudio.sh; then
+  sudo install -d -m 0755 /usr/lib/pizzawave/scripts
+  sudo perl -pi -e 's/\r$//' /opt/pizzawave/pizzad/scripts/setup-lmstudio.sh
+  sudo install -m 0755 -o root -g root /opt/pizzawave/pizzad/scripts/setup-lmstudio.sh /usr/lib/pizzawave/scripts/setup-lmstudio.sh
 fi
 if sudo test -f /opt/pizzawave/pizzad/scripts/tr_tune.sh; then
   sudo install -d -m 0755 /usr/lib/pizzawave/scripts

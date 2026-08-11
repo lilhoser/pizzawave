@@ -7,6 +7,7 @@ set -euo pipefail
 
 DEFAULT_MODEL="qwen3.6-35b-a3b@q8_0"
 SERVICE_PATH="/etc/systemd/system/lmstudio.service"
+LEGACY_EMBEDDING_DROPIN="/etc/systemd/system/lmstudio.service.d/load-embedding.conf"
 LMS_WRAPPER_PATH="/usr/local/bin/lms"
 
 print_usage() {
@@ -142,6 +143,7 @@ from urllib.request import urlopen
 
 CONFIG = '/etc/pizzawave/pizzad.json'
 LMS = '$LMS_BIN'
+TARGET_USER = '$TARGET_USER'
 
 try:
     with open(CONFIG) as f:
@@ -184,7 +186,10 @@ else:
     sys.exit(1)
 
 print(f'Loading local embedding model {model}')
-subprocess.run([LMS, 'load', model, '--identifier', model, '--yes'], check=True)
+subprocess.run(
+    ['sudo', '-u', TARGET_USER, '-H', LMS, 'load', model, '--identifier', model, '--yes'],
+    check=True,
+)
 EOF
   chmod 0755 /usr/local/bin/pizzawave-load-local-embedding-model
 fi
@@ -261,17 +266,23 @@ echo "==> Writing systemd unit: $SERVICE_PATH"
   echo "ExecStart=$LMS_BIN server start --bind 127.0.0.1 --port 1234"
   if [[ "$PRELOAD_MODEL" == "true" ]]; then
     echo "ExecStartPost=/usr/local/bin/pizzawave-check-lmstudio-chat-model $MODEL_ID"
-    echo "Restart=on-failure"
-    echo "RestartSec=20s"
   fi
+  echo "Restart=on-failure"
+  echo "RestartSec=20s"
   if [[ "$LOCAL_EMBEDDING_AUTOLOAD" == "true" ]]; then
-    echo "ExecStartPost=/usr/local/bin/pizzawave-load-local-embedding-model"
+    echo "ExecStartPost=+/usr/local/bin/pizzawave-load-local-embedding-model"
   fi
   echo "ExecStop=$LMS_BIN daemon down"
   echo ""
   echo "[Install]"
   echo "WantedBy=multi-user.target"
 } > "$SERVICE_PATH"
+
+if [[ -f "$LEGACY_EMBEDDING_DROPIN" ]] && grep -Fq "pizzawave-load-local-embedding-model" "$LEGACY_EMBEDDING_DROPIN"; then
+  echo "==> Removing superseded local embedding preload drop-in"
+  rm -f "$LEGACY_EMBEDDING_DROPIN"
+  rmdir "$(dirname "$LEGACY_EMBEDDING_DROPIN")" 2>/dev/null || true
+fi
 
 echo "==> Reloading systemd and enabling service"
 systemctl daemon-reload
