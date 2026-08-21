@@ -1,6 +1,6 @@
 # PizzaWave Work Queue
 
-Last reconciled: 2026-07-22 11:13 EDT
+Last reconciled: 2026-08-21
 
 This is the single queue for PizzaWave implementation and deployment work.
 Only one item may be `Active` at a time. Investigation sessions may work
@@ -40,7 +40,14 @@ Cross-repository source state:
   `codex/collapse-auto-rearm-rpi` at `2f6ca268`. The configured six-hour quota
   is reconstructed from completed and interrupted files across restarts.
 
-## Active
+## RF Investigation Status
+
+The OT/RPI RF analysis is closed without a root-cause resolution. The detailed
+record below is retained as completed evidence, not as an active experiment.
+OT will be re-evaluated after the receiving equipment and antenna rig move from
+the pumphouse to the main house. RPI/Raymond requires a separate future effort,
+which may also include antenna relocation. No RF experiment is currently
+active.
 
 - Initial-collapse flight recording and paired-wide analysis are complete. RPI
   captured a shadow-instrumented
@@ -233,7 +240,18 @@ Cross-repository source state:
 
 ## Pending
 
-1. RF stabilization:
+1. RF analysis is closed; physical re-evaluation is deferred:
+   - no RF experiment is active. The retained findings below document the
+     completed analysis and do not authorize another software, filter, MCA,
+     receiver, or small antenna-position trial;
+   - re-examine OT RF quality after the complete receiving equipment and
+     antenna rig move from the pumphouse to the main house. Preserve a fixed
+     pre-move baseline and compare matching daytime, nighttime-decline, and
+     recovery windows after the move while holding the remaining path and
+     decoder settings constant where practical;
+   - resume RPI/Raymond only as a separate future effort. Its physical work may
+     also include antenna relocation, but OT's relocation result must not be
+     treated as proof for RPI;
    - retain the post-quota paired result: Raymond capture `1784754504018`
      shows a short 6-10 dB received-channel dip followed by immediate
      fixed-primary recovery, while North Bradley capture `1784754546018`
@@ -243,12 +261,9 @@ Cross-repository source state:
      simulcast/multipath as the leading per-rig causes. The two triggers being
      42 seconds apart is a quota-selection artifact, not evidence of one shared
      interferer;
-   - for RPI, retain an 8-15 inch relocation as a later no-new-antenna
-     discriminator when the rig is physically available. For OT, do not
-     randomly move the 20-foot mast: the complete PCTEL MFBW7463 radiator is
-     already above the roofline. Follow the staged
+   - use the completed
      [OT Ventax decoder-isolation handoff](field-tests/2026-07-24-ot-ventax-decoder-isolation-handoff.md)
-     instead;
+     as the authoritative evidence and closure record;
    - retain OT North Bradley capture `1784584105012` as the completed cross-
      geography discriminator: its IQ power/CNR changed only about 0.4/0.5 dB,
      sample continuity was clean, and a fresh replay reproduced the low decode;
@@ -265,23 +280,24 @@ Cross-repository source state:
    - retain the completed control-only FSK4 result: it was operationally safe
      but the same-IQ replay did not reproduce a material advantage on its live
      event, so the exact CQPSK baseline was restored;
-   - on the next Raymond collapse, inspect near-valid P25 network-ID words for
-     Raymond NAC `2A4`, West NAC `2A2`, and Ashcroft NAC `2A0`, including words
-     that do not survive full-message CRC; independently confirm West's active
-     control channel if an MSWIN status source is available;
-   - on the next OT blip, compare the episode boundaries for North Bradley,
-     Hamilton, and Cleveland on the same host. Do not prioritize more OT
-     co-channel replay unless a nonlocal NAC or site identity appears; use the
-     retained IQ to characterize modulation-quality and changing simulcast-path
-     evidence instead;
-   - keep the available BPF-800-M as a later out-of-band-overload check, not the
-     next root-cause test: it cannot reject an in-band P25 transmitter on the
-     exact same frequency. Do not add an antenna or another live wide recorder;
-   - keep alternate-channel validation and Trunk Recorder retune grace as
-     secondary recovery work, not as the presumed root-cause fix.
+   - retain the completed offline blind-CMA equalizer rejection: a 40-run
+     screen and 32-run confirmation found no tap/step candidate that protected
+     healthy decoding while improving every degraded Hamilton and North Bradley
+     capture. Do not run the reserved holdouts or a live CMA trial. Expose
+     Gardner quality and carrier/timing error on unchanged same-IQ replay before
+     considering a synchronized or P25-trained equalizer;
+   - retain the completed loop diagnosis: carrier/constellation error separated
+     healthy from degraded same-IQ seconds consistently, while Gardner timing
+     error was weak and the clock never hit its omega bounds. Close broad
+     decoder sweeps. A second pre-clock AGC passed all six Hamilton healthy
+     holdouts and improved five of six degraded holdouts, but one degraded
+     capture regressed. The later passive same-IQ shadow rejected the second
+     AGC as a production remedy. Keep North Bradley stock;
+   - retain the Airspy, AGC, loop, equalizer, BPF-800-M, and MCA208M outcomes as
+     closed evidence. They are not pending root-cause experiments.
 2. Build the local incident membership model using
    [incident-model-training-handoff.md](incident-model-training-handoff.md).
-   Keep this work separate from RF stabilization.
+   Keep this work separate from the closed RF investigation record.
 3. Package 7: isolated Offline and Archive Calls workspaces.
 
 ## Archived work

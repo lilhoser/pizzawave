@@ -773,6 +773,535 @@ It also validates the site-specific configuration boundary proposed upstream:
 the same loop values can materially help one CQPSK site and prevent another
 site's passive decoder from acquiring the same samples.
 
+### Offline blind-CMA equalizer rejection
+
+On 2026-08-10, the next retained-IQ discriminator tested whether a simple
+blind constant-modulus adaptive equalizer could recover the channel-local
+modulation damage without changing production. Trunk Recorder experiment
+commit `57e32a3ddc1c20e11ccdea99977deccdb4591cee` added offline-only CMA tap
+count and step-size overrides ahead of the existing Gardner clock. The Release
+binary SHA-256 was
+`ce32213d860c4f8225a0b6402535942d59177b75507408028e0dc1777bfa30aa`;
+the decoder library remained
+`ac5d231a4a7a7663497e7555b0d4c90be72232c60920f5445ab2bdbd48bce081`.
+No live host, configuration, receiver, or service was contacted.
+
+The screen used two Hamilton and two North Bradley 90-second captures as a
+development set. Existing OP25 same-IQ output supplied independent per-second
+labels: at least 15 valid messages/second was healthy and at most 3 was
+degraded. Trunk Recorder's fixed-primary shadow was scored against those
+labels. Nine CMA combinations covered 1, 3, 7, and 15 taps with step sizes
+from `0.00001` through `0.0005`; the one-tap case was an amplitude-adaptation
+control. Forty screen runs completed with the correct local identity, clean
+EOF exit, and no foreign identity.
+
+No setting passed the predeclared gate of protecting healthy windows while
+improving every degraded capture. A 32-run confirmation repeated baseline,
+one-tap control, and the two closest multi-tap candidates twice on the same
+development files:
+
+| Candidate | Mean healthy delta vs baseline | Mean degraded delta vs baseline | Total valid-message delta | Degraded captures improved/regressed | Decision |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 1 tap, step `0.0001` | -6.173 msg/s | -0.002 msg/s | -1013 | 1 / 3 | Reject; adaptation alone materially damaged healthy decoding |
+| 3 taps, step `0.00001` | -0.345 msg/s | -2.123 msg/s | -46 | 2 / 2 | Reject; the least harmful healthy result still worsened degraded decoding overall |
+| 7 taps, step `0.0001` | -3.802 msg/s | +0.117 msg/s | -86 | 2 / 2 | Reject; the small aggregate degraded gain hid large site/capture regressions |
+
+The 7-tap confirmation shows why aggregate totals are insufficient. It
+improved degraded North Bradley seconds by 9.085 and 6.550 messages/second in
+the two captures, but it reduced degraded Hamilton decoding by 3.167 and
+12.000 messages/second. One North Bradley healthy subset also fell by 23.109
+messages/second. All 32 confirmation runs decoded the correct local identity
+and none produced a foreign identity, so the rejection is about robustness,
+not wrong-site acquisition.
+
+The twelve reserved captures were not opened as a holdout validation set
+because no candidate survived the development gate. Blind CMA is therefore
+not a passive-live or production candidate, and another blind tap/step sweep
+is not justified. This negative result does not disprove changing
+simulcast/multipath geometry; it shows that an untrained constant-modulus
+equalizer is not a safe general inverse for these CQPSK waveforms. The next
+decoder experiment must first expose the existing Gardner quality and bounded
+carrier/timing error trajectories during the same-IQ replay. Any later
+equalizer should be synchronized or trained from known P25 structure and must
+again pass healthy, degraded, and held-out gates.
+
+Artifacts are under
+`C:\temp\pizzawave-rf\ot-cqpsk-equalizer`. Screen manifest and analysis
+SHA-256 values are respectively
+`a46dceef08aad19b89a7f347d2970bcbbb0b7e93cf8d398d5bfc4ea32083c685`
+and
+`f8679bbfef034672724cd8238ea62805c900beee58ecd999f0ddf0208ae31645`.
+Confirmation manifest and analysis SHA-256 values are respectively
+`7deaf03ad16f637192614094108b71b9cfcc8399279ad813aac5fc0ce9f2f0af`
+and
+`820d126d95a1b7c99ce3dbe2ba2e4856667ea9e10f4d1a53cefcbb9a5f7d2ca7`.
+
+### Offline loop diagnosis and Hamilton AGC holdout
+
+The follow-up on 2026-08-10 instrumented the unchanged stock CQPSK decisions
+rather than trying another equalizer. Trunk Recorder experiment commit
+`0535b6f62b3ca2d2747a87342cd5631641a8997d` added offline-only one-second
+Gardner and Costas summaries and an independently enabled second feed-forward
+AGC trial. The exact validation binary SHA-256 was
+`1d1f684b3821257eee052f789b0032e804202fbf85bc2ad738580eb16e95f563`;
+the instrumented decoder-library SHA-256 was
+`ac656722a0b783d635461131e0d069992459641e100fbf7b7b08e73e30b4c25a`.
+Production was not contacted or changed.
+
+Four stock development replays produced 89 complete diagnostic seconds each.
+After excluding the first five acquisition seconds, 336 seconds remained,
+including 192 OP25-labeled healthy seconds and 78 degraded seconds. Carrier
+phase-detector error was the strongest consistent discriminator:
+
+| Metric | Healthy mean | Degraded mean | Separation AUC | Correlation with OP25 rate | Direction across all four captures |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Costas mean absolute error | 0.1836 | 0.2456 | 0.953 | -0.636 | Consistent |
+| Costas error RMS | 0.2449 | 0.3036 | 0.945 | -0.608 | Consistent |
+| Gardner error RMS | 0.4126 | 0.3852 | 0.601 | +0.198 | Weak |
+| Gardner omega-limit hits | 0 | 0 | 0.500 | none | No timing runaway observed |
+
+Gardner lock quality was useful within some captures but was not directionally
+consistent across both systems and had only 0.552 mean leave-one-capture-out
+balanced accuracy. Costas mean absolute error retained 0.667 and Costas RMS
+0.716 under the same holdout calculation. The bounded conclusion is that the
+retained failures present primarily as spreading/damage at the carrier and
+constellation stage, not a Gardner clock walking out of bounds. This does not
+mathematically distinguish dynamic simulcast/multipath from an exactly
+co-channel signal, but it independently corroborates channel-local modulation
+damage and rejects timing-loop runaway as the shared onset.
+
+Because the Costas detector is amplitude-dependent, a second fast
+feed-forward AGC immediately before timing recovery was tested as a controlled
+conditioning change. On the two-site development set it improved both
+Hamilton captures, including healthy and degraded labels, but slightly
+regressed degraded North Bradley in both captures. It was therefore treated as
+a Hamilton-only hypothesis and the six North Bradley files in the reserved
+holdout set remained unopened.
+
+The Hamilton validation then used all six previously untouched Hamilton
+captures, with two stock and two candidate runs per capture: 24 runs total.
+Every candidate run decoded the correct local identity and no foreign identity.
+Across the six capture medians, the extra AGC increased healthy-window decode
+by 0.952 messages/second with zero healthy capture regressions, increased
+degraded-window decode by 0.261 messages/second overall, and added 273 valid
+messages. Five degraded captures improved; one regressed by 1.545
+messages/second. This is enough to justify a Hamilton-only passive same-IQ live
+shadow, but not enough to approve live production decoding. It is explicitly
+not a global Trunk Recorder default and not a North Bradley candidate.
+
+Diagnostic analysis SHA-256 is
+`06cc9b8e3a172b4b1b5967bb71078a8ad8218148e80072929fc6c8dc8ca3c014`.
+The development AGC analysis SHA-256 is
+`23c0663e5e5ec863c9133ee3c699d7299e94c08e215c8cbd6a9b3b1780f4b226`.
+Hamilton holdout manifest and analysis SHA-256 values are respectively
+`5baa2db6a86bffd8c6aab4da93d7a0dc589c5433849180ff7ec150ff82598ede`
+and
+`5d6952b9fe566acf44dea2469e0484b2b3a85fd64c1f6c19f91ae43b6d1b2b7e`.
+
+### Hamilton passive second-AGC live rejection
+
+On 2026-08-10 the offline-only AGC hypothesis advanced to the required
+passive, same-IQ live comparison at OT. Hamilton production retained its
+approved slower loop (`gain_mu=0.0125`, Costas alpha `0.004`, omega scale
+`0.1`) with no second AGC. Only the fixed-primary shadow on 855.212500 MHz
+used the stock loop (`0.025`, `0.008`, `0.1`) plus the second feed-forward
+AGC. North Bradley, RF settings, source affinity, gain, source centers,
+control-channel lists, and PizzaWave were unchanged.
+
+An initial binary built against the wrong local ABI caused a libcallstream
+startup failure and was rolled back immediately. The valid observation used
+the ABI-matched binary SHA-256
+`107e1a42ad58881bf73743f8d7e3d7904680d08dabed0c98b02c52e4a610af45`,
+unchanged decoder-library SHA-256
+`ac5d231a4a7a7663497e7555b0d4c90be72232c60920f5445ab2bdbd48bce081`,
+and experiment config SHA-256
+`94ca265ff849f8a090361ee28932a46260ac683763250430ee5608a236dc9d46`.
+The valid run began at 2026-08-10 17:15:39 EDT. Trunk Recorder and PizzaWave
+remained active with zero automatic restarts or source-stop events, all six
+RTL-SDR devices remained present, and same-IQ telemetry advanced normally.
+
+The exact gate retained 2,119 seconds where both paths used 855.212500 MHz
+and had matching source-input and channelized sample counters. It included a
+natural 17-second healthy boundary, a three-second degraded interval, and a
+five-second recovered boundary. Production averaged 32.394 messages/second
+versus 30.684 for the AGC shadow; medians were 36 and 33. Production had zero
+zero-rate seconds and six seconds at or below 3, while the shadow had one zero
+and 11 seconds at or below 3. Production won 986 paired seconds, the paths tied
+for 828, and the shadow won 305. Within 1,631 healthy seconds (pair mean at
+least 25), production averaged 36.539 versus 35.009. Within 59 degraded
+seconds (pair mean at most 10), production averaged 7.305 versus 6.339.
+
+The candidate therefore failed both the safety and advantage requirements.
+Do not put the second AGC into Hamilton production and do not generalize it to
+North Bradley or a Trunk Recorder default. The exact pre-experiment binary and
+configuration were restored from
+`/var/backups/pizzawave/hamilton-agc-shadow-20260810T210812Z`; one deliberate
+restart returned both services healthy with zero restart count and advancing
+Hamilton telemetry. Restored binary and config SHA-256 values are respectively
+`212e0c06deb03453c1832940b31a9b2a2d8e3a6a7f7aa352fb7461feaa84e8f8`
+and `c4535a23faa9a4e34c40c30170d2d55028c26e6c37a011ca11a03aa61d09598d`.
+
+The preserved journal and same-IQ analysis SHA-256 values are respectively
+`59bd7870e5737fc0a10c5117086563cc74255ff16b2561916b62d064805b4fb7`
+and `5f073a36c73859632f16e080c0e23969a36ba223e586ea319ad06fadfb6d6dfa`.
+The live result overrules the small retained-IQ replay advantage: the added
+conditioning did not improve the real Hamilton path under simultaneous input.
+
+### Hamilton Airspy R2 receiver-substitution result
+
+The next passive test on 2026-08-11 substituted receiver hardware without
+changing OT production. Airspy R2 serial `637862DC2E457DD7` was connected to
+an unused output of the same MCA208M feeding the OT RTL-SDR array and decoded
+Hamilton on Ventax. The comparator used 10 MS/s, linearity gain 15, source
+center 854.743750 MHz, and fixed primary 855.212500 MHz. Its stock QPSK loop
+values (`0.025`, `0.008`, `0.1`) matched OT's fixed-primary RTL shadow so the
+intended variable was the receiver path rather than decoder tuning.
+
+Trunk Recorder comparator commit
+`a45de5f9ee6d898578144adea76a9a53b2e3f56c` added a replay-only fixed-control
+mode to prevent the passive process from learning and hopping to alternate
+Hamilton control channels. Its binary and config SHA-256 values were
+`0ffe8ad16b4d7f4b44ca9a7491b2f3b13c25593e3f347c8a594c202b0c26f94f`
+and `fae9bcb275b8ef5c9e2579694774716e093c377e37bd84ff7bd9ac61fa184c8b`.
+The clean comparator decoded WACN `BEE00`, system `2A5`, NAC `2A0`, RFSS 2,
+site 10 and logged no retune, USB, overflow, dropped-sample, or foreign-identity
+event. An earlier 90-second smoke that learned alternate channels is excluded.
+
+Windows Update rebooted Ventax at approximately 17:32:13 EDT. The test treats
+that interval as a contaminated gap and never joins an event across it. The
+valid pre-reboot segment covered 16:48:30-17:28:44 EDT with 776 aligned
+three-second intervals. Airspy averaged 37.052 messages/second versus 30.924
+for RTL and won 679 intervals to 94. No complete deterioration/recovery event
+occurred in that segment. The post-reboot segment covered
+17:33:59-18:20:19 EDT with 907 aligned intervals. Airspy averaged 33.686 versus
+28.492 for RTL and won 765 intervals to 140.
+
+The uninterrupted post-reboot segment contained the required natural event:
+a 21-interval healthy boundary, a four-interval degraded run at
+17:48:23-17:48:32, and a four-interval recovered boundary at
+17:52:34-17:52:43. During that qualifying degraded run, Airspy averaged 11.250
+messages/second while RTL averaged 2.333.
+
+Across both valid segments, excluding the reboot gap, the 1,683 aligned
+intervals produced these results:
+
+| Metric | Airspy R2 | RTL-SDR fixed-primary shadow |
+| --- | ---: | ---: |
+| Overall mean | 35.238 | 29.613 |
+| Median | 40.000 | 33.667 |
+| 10th percentile | 19.000 | 11.667 |
+| Intervals at or below 3 | 30 | 84 |
+| Paired wins | 1,444 | 234 |
+| Healthy-subset mean (1,383 intervals) | 38.968 | 33.785 |
+| Degraded-subset mean (105 intervals) | 7.019 | 2.575 |
+
+This is decisive evidence that the Airspy R2 provides materially more Hamilton
+decode margin than the simultaneous RTL-SDR path behind the MCA208M. It
+supports a bounded Airspy R2 production trial for Hamilton. It does not prove
+that the RTL-SDR itself creates the nighttime distortion: the receivers used
+different MCA outputs, cables/USB hosts, sample rates, centers, and hardware-
+appropriate gains. More importantly, both paths still reached a 19-interval
+run at or below 3. Airspy improves resilience but does not eliminate the shared
+deep fade, so receiver substitution is a mitigation rather than the complete
+root-cause remedy.
+
+Pre-reboot Airspy log and OT journal SHA-256 values are respectively
+`8dd8416fe8735775b8622c26d3c6e07d5c95be10f7d6c911dc398ec4ad0ac3b2`
+and `7feed88071f0aebb8f7e6ffc08adaf467938f5faf5418f6b35eb3ead067dc98e`.
+Post-reboot values are
+`5aac114b00fce03182e1e577652b7f2169e0a654d0cc75e10c4f5d9a30c12854`
+and `baab18ee1e0aa1ef9e2afe1536fe0f1fff62213003714cd3d55992a138755443`.
+The aligned analysis and analyzer SHA-256 values are respectively
+`c45ef970b748a468902c844499f0e26a3c3e9c4a01c435db8f68cc27e7e299d8`
+and `342b73141aa52f0948f64bc29bb62ea940884979793ca44442605245bb25dce7`.
+The comparator and helpers were stopped, the Airspy was detached safely from
+WSL, and OT Trunk Recorder and PizzaWave remained healthy with zero restarts.
+
+### Hamilton Airspy R2 production-trial result
+
+The bounded OT production trial on 2026-08-13 tested whether that comparator
+advantage survived inside the real Trunk Recorder workload. The first layout
+attempted to replace both Hamilton RTL-SDR windows with one Airspy R2 at
+10 MS/s and 12 recorders. That graph processed only about 6.2 million of the
+10 million input samples per second and about 15,000 of the required 24,000
+channelized samples per second; Hamilton remained at zero messages/second.
+This phase is rejected as a host/graph-capacity failure, not as evidence about
+Airspy RF performance. It also means a one-R2-plus-one-Mini consolidation
+cannot be approved until the 10 MS/s recorder ceiling is understood.
+
+The safe split layout began at 09:12:11 EDT. Airspy R2 serial
+`637862DC2E457DD7` replaced only source 3 at 2.5 MS/s, centered directly on
+Hamilton primary 855.212500 MHz with linearity gain 15 and six recorders.
+RTL-SDR serial `00000005` remained source 4 at 857.600 MHz with six recorders.
+The Airspy source ran in real time, acquired the correct Hamilton identity in
+four seconds, and produced no USB, sample-source, restart, or call-recorder
+failure. The installed trial config SHA-256 was
+`558028b852d9d4f0ab5a519715b828ad3174e03a088742f14c37b36f66c7a889`.
+
+The trial covered a complete daytime-healthy, nighttime-deteriorated, and
+post-midnight-recovered cycle. For a fair clock-of-day comparison, its 57,675
+fixed-primary shadow seconds were compared with the preceding day's 57,679
+RTL fixed-primary shadow seconds over the same 16-hour clock window:
+
+| Metric | Airspy R2 production trial | Prior-day RTL-SDR |
+| --- | ---: | ---: |
+| Mean messages/second | 19.858 | 12.737 |
+| Median | 18 | 10 |
+| 5th percentile | 6 | 1 |
+| 25th percentile | 12 | 6 |
+| 75th percentile | 27 | 18 |
+| 95th percentile | 39 | 35 |
+| Zero-rate seconds | 29 | 124 |
+| Seconds at or below 3 | 1,590 | 9,204 |
+| Seconds at or below 10 | 12,356 | 30,710 |
+| Longest run at or below 3 | 4 seconds | 9 seconds |
+| Longest run at or below 10 | 23 seconds | 90 seconds |
+| Blocked out-of-window retunes | 386 | 525 |
+| Source errors | 0 | 0 |
+
+The Airspy raised the matching-clock mean by 56%, reduced zero-rate seconds by
+77%, reduced seconds at or below 3 by 83%, and reduced seconds at or below 10
+by 60%. It is therefore a substantial Hamilton receiver-path mitigation. It
+did not eliminate the phenomenon: performance still declined through the
+evening and recovered after 01:00, so the evidence continues to support a
+nighttime RF-path impairment rather than an RTL-SDR-only failure.
+
+The Airspy trial and matching-clock RTL journal SHA-256 values are respectively
+`50050be2bc66b2452cb1fdd89bf8ef9de71ee52b246b64e5999235dc269a4e0b`
+and `e206e9372ae6234f47fa5b6edb6a8871218660007c3b4b68a8547729c5f12992`.
+The aligned analysis SHA-256 is
+`eb2f3426428f448cab40dd16ba30292d337cdc23b3a268c1a105d37afeecddf1`.
+Evidence and the exact rollback remain under
+`/var/backups/pizzawave/hamilton-airspy-r2-production-trial-20260813T130643Z`.
+At completion, `/etc/trunk-recorder/config.json` was restored byte-for-byte to
+SHA-256 `c4535a23faa9a4e34c40c30170d2d55028c26e6c37a011ca11a03aa61d09598d`.
+Trunk Recorder restarted once with all five RTL-SDRs present, correct site
+identities, zero restart count, healthy PizzaWave, and recovered Hamilton
+decode. The Airspy trial is no longer active in production.
+
+### Airspy 10 MS/s capacity root cause
+
+The follow-up on 2026-08-14 isolated the rejected 10 MS/s phase without
+changing production configuration. A standalone Hamilton process was run from
+the otherwise-unused Airspy while the restored RTL production service remained
+active. The 2.5 MS/s, six-recorder reference sustained 2.500 million source
+samples and 24,008 channelized samples per second with a 32.429 mean shadow
+decode rate. At 10 MS/s, source throughput stayed near 3.78 million and
+channelized throughput near 9,065 samples per second whether the pool contained
+1, 6, or 12 recorders:
+
+| Airspy rate and recorder pool | Source samples/second | Channelized samples/second | Mean shadow decode | Process CPU |
+| --- | ---: | ---: | ---: | ---: |
+| 2.5 MS/s, 6 recorders | 2,500,323 | 24,008 | 32.429 | 38.89% |
+| 10 MS/s, 1 recorder | 3,764,044 | 9,038 | 0.914 | 17.00% |
+| 10 MS/s, 6 recorders | 3,778,494 | 9,065 | 0.941 | 17.37% |
+| 10 MS/s, 12 recorders | 3,785,418 | 9,088 | 0.941 | 19.57% |
+
+Recorder count therefore was not the ceiling, and the low CPU utilization
+excluded host compute saturation. USB topology supplied the missing variable:
+the Airspy and all RTL-SDRs enumerated below the same Bus 001 480 Mb/s root
+path, behind several cascaded hubs. With production RTL streams active,
+`airspy_rx` requesting 100 million samples at 10 MS/s settled near 3.79 MS/s
+and required approximately 27 seconds. During one controlled 23-second
+maintenance gap with Trunk Recorder stopped, the identical Airspy, USB path,
+frequency, gain, output format, and sample request sustained 10.000 MS/s and
+completed in 11.03 seconds. This directly proves shared USB 2.0 transport
+contention caused the earlier wide-Airspy graph to fall behind.
+
+The capacity analysis and Airspy-alone proof SHA-256 values are respectively
+`7fbb1033734d70ce7f0519c88af004991dbe59f85e52817508ffc92a493a75bc`
+and `d35d5162d999836165f43b88c1eadfad79633f56ed4ec7403c8a9c725c4c1b74`.
+The before/after maintenance records are
+`ee97419fcf81774d38d7c3d042a7373192b854edde077fbd27a2724bda966fc6`
+and `5c95b04c5684601baae73c2ca8a76e7fad83eb7a019606dd64396d92bd52bf57`.
+The exact production config hash remained
+`c4535a23faa9a4e34c40c30170d2d55028c26e6c37a011ca11a03aa61d09598d`.
+After the intentional restart, Trunk Recorder and PizzaWave were active with
+zero restart count; Cleveland, Hamilton, and North Bradley reacquired their
+correct identities and all production RTL pipelines advanced normally.
+
+### Airspy 10 MS/s separated-bus production validation
+
+The USB-root correction was validated in production on 2026-08-14. Moving
+Airspy R2 serial `637862DC2E457DD7` from the shared Bus 001 RTL hub path to the
+independent Bus 007 USB 2.0 root immediately changed a standalone 100-million-
+sample `airspy_rx` request from approximately 3.8 MS/s to 10.000 MS/s. A bounded
+production trial then replaced Hamilton RTL sources `00000004` and `00000005`
+with one Airspy source at 10 MS/s, center 854.743750 MHz, linearity gain 15, and
+12 digital recorders. The trial ran from 17:50:09 through 18:50:09 EDT with
+config SHA-256
+`47c49a84e77727e9088a81bfb9955b3e65ec1b0aa35445b6c7faf611f5c2cb27`.
+
+The graph stayed exactly real-time for the full hour: 3,596 telemetry seconds
+had a 9,999,996 mean and 10,000,416 median source samples/second, plus a 24,000
+mean and 23,998 median channelized samples/second. The 10th-to-90th percentile
+ranges were 9,933,299-10,077,600 source samples/second and 23,806-24,200
+channelized samples/second. Hamilton acquired the correct NAC `2A0`, WACN
+`BEE00`, system `2A5`, RFSS `2`, and site `10` identity.
+
+On the 855.212500 MHz primary, 3,506 one-second live records had a 31.393 mean,
+37 median, 14 10th percentile, and 42 90th-percentile decode rate. There were
+no zero seconds; 42 seconds were at or below 3, and the longest such run was
+three seconds. Trunk Recorder completed 1,241 Hamilton calls across 12 voice
+frequencies from 854.387500 through 858.437500 MHz. The wide source also
+contained every Hamilton control-channel scan target, so the 37 normal retunes
+did not require a source change. There were zero Airspy, USB, sample-source,
+service, or process failures. A final five-second process sample averaged 141%
+CPU, approximately 1.41 of the host's 16 logical cores; earlier spot samples
+were in the same 1.3-1.5-core range.
+
+This closes the 10 MS/s capacity question: the Airspy R2 and current OT host
+can replace the two Hamilton RTL windows when the Airspy has its own USB root.
+The earlier 62%-realtime failure was USB contention, not an Airspy, recorder-
+pool, decoder, or CPU limit. It does not yet prove that one R2 can carry both
+Cleveland and Hamilton while an Airspy Mini carries North Bradley; that final
+two-receiver layout still needs a simultaneous production validation because
+it adds another system and a second Airspy stream.
+
+The trial journal, analysis, final CPU sample, and restoration journal SHA-256
+values are respectively
+`921b5c8f67ca3413af9ba78dbf49311cab1ae0ed861f539461f315e61787896c`,
+`8aea424e0fb49ba8b6c90695047ebf30b863e0950cbcddac34cf5a0c4b8d856a`,
+`43753bff92fd5ea8040fe5daf132e3e630962c0af3c55a3c077426b125f7f4fb`,
+and `a3a6147096c3132b1952bc92cfdb13f7a104919cb76fc421eab2cccd43120867`.
+The analysis-script SHA-256 is
+`1c3549f1c212dede3663bcf7ace81d35b8fb175714a46409d243e61a6ff9ff70`.
+Artifacts are under
+`C:\temp\pizzawave-rf\ot-airspy-r2-comparison\capacity-benchmark\wide-production-trial`.
+At closure, the exact backup from
+`/var/backups/pizzawave/hamilton-airspy-wide-separated-20260814T215009Z`
+was restored. Config SHA-256 returned to
+`c4535a23faa9a4e34c40c30170d2d55028c26e6c37a011ca11a03aa61d09598d`;
+Trunk Recorder restarted once, PizzaWave remained healthy, and Hamilton
+reacquired on RTL `00000004` at 39 messages/second.
+
+### Two-Airspy production-consolidation result
+
+The final simultaneous consolidation gate ran from 2026-08-15 17:29:45
+through 2026-08-16 09:30:00 EDT. Airspy Mini serial `637862DC2E7986D7`
+served North Bradley at 6 MS/s from independent PCI USB controller `c9:00.4`,
+Bus 005, center 771.168750 MHz, linearity gain 15, and two digital recorders.
+Airspy R2 serial `637862DC2E457DD7` served Cleveland and Hamilton at 10 MS/s
+from independent controller `c9:00.3`, Bus 007, center 854.743750 MHz,
+linearity gain 15, and 15 digital recorders. The Mini RF path was an unused
+MCA208M output, short jumper, and 10-foot active USB 3 extension. The installed
+trial config SHA-256 was
+`e882dabb786851b4eaaf3ba5eb5cd7e2ea350698c174b69ce53c6e4d487a5455`.
+
+Both graphs stayed real time for the entire 16-hour gate. Across 57,613
+one-second pipeline deltas, the Mini averaged 5,999,990 source samples/second
+and 24,000 channelized samples/second; the R2 averaged 10,000,025 and 24,000
+respectively. Their first-to-99th percentile source-rate ranges were
+5,904,738-6,087,633 and 9,876,048-10,128,241 samples/second. There were no
+Airspy, libusb, USB-transport, sample-source, process, or service failures, and
+Trunk Recorder did not restart during the gate. All three systems acquired the
+correct identities. Trunk Recorder completed 2,051 Cleveland, 9,654 Hamilton,
+and 68 North Bradley calls.
+
+| System | Two-Airspy mean | Immediately preceding RTL mean | Prior matching-clock RTL mean | Two-Airspy zero / <=3 | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Cleveland | 39.997 | 39.997 | 39.998 | 0% / 0% | Unchanged and continuously healthy |
+| Hamilton | 30.131 | 19.352 | 26.162 | 0.896% / 0.998% | Healthy overall, with the same nighttime fade and recovery pattern |
+| North Bradley | 0.445 | 0.622 | 5.520 | 84.461% / 96.419% | No healthy boundary; Mini receiver-performance gate failed |
+
+On each fixed primary, the Airspy-versus-immediately-preceding RTL means were
+39.997 versus 39.997 for Cleveland, 30.484 versus 21.403 for Hamilton, and
+1.064 versus 1.547 for North Bradley. North Bradley had already fallen to zero
+on RTL before deployment, so this run does not prove that the Mini caused its
+poor result. It does prove that replacing the receiver does not by itself cure
+North Bradley. Because North Bradley never supplied a healthy Mini boundary
+and its matching-clock RTL window had averaged 10.031 on the primary, the
+evidence is not strong enough to retain the consolidated layout in production.
+
+The exact pre-trial config was restored from
+`/var/backups/pizzawave/airspy-consolidation-20260815T212919Z`. The first RTL
+startup encountered one `source 4` sample stop; systemd's single configured
+recovery attempt succeeded, and no restart loop was entered. The restored
+service remained active with `NRestarts=1`, config SHA-256
+`c4535a23faa9a4e34c40c30170d2d55028c26e6c37a011ca11a03aa61d09598d`,
+Cleveland at 39-40 messages/second, Hamilton at 38, and North Bradley still at
+zero. This startup event is preserved as a rollback limitation rather than
+being attributed to the stable Airspy trial.
+
+The trial journal, analysis, analyzer, immediate RTL telemetry, prior
+matching-clock RTL telemetry, kernel journal, PizzaWave journal, and rollback
+journal SHA-256 values are respectively
+`58d559ea45ec61164c67d28ded65efa618adf8dee014ca67b0dff1193bde737f`,
+`60da24009dfbb7141f0fe767fd61633bda064bc25677326fe3ac94e2df62d852`,
+`9cc0ddb075aa8f4e6bc76c914c50163bf4dd1372dec36b2eeb93afb3321bc0b5`,
+`2b53db420275bc01bde2a59fc0469d3235e165d68f318d32ea4b630a1a5288b9`,
+`d5999e5f59ff9a13b4d4ad0e88a63a93a2140d802f3baf8db5fdf70e1e28d3d3`,
+`38d1140027ecfeea7e8f9b83fdaa0ca733e9ddc6439405113c5f2f75497705d6`,
+`758d98326772b0bb063694c100f98809c9bda79f0e7b66ab62e0cc72fae28b85`,
+and `4ff6653fc2eb3ffdf326426ca02afb4e3c8f9444a0d4615e6676c0f79af5fbd8`.
+Artifacts are under
+`C:\temp\pizzawave-rf\ot-airspy-r2-comparison\combined-trial`.
+
+### Hamilton/Raymond nightly timing audit
+
+A read-only cross-site audit completed on 2026-08-16 after the operator noted
+that Hamilton at OT and ETV Raymond at RPI show a similar nightly decline even
+though the receivers are about 400 miles apart and Raymond has no MCA208M. The
+authoritative input was PizzaWave's stored per-system five-minute Trunk
+Recorder health history, not a new recording or a hand-selected event. The
+comparison window was 2026-07-10 12:00Z through 2026-08-08 00:00Z, ending
+before the recent OT Airspy production trials. Bins containing a sample stop,
+an unable-source event, or no decode observation were excluded. The result had
+7,981 valid Hamilton bins and 8,156 valid Raymond bins.
+
+The sites do **not** fail as one tightly synchronized event. Their five-minute
+decode-rate correlation was only `0.229` at the same UTC instant and `0.223`
+at the same local civil time. Scanning Raymond from six hours before to six
+hours after Hamilton found a shallow maximum of only `0.231` at a 10-minute
+shift. The detected sustained nightly onsets also moved substantially from day
+to day and between sites; paired onsets ranged from more than two hours before
+to several hours after one another. This rejects a single shared scheduled
+outage or one common instantaneous RF event as the explanation for the visual
+similarity.
+
+The repeating *shape* is nevertheless real. The correlation between the two
+mean 24-hour profiles was `0.910` by local civil hour and `0.882` by UTC hour.
+It was highest, `0.918`, when each site's profile was expressed in 30-minute
+bins relative to its own sunset. The approximate receiver-area coordinates put
+Raymond sunset only 14.3 to 16.4 minutes after Hamilton sunset in UTC during
+this window, despite the one-hour civil-time-zone difference. Thus similar
+wall-clock plots cannot distinguish an absolute-time trigger from a
+sunset-related mechanism without this normalization.
+
+The [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api)
+provided a secondary weather check using hourly
+approximate receiver-area coordinates. Low-rate hours at both sites were, on
+average, more humid, had smaller temperature/dew-point spreads, and were
+calmer. Most of that relationship was the nighttime clock itself. After
+subtracting each site's normal local-hour profile, temperature and humidity
+correlations had opposite signs at Hamilton and Raymond; wind retained a
+positive rate correlation of `0.388` at Hamilton and `0.162` at Raymond. No
+single measured surface-weather variable explains both sites. Calm nighttime
+conditions remain compatible with propagation changes, but this audit does not
+turn that association into proof.
+
+The bounded conclusion is that the common factor is the nightly propagation
+regime, not shared receiver hardware. The detailed retained IQ still shows
+different manifestations: Hamilton can lose modulation quality while
+in-channel energy rises, whereas Raymond has also shown real
+frequency-selective power fades. Moving one antenna could therefore improve
+one local path without being the cause of the shared timing. The correct next
+discriminator is simultaneous spatial diversity at Hamilton while leaving the
+production omni untouched.
+
+The reusable analyzer is
+`scripts/analyze_hamilton_raymond_history.py`. Hamilton/Raymond health inputs,
+Hamilton/Raymond weather inputs, analysis JSON, and analyzer SHA-256 values are
+respectively
+`29055830c0e54b9e1adbfeb0e56a03ecf54db6fbc31ff8362d39d367c57b84af`,
+`89eb2fff1b9c53efa5a84a8da6048747072b280148e2561b5c577c0ce1fb01ad`,
+`6f1cee3f5e166d3036202c59dce658b8432961e9df37ae13bdc952845760bd48`,
+`a32bc4d1d54ccc656e453f1a01a46c5e7a7e137b011e3d3edabd50285d397fc4`,
+`8db8ae2efc0c17591fc9c1efb00af3dcb1a70f25961f817ca84910454d5a4653`,
+and `10ac2edff8805d2043fc18d291c75132f950a5f36756137222572ffb6acb2caf`.
+Local artifacts are under
+`C:\temp\pizzawave-rf\hamilton-raymond-timing`.
+
 ## Purchase gate
 
 Buy nothing before Stage 1.
@@ -806,20 +1335,35 @@ known PizzaWave-only deployment gaps are not individually duplicated because
 they produced no RF result; the permanent record retains the relevant health,
 restart, quota, and exclusion conclusions.
 
-## Next step
+## Investigation closure and future re-evaluation
 
-Retain Hamilton's opt-in slower loop and North Bradley's stock loop. Do not
-reuse loop values across sites without an exact-sample gate. The per-system
-loop-setting proposal is now under upstream review; prepare source affinity as
-a separate reviewed Trunk Recorder change with explicit multi-source semantics,
-configuration documentation, and focused tests. Any further North Bradley loop
-candidate must first beat stock on its retained IQ across both healthy and
-degraded windows before another passive live test. Do not change global loop
-defaults. PizzaWave owns ensuring that every control channel provided during
-Setup fits the site's chosen source; Trunk Recorder owns safely handling
-control channels it later discovers at runtime. Do not restore the demonstrated
-cross-source graph-rebuild hazard merely to repeat it. These changes are not a
-retune grace period and do not replace Trunk Recorder's P25 decoder.
+The RF analysis is closed as of 2026-08-21 without a root-cause resolution for
+either OT or RPI. The retained evidence and rejected hypotheses remain valid,
+but additional software tuning, receiver substitution, MCA bypass, filtering,
+or small antenna-position experiments are not active work. Keep Cleveland
+unchanged, retain Hamilton's opt-in slower loop, retain North Bradley's stock
+loop, and do not change global loop defaults.
+
+The next OT checkpoint is the planned relocation of the complete receiving
+equipment and antenna rig from the pumphouse to the main house. Preserve a
+fixed pre-move baseline, then re-examine RF quality over matching daytime,
+nighttime-decline, and recovery windows after the move. Keep the PCTEL antenna,
+coax, MCA208M, receivers, gains, source centers, control-channel lists, and
+decoder settings the same where practical, and record every unavoidable path
+change. This is a site-path remediation assessment, not a controlled isolation
+of one variable.
+
+RPI/Raymond is a separate future investigation. Resume it independently when
+there is capacity to do so; its next physical discriminator may also be antenna
+relocation. Do not infer the outcome from OT's move, and do not combine the two
+sites into one hardware or software remedy merely because their average
+nightly profiles are similar.
+
+The one-R2-plus-one-Mini capacity work is complete, the BPF-800-M and MCA208M
+bypass are not pending root-cause tests, and North Bradley remains a separate
+marginal-path issue. PizzaWave still owns ensuring that every Setup-provided
+control channel fits the assigned source. Trunk Recorder owns safely handling
+runtime-discovered channels and avoiding cross-source graph reconstruction.
 
 ## Trunk Recorder source access from Ventax
 
