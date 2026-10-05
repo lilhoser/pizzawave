@@ -36,9 +36,14 @@ dotnet test C:\projects\pizzawave\pizzad.Tests\pizzad.Tests.csproj --no-restore
 - Use the automatic direct-deploy helper for development deployments:
 
 ```powershell
-.\scripts\deploy_pizzad_tar.ps1 -HostName ocroot@100.105.110.92 -SshKey 'G:\My Drive\Backups\creds\pizzapi_rpi_test_ed25519' -Rid linux-arm64
+.\scripts\deploy_pizzad_tar.ps1 -HostName sdr1861 -Rid linux-arm64
 ```
 
+- `sdr1861` is a local OpenSSH shortcut using the owner's managed personal key.
+  KeePass/KeeAgent must have loaded that key into the existing local Pageant.
+  See [SSH access](docs/ssh-access.md) for setup and other client choices.
+  Do not recreate the retired PizzaWave test key or use a human vault as an
+  unattended service credential.
 - The helper hashes deployable inputs and compares them with the live manifest.
   It performs only a health check when nothing changed, automatically uses a
   no-restart web-only deployment for frontend changes, and publishes/restarts
