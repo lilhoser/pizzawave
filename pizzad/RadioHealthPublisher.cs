@@ -46,7 +46,7 @@ public sealed class RadioHealthPublishSchedule
         {
             summary.Condition, summary.Confidence, summary.Impact, summary.Coverage,
             summary.ExceptionCount,
-            Exceptions = summary.Exceptions.Select(item => new { item.Id, item.Severity, item.Summary }),
+            Exceptions = summary.Exceptions.Select(item => new { item.Id, item.Severity, item.Summary, item.Impact, item.Evidence, item.RecommendedAction, item.DetailsUrl }),
             summary.Protection
         });
 }

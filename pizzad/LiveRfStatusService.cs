@@ -200,7 +200,8 @@ public sealed class LiveRfStatusService : BackgroundService
 
         var basis = new[] { decodeAssessment.Basis, zeroAssessment.Basis, retuneAssessment.Basis }.Contains("local", StringComparer.OrdinalIgnoreCase) ? "local" : "static";
         var detail = $"Decode: {decodeAssessment.Detail} Zero decode: {zeroAssessment.Detail} Retunes: {effectiveRetuneAssessment.Detail}";
-        return new LiveRfSiteStatusDto(scope, tone, status, averageRate, zeroPercent, samples, retunes, retunesPerHour, lastDecodeUtc, freshnessSeconds, basis, detail);
+        return new LiveRfSiteStatusDto(scope, tone, status, averageRate, zeroPercent, samples, retunes, retunesPerHour, lastDecodeUtc, freshnessSeconds, basis, detail,
+            decodeAssessment, zeroAssessment, effectiveRetuneAssessment);
     }
 
     private async Task<string> ReadJournalAsync(DateTime startUtc, DateTime endUtc, CancellationToken ct)

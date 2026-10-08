@@ -98,3 +98,37 @@ and deferred account restriction/recovery checks are in whiteoakHomeAssistant
 (see docs/radio-health-reporting-2026-10-07.md and
  docs/followups/mqtt-radio-permissions.md). Historical activation-hold text above
 records the earlier failed attempt, not current state.
+
+## Useful operational findings
+
+The area report now carries up to three specific findings: affected capability or
+RF site, domain-owned evidence, operational consequence, next investigation step,
+and source diagnostic link. Critical capture/reception issues lead ahead of less
+severe processing warnings. RF uses the existing structured decode/gap/retune
+assessments exposed by LiveRfStatusService; no thresholds or network checks are
+duplicated. Recovering reception reports the domain recovery hold explicitly.
+Potential missing calls are described as a risk; no unmeasured lost-call count or
+proven loss is claimed. First-observed times remain local reporter observations.
+
+These are backward-compatible optional exception fields on contract version 1.
+The publisher detects changes in explanation/evidence as material, remains bounded
+to 4,096 bytes and the existing publication schedule, and never polls SDR 1861.
+Names and domain evidence are byte-bounded without exporting combined diagnostics,
+paths, transcript content, credentials or raw exception messages. Per-site issue
+identities use stable hashes to avoid collisions after display-name truncation.
+
+HA shows the leading finding with evidence, consequence, observation age and a
+source link; a detailed page shows the three exported findings with next steps.
+Backup & recovery and Reporting coverage are labeled separately. Missing evidence
+stays unknown instead of an outage or a whole-area Healthy badge. Other AOR feeds
+and backup evidence remain outside this Radio summary improvement.
+
+Useful findings activated from clean source d0842d7. Checksum-verified backend
+archive: 4fb89f394b6b0bd051a512028613da1725b2e26deb7d997bfa5453ad8af87887.
+Live assembly: 42e814631237591a3c5e667f566d936e05c321bf72c1988b07cf71f857c4f9bc.
+One pizzad restart; Trunk Recorder remained active. The actual 1,754-byte report
+reached Home Assistant and identified North Bradley decoding failure, potential
+unquantified missed calls and the domain evidence. Cleveland's retune warning
+was visible separately; no new SDR queries were added. 826 backend tests passed.
+HA native stale/unavailable/current fixtures and main/detail rendering passed.
+Complete receipt: whiteoakHomeAssistant docs/useful-radio-status-2026-10-07.md.

@@ -1054,7 +1054,10 @@ public sealed record LiveRfSiteStatusDto(
     DateTime? LastDecodeUtc,
     double FreshnessSeconds,
     string AssessmentBasis,
-    string Detail);
+    string Detail,
+    TrMetricAssessmentDto? DecodeAssessment = null,
+    TrMetricAssessmentDto? ZeroDecodeAssessment = null,
+    TrMetricAssessmentDto? RetunesAssessment = null);
 
 public sealed record LiveRfStatusDto(
     DateTime GeneratedAtUtc,

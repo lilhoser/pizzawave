@@ -142,6 +142,65 @@ public sealed class RadioHealthSummaryTests
     }
 
     [Fact]
+    public void CriticalReceptionLeadsWithSiteReasonAndHonestImpact()
+    {
+        var site = Rf("error").Sites[0] with { SystemShortName = "North Bradley",
+            DecodeAssessment = new("error", "critical", null, "Control-channel decoding is effectively unavailable.") };
+        var report = new RadioHealthAssessment().Assess(Healthy() with { QueueUnderPressure = true },
+            Rf("error") with { Sites = [site] }, Now);
+        var issue = report.Exceptions[0];
+        Assert.Contains("North Bradley", issue.Summary);
+        Assert.Contains("cannot be decoded", issue.Summary);
+        Assert.Contains("not measured", report.Impact);
+        Assert.Contains("effectively unavailable", issue.Evidence);
+        Assert.Equal("http://192.168.1.173:8080/api/v1/system/rf/live", issue.DetailsUrl);
+    }
+
+    [Fact]
+    public void RetuneWarningDoesNotAssertLostCalls()
+    {
+        var site = Rf("warning").Sites[0] with {
+            DecodeAssessment = new("ok", "local", 40, "Decoding available."),
+            RetunesAssessment = new("warning", "local", 10, "Retunes are elevated, but decoding remains available.") };
+        var report = new RadioHealthAssessment().Assess(Healthy(), Rf("warning") with { Sites = [site] }, Now);
+        Assert.Contains("repeatedly changes", report.Exceptions[0].Summary);
+        Assert.Contains("not been established", report.Impact);
+    }
+
+    [Fact]
+    public void RecoveryHoldDoesNotRepeatThePreviousFaultAsCurrentEvidence()
+    {
+        var site = Rf("warning").Sites[0] with { Status = "Recovering",
+            DecodeAssessment = new("ok", "local", 40, "Healthy now.") };
+        var report = new RadioHealthAssessment().Assess(Healthy(), Rf("warning") with { Sites = [site] }, Now);
+        Assert.Contains("recovering", report.Exceptions[0].Summary);
+        Assert.Contains("Current RF readings are healthy", report.Impact);
+    }
+
+    [Fact]
+    public void MultipleSitesStayBoundedWithoutExportingCombinedDiagnosticText()
+    {
+        var sites = Enumerable.Range(0, 20).Select(i => Rf("error").Sites[0] with {
+            SystemShortName = i + new string('\u754c',100), Detail = "private full diagnostic text",
+            DecodeAssessment = new("error", "critical", null, new string('\u754c',1000)) }).ToArray();
+        var report = new RadioHealthAssessment().Assess(Healthy(), Rf("error") with { Sites = sites }, Now);
+        Assert.Equal(20, report.ExceptionCount);
+        Assert.Equal(3, report.Exceptions.Count);
+        Assert.True(report.Serialize().Length <= RadioHealthSummary.MaxPayloadBytes);
+        Assert.DoesNotContain("private full diagnostic", System.Text.Encoding.UTF8.GetString(report.Serialize()));
+    }
+
+    [Fact]
+    public void MaterialEvidenceChangesArePublishedWithoutWaitingForHeartbeat()
+    {
+        var report = new RadioHealthAssessment().Assess(Healthy(), Rf("warning"), Now);
+        var schedule = new RadioHealthPublishSchedule();
+        schedule.Published(report, Now);
+        var changed = report with { Exceptions = [report.Exceptions[0] with { Evidence = "Changed operational finding" }] };
+        Assert.True(schedule.IsDue(changed, Now.AddMinutes(1)));
+    }
+
+    [Fact]
     public void PublisherDefaultsDisabledAndRequiresAnExplicitProtectedCredentialPath()
     {
         var options = new RadioHealthPublisherOptions();
