@@ -1,0 +1,16 @@
+[Unit]
+Description=Bounded SDR 1861 health upload using existing NAS transport
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/whiteoak-sdr-health/sdr-health-report.py
+TimeoutStartSec=80
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RuntimeDirectory=whiteoak-sdr-health
+RuntimeDirectoryMode=0700
+ReadWritePaths=/run/whiteoak-sdr-health

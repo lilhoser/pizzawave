@@ -1,0 +1,11 @@
+[Unit]
+Description=SDR 1861 health every fifteen minutes
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=5
+Persistent=false
+Unit=whiteoak-sdr-health.service
+
+[Install]
+WantedBy=timers.target
