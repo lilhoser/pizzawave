@@ -37,7 +37,7 @@ if (($HostName -match "(^|@)(192\.168\.1\.173|omicrontheta)(:|$)") -and $Rid -an
 }
 
 function Get-SshArgs {
-    $args = @("-o", "BatchMode=yes")
+    $args = @("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes")
     if ($SshKey) {
         $args += @("-i", $SshKey, "-o", "IdentitiesOnly=yes")
     }
@@ -421,12 +421,16 @@ Invoke-TimedStage "backend upload" {
     Assert-NativeCommand "backend archive upload"
 }
 
+$archiveSha256 = (Get-FileHash -LiteralPath $tarPath -Algorithm SHA256).Hash.ToLowerInvariant()
+Write-Host "Backend package SHA-256: $archiveSha256"
 $restartPizzad = if ($NoRestart) { "0" } else { "1" }
 $remoteScript = @"
 REMOTE_TAR=$(ConvertTo-BashSingleQuoted $RemoteTar)
+EXPECTED_SHA256=$(ConvertTo-BashSingleQuoted $archiveSha256)
 RESTART_PIZZAD=$(ConvertTo-BashSingleQuoted $restartPizzad)
 HEALTH_TIMEOUT_SECONDS=$(ConvertTo-BashSingleQuoted ([string]$HealthTimeoutSeconds))
 set -e
+printf '%s  %s\n' "`$EXPECTED_SHA256" "`$REMOTE_TAR" | sha256sum -c -
 work=/tmp/pizzad-direct-deploy
 maintenance_start=`$(date -u +%Y-%m-%dT%H:%M:%SZ)
 maintenance_token=`$(sudo cat /etc/pizzawave/pizzad.token 2>/dev/null || true)

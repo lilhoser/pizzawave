@@ -54,6 +54,8 @@ builder.Services.AddSingleton<IncidentBatchConstructorShadowService>();
 builder.Services.AddSingleton<IncidentBatchVerificationShadowService>();
 builder.Services.AddSingleton<LiveTrActivityMonitor>();
 builder.Services.AddSingleton<HealthStatusService>();
+builder.Services.AddSingleton<RadioHealthSummaryService>();
+builder.Services.AddHostedService<RadioHealthPublisher>();
 builder.Services.AddSingleton<EnginePipeline>();
 builder.Services.AddSingleton<RemoteTranscriptionHealthService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RemoteTranscriptionHealthService>());
@@ -154,6 +156,13 @@ app.MapGet("/api/v1/app-version", () =>
 })
 .WithName("AppVersion")
 .WithOpenApi();
+
+app.MapGet("/api/v1/health/radio-summary", async (HttpContext context, AuthService auth,
+    RadioHealthSummaryService summary, CancellationToken ct) =>
+{
+    if (!auth.IsReadAllowed(context)) return Results.Unauthorized();
+    return Results.Bytes((await summary.GetAsync(ct)).Serialize(), "application/json");
+}).WithName("RadioAreaHealth").WithOpenApi();
 
 app.MapGet("/api/v1/health", async (HealthStatusService health, CancellationToken ct) => Results.Ok(await health.GetAsync(ct)))
     .WithName("Health")

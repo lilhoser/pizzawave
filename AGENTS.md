@@ -100,6 +100,14 @@ dotnet test C:\projects\pizzawave\pizzad.Tests\pizzad.Tests.csproj --no-restore
 
 ## Durable Design
 
+Whenever capabilities, services, or dependencies are added, changed, or removed,
+review the affected health metrics and Radio AOR reporting before declaring the
+task complete. Reuse existing assessors, verify useful operation and source
+freshness, revisit protection/coverage, and record remaining gaps. Keep detailed
+rules here and bounded area summaries upstream. This review does not authorize
+new machine dependencies, credentials, or live changes; obtain explicit approval
+for those additions and follow the deployment rules.
+
 - Prefer durable architectural fixes over narrow special-case patches.
 - Avoid regex-driven fixes when a structured parser, schema, typed model,
   database constraint, replay test, or server-side evidence contract would solve
