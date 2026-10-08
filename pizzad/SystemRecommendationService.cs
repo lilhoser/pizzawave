@@ -49,7 +49,8 @@ public sealed class SystemRecommendationService
             if (_cachedRecommendations != null && now - _cachedRecommendationsAt <= RecommendationCacheTtl)
                 return _cachedRecommendations;
 
-            if (_recommendationBuildTask is { IsCompleted: false } running)
+            // A shared build can finish after its first waiter was cancelled. Reuse that result.
+            if (_recommendationBuildTask is { } running && (!running.IsCompleted || running.IsCompletedSuccessfully))
             {
                 buildTask = running;
             }
@@ -678,7 +679,7 @@ public sealed class SystemRecommendationService
             active,
             findings.KnownIssues,
             recentlyResolved,
-            findings.Resolved);
+            findings.Resolved) { GeneratedAtUtc = now };
     }
 
     private async Task<bool> QdrantReachableAsync(CancellationToken ct)
@@ -1221,7 +1222,10 @@ public sealed record SystemRecommendationsDto(
     IReadOnlyList<SystemRecommendationDto> Items,
     IReadOnlyList<SystemRecommendationDto> KnownIssues,
     IReadOnlyList<SystemRecommendationDto> RecentlyResolved,
-    IReadOnlyList<SystemRecommendationDto> History);
+    IReadOnlyList<SystemRecommendationDto> History)
+{
+    public DateTime GeneratedAtUtc { get; init; }
+}
 
 public sealed record SystemRecommendationSummaryDto(
     int OpenCount,

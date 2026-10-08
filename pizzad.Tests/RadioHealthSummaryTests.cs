@@ -1,216 +1,176 @@
 using System.Text.Json;
-
 namespace pizzad.Tests;
 
 public sealed class RadioHealthSummaryTests
 {
     private static readonly DateTime Now = new(2026, 10, 7, 12, 0, 0, DateTimeKind.Utc);
-
-    private static HealthDto Healthy()
-        => JsonSerializer.Deserialize<HealthDto>(JsonSerializer.Serialize(new
-        {
-            status = "ok", serverTimeUtc = Now, databasePath = "private-path", audioRoot = "private-audio",
-            liveTrActivity = new { status = "ok", stale = false, lastActivityUtc = Now, lastTrHealthUtc = Now },
-            incidentAnalysisQueueHealth = new { status = "ok" },
-            aiCompletionHealth = new { status = "ok" },
-            embeddingHealth = new { enabled = true, status = "ok", qdrantOk = true, embeddingEndpointOk = true }
-        }), EngineConfig.JsonOptions())!;
-
-    private static LiveRfStatusDto Rf(string tone = "ok") => new(Now, 120, 300, tone, "assessed",
-        [new("OT", tone, "assessed", 40, 0, 5, 0, 0, Now, 0, "existing-domain-assessment", "detail")]);
+    private static SystemRecommendationDto Finding(string id = "queue-pressure", string severity = "high")
+        => new(id, "pizzad", severity, "Transcription queue is growing", "private endpoint/error detail",
+            "private raw action", new("pizzad", "jobs", ""), []) { FindingId = 12, EvidenceWindow = "Last 10 minutes" };
+    private static SystemRecommendationsDto Source(params SystemRecommendationDto[] items)
+        => new(0, 0, 0, 0, 0, 0, items, [], [], []) { GeneratedAtUtc = Now };
 
     [Fact]
-    public void MissingRemoteCoverageCannotBecomeWholeAreaHealthy()
+    public void NoPipelineEscalationDoesNotClaimUnobservedReceiverHealthy()
     {
-        var report = new RadioHealthAssessment().Assess(Healthy(), Rf(), Now);
+        var report = new RadioHealthAssessment().Assess(Source(), Now);
         Assert.Equal("unknown", report.Condition);
         Assert.Equal("partial", report.Confidence);
-        Assert.Equal(3, report.Coverage.Observed);
+        Assert.Contains("No active High or Critical pipeline",report.Impact);
+        Assert.Equal(1, report.Coverage.Observed);
         Assert.Equal("sdr-1861", Assert.Single(report.Coverage.Missing));
         Assert.Equal("unknown", report.Protection.State);
     }
 
-    [Fact]
-    public void QueuePressureOverridesTopLevelOk()
+    [Theory]
+    [InlineData("high")]
+    [InlineData("critical")]
+    public void ActivePipelineRecommendationsEscalate(string severity)
     {
-        var report = new RadioHealthAssessment().Assess(Healthy() with { QueueUnderPressure = true }, Rf(), Now);
+        var report = new RadioHealthAssessment().Assess(Source(Finding(severity: severity)), Now);
         Assert.Equal("degraded", report.Condition);
-        Assert.Equal("radio:queue-pressure", Assert.Single(report.Exceptions).Id);
-    }
-
-    [Fact]
-    public void DomainCaptureFaultRemainsVisibleEvenWhenTheDomainMarksItStale()
-    {
-        var health = Healthy();
-        var report = new RadioHealthAssessment().Assess(health with
-        { LiveTrActivity = health.LiveTrActivity with { Status = "fault", Stale = true } }, Rf(), Now);
-        Assert.Equal("degraded", report.Condition);
-        Assert.Contains(report.Exceptions, item => item.Id == "radio:capture");
-    }
-
-    [Fact]
-    public void IntentionalCaptureStopIsReportedWithoutAnUnexpectedOutageAlarm()
-    {
-        var health = Healthy();
-        var report = new RadioHealthAssessment().Assess(health with
-        { LiveTrActivity = health.LiveTrActivity with { Status = "stopped", Stale = false } }, Rf("error"), Now);
-        Assert.Equal("unknown", report.Condition);
-        Assert.Empty(report.Exceptions);
-        Assert.Contains("intentionally stopped", report.Impact);
-        Assert.Equal(2, report.Coverage.Required);
+        Assert.Equal(severity, Assert.Single(report.Exceptions).Severity);
+        Assert.Contains("Transcripts", report.Impact);
     }
 
     [Theory]
-    [InlineData(-181)]
+    [InlineData("medium")]
+    [InlineData("low")]
+    public void LowerSeveritiesDoNotBecomeEstateAlarms(string severity)
+        => Assert.Empty(new RadioHealthAssessment().Assess(Source(Finding(severity: severity)), Now).Exceptions);
+
+    [Fact]
+    public void ExpectedOrRecurringRfSitesNeverBecomePipelineEscalations()
+    {
+        var source = Source(Finding("tr-rf-temporal-v2:whiteoakmt-nbradley", "critical"),
+            Finding("future-rf-finding", "high") with { Target = new("metrics", "rf", "") },
+            Finding("legacy-rf", "high") with { Target = new("tr", "metrics", "") });
+        Assert.Empty(new RadioHealthAssessment().Assess(source, Now).Exceptions);
+    }
+
+    [Theory]
+    [InlineData("known_issue")]
+    [InlineData("resolved")]
+    [InlineData("dismissed")]
+    public void AcceptedOrClosedFindingsDoNotEscalate(string workflow)
+        => Assert.Empty(new RadioHealthAssessment().Assess(Source(Finding() with { WorkflowStatus = workflow }), Now).Exceptions);
+
+    [Theory]
+    [InlineData("investigating")]
+    [InlineData("unresolved")]
+    [InlineData("monitoring")]
+    public void OpenOperationalProblemsRemainVisible(string workflow)
+        => Assert.Single(new RadioHealthAssessment().Assess(Source(Finding() with { WorkflowStatus = workflow }), Now).Exceptions);
+
+    [Fact]
+    public void QuietFindingsAndImprovementsAreNotPipelineFaults()
+    {
+        var source = Source(Finding() with { ActivityState = "quiet" }, Finding("optimization", "critical") with { Kind = "improvement" });
+        Assert.Empty(new RadioHealthAssessment().Assess(source, Now).Exceptions);
+    }
+
+    [Fact]
+    public void KnownAndHistoricalCollectionsNeverBecomeCurrentAlarms()
+    {
+        var source = Source() with { KnownIssues = [Finding()], RecentlyResolved = [Finding()], History = [Finding()] };
+        Assert.Empty(new RadioHealthAssessment().Assess(source, Now).Exceptions);
+    }
+
+    [Theory]
+    [InlineData(-361)]
     [InlineData(31)]
-    public void FreshReportDoesNotFreshenInvalidSourceTime(int offset)
+    public void FreshReportCannotFreshenStaleOrFutureRecommendations(int seconds)
     {
-        var report = new RadioHealthAssessment().Assess(Healthy() with
-        { ServerTimeUtc = Now.AddSeconds(offset) }, Rf(), Now);
-        Assert.Equal("unknown", report.Condition);
-        Assert.Contains("ot-processing", report.Coverage.Missing);
-        Assert.Contains("ot-receiver", report.Coverage.Missing);
-    }
-
-    [Fact]
-    public void StaleRfSnapshotCannotReassertItsOldFault()
-    {
-        var report = new RadioHealthAssessment().Assess(Healthy(),
-            Rf("error") with { GeneratedAtUtc = Now.AddMinutes(-4) }, Now);
-        Assert.Contains("ot-rf", report.Coverage.Missing);
+        var report = new RadioHealthAssessment().Assess(Source(Finding()) with { GeneratedAtUtc = Now.AddSeconds(seconds) }, Now);
         Assert.Empty(report.Exceptions);
+        Assert.Equal(0, report.Coverage.Observed);
+        Assert.Contains("ot-pipeline", report.Coverage.Missing);
+        Assert.Contains("not current",report.Impact);
     }
 
     [Fact]
-    public void DomainFaultsAreBoundedAndDoNotExposeSourcePaths()
+    public void FiveMinuteSharedRecommendationCacheRemainsCurrent()
+        => Assert.Single(new RadioHealthAssessment().Assess(Source(Finding()) with { GeneratedAtUtc = Now.AddMinutes(-5) }, Now).Exceptions);
+
+    [Fact]
+    public void CriticalFindingsLeadAndProjectionDoesNotExportRawDiagnostics()
     {
-        var health = Healthy() with { QueueUnderPressure = true, AiWorkBlockedReason = "sensitive detail" };
-        health = health with
-        {
-            IncidentAnalysisQueueHealth = health.IncidentAnalysisQueueHealth with { Status = "degraded" },
-            AiCompletionHealth = health.AiCompletionHealth with { Status = "degraded" },
-            EmbeddingHealth = health.EmbeddingHealth with { Status = "degraded" }
-        };
-        var report = new RadioHealthAssessment().Assess(health, Rf("warning"), Now);
-        Assert.True(report.ExceptionCount > 3);
-        Assert.Equal(3, report.Exceptions.Count);
-        var bytes = report.Serialize();
-        Assert.True(bytes.Length <= RadioHealthSummary.MaxPayloadBytes);
-        var json = System.Text.Encoding.UTF8.GetString(bytes);
-        Assert.DoesNotContain("private-path", json);
-        Assert.DoesNotContain("private-audio", json);
-        Assert.DoesNotContain("sensitive detail", json);
-        using var parsed = JsonDocument.Parse(bytes);
-        Assert.Equal("radio", parsed.RootElement.GetProperty("aor_id").GetString());
-        Assert.True(parsed.RootElement.TryGetProperty("generated_at", out _));
+        var report = new RadioHealthAssessment().Assess(Source(Finding(), Finding("ai-generation-health", "critical")), Now);
+        Assert.Equal("critical", report.Exceptions[0].Severity);
+        Assert.Contains("Incident creation",report.Impact);
+        var text = System.Text.Encoding.UTF8.GetString(report.Serialize());
+        Assert.DoesNotContain("private endpoint",text);
+        Assert.DoesNotContain("private raw action",text);
+        Assert.Contains("?page=system",text);
+        Assert.DoesNotContain("/api/",text);
     }
 
     [Fact]
-    public void FirstObservedPersistsUntilRecoveryAndResetsForANewIncident()
+    public void SpecificFindingLinksUseTheWebUiAndSafeIds()
+    {
+        var issue = Assert.Single(new RadioHealthAssessment().Assess(Source(Finding()), Now).Exceptions);
+        Assert.EndsWith("&finding=12",issue.DetailsUrl);
+        issue = Assert.Single(new RadioHealthAssessment().Assess(Source(Finding() with { FindingId = long.MaxValue }), Now).Exceptions);
+        Assert.Equal(RadioHealthAssessment.RecommendationsUrl,issue.DetailsUrl);
+    }
+
+    [Fact]
+    public void MultiFindingUnicodePayloadRemainsBounded()
+    {
+        var items = Enumerable.Range(0,20).Select(i => Finding(i.ToString()) with { Title = new string('\u754c',1000), EvidenceWindow = new string('\u754c',1000) }).ToArray();
+        var report = new RadioHealthAssessment().Assess(Source(items), Now);
+        Assert.Equal(20,report.ExceptionCount);
+        Assert.Equal(3,report.Exceptions.Count);
+        Assert.True(report.Serialize().Length <= RadioHealthSummary.MaxPayloadBytes);
+    }
+
+    [Fact]
+    public void FirstObservationSurvivesRefreshAndResetsAfterRecovery()
     {
         var assessor = new RadioHealthAssessment();
-        var health = Healthy() with { QueueUnderPressure = true };
-        var first = assessor.Assess(health, Rf(), Now);
-        var second = assessor.Assess(health, Rf(), Now.AddMinutes(1));
-        Assert.Equal(first.Exceptions[0].FirstObservedAt, second.Exceptions[0].FirstObservedAt);
-        assessor.Assess(Healthy(), Rf(), Now.AddMinutes(1));
-        var recurrence = assessor.Assess(health, Rf(), Now.AddMinutes(2));
-        Assert.Equal(Now.AddMinutes(2), recurrence.Exceptions[0].FirstObservedAt);
+        var first = assessor.Assess(Source(Finding()), Now);
+        var refresh = assessor.Assess(Source(Finding()), Now.AddMinutes(1));
+        Assert.Equal(first.Exceptions[0].FirstObservedAt,refresh.Exceptions[0].FirstObservedAt);
+        assessor.Assess(Source(), Now.AddMinutes(1));
+        Assert.Equal(Now.AddMinutes(2),assessor.Assess(Source(Finding()), Now.AddMinutes(2)).Exceptions[0].FirstObservedAt);
     }
 
     [Fact]
-    public void ScheduleSendsChangesAndHeartbeatButNotTimestampOnlyChanges()
+    public void APreviouslyUnexportedFindingKeepsItsFirstActiveObservation()
     {
         var assessor = new RadioHealthAssessment();
-        var first = assessor.Assess(Healthy(), Rf(), Now);
+        assessor.Assess(Source(Finding("a"),Finding("b"),Finding("c"),Finding("d")),Now);
+        var promoted = assessor.Assess(Source(Finding("d")),Now.AddMinutes(1));
+        Assert.Equal(Now,Assert.Single(promoted.Exceptions).FirstObservedAt);
+    }
+
+    [Fact]
+    public void ScheduleSendsChangedFindingsAndHeartbeatButNotReportTimeOnly()
+    {
+        var report = new RadioHealthAssessment().Assess(Source(Finding()), Now);
         var schedule = new RadioHealthPublishSchedule();
-        Assert.True(schedule.IsDue(first, Now));
-        schedule.Published(first, Now);
-        var refresh = first with { GeneratedAt = Now.AddMinutes(1), ReportId = "another" };
-        Assert.False(schedule.IsDue(refresh, Now.AddMinutes(1)));
-        Assert.True(schedule.IsDue(refresh, Now.AddMinutes(5)));
-        Assert.True(schedule.IsDue(refresh with { Condition = "degraded" }, Now.AddMinutes(1)));
+        Assert.True(schedule.IsDue(report,Now));
+        schedule.Published(report,Now);
+        Assert.False(schedule.IsDue(report with { ReportId = "another", GeneratedAt = Now.AddMinutes(1) },Now.AddMinutes(1)));
+        Assert.True(schedule.IsDue(report,Now.AddMinutes(5)));
+        Assert.True(schedule.IsDue(report with { Exceptions = [report.Exceptions[0] with { Summary = "Another active problem" }] },Now.AddMinutes(1)));
     }
 
     [Fact]
     public void FailedPublishDoesNotAdvanceSchedule()
     {
-        var report = new RadioHealthAssessment().Assess(Healthy(), Rf(), Now);
         var schedule = new RadioHealthPublishSchedule();
-        Assert.True(schedule.IsDue(report, Now));
-        Assert.True(schedule.IsDue(report, Now.AddMinutes(1)));
+        var report = new RadioHealthAssessment().Assess(Source(),Now);
+        Assert.True(schedule.IsDue(report,Now));
+        Assert.True(schedule.IsDue(report,Now.AddMinutes(1)));
     }
 
     [Fact]
-    public void CriticalReceptionLeadsWithSiteReasonAndHonestImpact()
+    public void PublisherDefaultsDisabledAndRequiresProtectedCredentialPath()
     {
-        var site = Rf("error").Sites[0] with { SystemShortName = "North Bradley",
-            DecodeAssessment = new("error", "critical", null, "Control-channel decoding is effectively unavailable.") };
-        var report = new RadioHealthAssessment().Assess(Healthy() with { QueueUnderPressure = true },
-            Rf("error") with { Sites = [site] }, Now);
-        var issue = report.Exceptions[0];
-        Assert.Contains("North Bradley", issue.Summary);
-        Assert.Contains("cannot be decoded", issue.Summary);
-        Assert.Contains("not measured", report.Impact);
-        Assert.Contains("effectively unavailable", issue.Evidence);
-        Assert.Equal("http://192.168.1.173:8080/api/v1/system/rf/live", issue.DetailsUrl);
-    }
-
-    [Fact]
-    public void RetuneWarningDoesNotAssertLostCalls()
-    {
-        var site = Rf("warning").Sites[0] with {
-            DecodeAssessment = new("ok", "local", 40, "Decoding available."),
-            RetunesAssessment = new("warning", "local", 10, "Retunes are elevated, but decoding remains available.") };
-        var report = new RadioHealthAssessment().Assess(Healthy(), Rf("warning") with { Sites = [site] }, Now);
-        Assert.Contains("repeatedly changes", report.Exceptions[0].Summary);
-        Assert.Contains("not been established", report.Impact);
-    }
-
-    [Fact]
-    public void RecoveryHoldDoesNotRepeatThePreviousFaultAsCurrentEvidence()
-    {
-        var site = Rf("warning").Sites[0] with { Status = "Recovering",
-            DecodeAssessment = new("ok", "local", 40, "Healthy now.") };
-        var report = new RadioHealthAssessment().Assess(Healthy(), Rf("warning") with { Sites = [site] }, Now);
-        Assert.Contains("recovering", report.Exceptions[0].Summary);
-        Assert.Contains("Current RF readings are healthy", report.Impact);
-    }
-
-    [Fact]
-    public void MultipleSitesStayBoundedWithoutExportingCombinedDiagnosticText()
-    {
-        var sites = Enumerable.Range(0, 20).Select(i => Rf("error").Sites[0] with {
-            SystemShortName = i + new string('\u754c',100), Detail = "private full diagnostic text",
-            DecodeAssessment = new("error", "critical", null, new string('\u754c',1000)) }).ToArray();
-        var report = new RadioHealthAssessment().Assess(Healthy(), Rf("error") with { Sites = sites }, Now);
-        Assert.Equal(20, report.ExceptionCount);
-        Assert.Equal(3, report.Exceptions.Count);
-        Assert.True(report.Serialize().Length <= RadioHealthSummary.MaxPayloadBytes);
-        Assert.DoesNotContain("private full diagnostic", System.Text.Encoding.UTF8.GetString(report.Serialize()));
-    }
-
-    [Fact]
-    public void MaterialEvidenceChangesArePublishedWithoutWaitingForHeartbeat()
-    {
-        var report = new RadioHealthAssessment().Assess(Healthy(), Rf("warning"), Now);
-        var schedule = new RadioHealthPublishSchedule();
-        schedule.Published(report, Now);
-        var changed = report with { Exceptions = [report.Exceptions[0] with { Evidence = "Changed operational finding" }] };
-        Assert.True(schedule.IsDue(changed, Now.AddMinutes(1)));
-    }
-
-    [Fact]
-    public void PublisherDefaultsDisabledAndRequiresAnExplicitProtectedCredentialPath()
-    {
-        var options = new RadioHealthPublisherOptions();
-        options.Validate();
-        Assert.False(options.Enabled);
-        options.Enabled = true;
-        Assert.Throws<InvalidOperationException>(options.Validate);
-        options.BrokerHost = "broker.local";
-        options.Username = "radio";
-        options.PasswordFile = "relative-password";
+        var options = new RadioHealthPublisherOptions(); options.Validate(); Assert.False(options.Enabled);
+        options.Enabled = true; Assert.Throws<InvalidOperationException>(options.Validate);
+        options.BrokerHost = "broker.local"; options.Username = "radio"; options.PasswordFile = "relative-password";
         Assert.Throws<InvalidOperationException>(options.Validate);
     }
 }

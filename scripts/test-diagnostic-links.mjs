@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
+const { readDiagnosticLink } = await import(pathToFileURL(process.argv[2]).href);
+assert.deepEqual(readDiagnosticLink("?page=system&tab=recommendations&finding=12066"), {tab:"recommendations",findingId:12066});
+assert.deepEqual(readDiagnosticLink("?page=system&tab=metrics&metric=incidents"), {tab:"metrics",metric:"incidents"});
+assert.deepEqual(readDiagnosticLink("?page=system&tab=services&finding=12066"), {tab:"services"});
+assert.equal(readDiagnosticLink("?page=system&tab=reset&action=delete"), null);
+assert.equal(readDiagnosticLink("?page=setup&tab=recommendations"), null);
+for (const value of ["-1", "0", "1.5", "9007199254740992", "javascript:bad"]) assert.equal(readDiagnosticLink("?page=system&tab=recommendations&finding="+value)?.findingId, undefined);
+console.log("Diagnostic navigation cases passed");

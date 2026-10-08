@@ -132,3 +132,41 @@ unquantified missed calls and the domain evidence. Cleveland's retune warning
 was visible separately; no new SDR queries were added. 826 backend tests passed.
 HA native stale/unavailable/current fixtures and main/detail rendering passed.
 Complete receipt: whiteoakHomeAssistant docs/useful-radio-status-2026-10-07.md.
+
+## Estate escalation policy correction
+
+Individual RF sites are no longer estate alarms. North Bradley's expected failure
+must not dominate broad operational reporting. The area summary now projects only
+active High/Critical System Recommendations problems, excluding RF targets,
+dormant/quiet findings, accepted known issues, closed/dismissed findings and
+improvements. It does not duplicate thresholds from HealthDto or RF status.
+Recommendations owns ingest, transcription, incident/AI and dependency judgments.
+Unresolved investigating/monitoring findings still escalate when active High+.
+
+Use the shared five-minute Recommendations assessment/cache, including its real
+generation time; reject stale/future source data. A completed shared build can be
+reused after a cancelled waiter. Do not publish arbitrary detail/action/error
+text: title, severity, evidence window and safe finding reference are sufficient
+for the broad board; the complete diagnosis belongs in the web app.
+
+Read-only UI links accept page=system and allowlisted tab/metric/finding IDs.
+They override remembered landing tabs and optionally open a finding review panel;
+invalid IDs or action/reset parameters cannot execute anything. The backend's
+finding URL points to System / Recommendations, not an API dump. OT and SDR 1861
+web assets need the same navigation support. The SDR update is frontend only,
+319,142 compressed bytes, with no new agent, poll, backend change or restart.
+Complete plan/evidence: whiteoakHomeAssistant docs/pipeline-escalation-2026-10-07.md.
+
+Pipeline correction activated and verified. Final source fc0f7ec package checksum:
+cf37e4ab84a996052af2e6a5a58d96191348dee6783dc8931889b49b396d131c.
+Final OT assembly e74d7dd566b42a2009e1053a6d3ae86ffcdf74286941b53dee9c289e514fd552.
+Two OT pizzad restarts included a final observation-time correction; Trunk Recorder
+remained active. SDR web-only package checksum:
+5f9bf5af50757218995e1ed177230452db877dafa5393cf8639fb64a24a7384a.
+Its original backend hash/process IDs/start times remained unchanged. Web transfer
+was 319,142 bytes with no added unattended traffic. Both deployed apps now support
+read-only System URL navigation; OT finding review panels were verified in-browser.
+835 backend tests, web build and ten navigation checks passed. The real 631-byte
+summary exported no pipeline alerts while three High RF findings stayed in the
+Recommendations UI. Healthy operation of unobserved SDR/backup/other AORs is not
+claimed. Full receipt: whiteoakHomeAssistant docs/pipeline-escalation-2026-10-07.md.

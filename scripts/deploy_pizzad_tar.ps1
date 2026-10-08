@@ -296,11 +296,15 @@ if ($effectiveWebOnly) {
         Assert-NativeCommand "web archive upload"
     }
 
+    $webArchiveSha256 = (Get-FileHash -LiteralPath $webTarPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Host "Web package SHA-256: $webArchiveSha256"
     $remoteScript = @"
 REMOTE_TAR=$(ConvertTo-BashSingleQuoted $RemoteTar)
+EXPECTED_SHA256=$(ConvertTo-BashSingleQuoted $webArchiveSha256)
 HEALTH_TIMEOUT_SECONDS=$(ConvertTo-BashSingleQuoted ([string]$HealthTimeoutSeconds))
 DEPLOY_MANIFEST=$(ConvertTo-BashSingleQuoted $deployManifestJson)
 set -e
+printf '%s  %s\n' "`$EXPECTED_SHA256" "`$REMOTE_TAR" | sha256sum -c -
 work=/tmp/pizzad-web-deploy
 maintenance_start=`$(date -u +%Y-%m-%dT%H:%M:%SZ)
 maintenance_token=`$(sudo cat /etc/pizzawave/pizzad.token 2>/dev/null || true)

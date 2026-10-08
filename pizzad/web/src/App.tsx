@@ -14,6 +14,7 @@ import type { LiveRfStatus } from "./types";
 import type { CallTransmissionSession } from "./types";
 import type { CategoryActivity, CategoryActivityCall } from "./types";
 import type { AlertMatch, AlertTalkgroupRef, BackupArchive, BackupEstimate, BackupRestoreApplyResult, BackupRestoreCancelResult, BackupRestorePreview, BarStat, CallVolumeBucket, CategoryPage, Dashboard, EngineCall, EngineHealth, Incident, IncidentDecisionPerformance, IncidentOperationAuditRow, Job, JobLog, LocationHeat, ProcessingProfile, ProfileState, ProfileTalkgroupSetting, QualityAuditGroup, QualityAuditSample, QualityHour, QueueSnapshot, RemoteBandwidthReport, RfSurveyApplySourceDraftResponse, RfSurveyCancelExperimentResult, RfSurveyConfigDraft, RfSurveyDetail, RfSurveyExperiment, RfSurveyExperimentPlan, RfSurveyPathProfile, RfSurveyProfile, RfSurveySource, RfSurveySweepCandidateProgress, RfSurveySweepProgress, RfSurveySweepProgressRow, RfSurveySystem, RfSurveyToolPrep, RfSurveyWaterfallStatus, RfTelemetrySummary, SetupAreaBoundaryCandidate, SetupAreaBoundaryResponse, SetupArtifactReport, SetupCalibrationPlan, SetupRfHistory, SetupRfHistoryRow, SetupSdrDetection, SetupStatus, SetupTalkgroupSyncResult, SetupTrConfigDraft, SetupTrConfigSite, SetupTrConfigSites, SetupValidationResult, SiteSetup, SiteSetupActivity, SiteSetupConfig, SiteSetupMonitoredArea, SiteSetupPendingChange, SiteSetupSourcePlanOption, SiteSetupSourcePlanProjection, StatusSummary, SupportPackage, SupportPackageCreateResult, SystemCpuSnapshot, SystemRecommendation, SystemRecommendations, SystemRecommendationSummary, SystemResetResult, SystemRuntimeResourceSample, TalkgroupCatalogDocument, TalkgroupCatalogImport, TalkgroupCatalogItem, TalkgroupCatalogPage, TalkgroupCatalogResponse, TokenUsageReport, TopTalkgroup, TranscriptionGroup, TranscriptionLatencyBucket, TranscriptionOutcomeBucket, TranscriptionPerformance, TrConfigViewer, TrHealthChart, TrHealthMetric, TrLogPage, TrMetricAssessment, TrRfAnalysis, TrTroubleshoot } from "./types";
+import { readDiagnosticLink } from "./features/system/diagnosticLinks";
 import "./style.css";
 
 const categories = ["police", "fire", "ems", "traffic", "utilities", "other"] as const;
@@ -139,7 +140,7 @@ function countActiveSystemProblems(recommendations: SystemRecommendations) {
 }
 
 function App() {
-  const [page, setPageState] = useState<Page>(() => normalizePage(localStorage.getItem("pizzawave-page")));
+  const [page, setPageState] = useState<Page>(() => readDiagnosticLink(window.location.search) ? "system" : normalizePage(localStorage.getItem("pizzawave-page")));
   const [rangeHours, setRangeHours] = useState(24);
   const [theme, setTheme] = useState<Theme>(() => normalizeTheme(localStorage.getItem("pizzawave-theme")));
   const [appNotice, setAppNotice] = useState("");
@@ -4779,12 +4780,14 @@ function SystemSectionHeader({ title, description, meta, actions }: { title: str
 type RfChartCategory = "all" | "decode" | "activity" | "events";
 
 function SystemView({ rangeHours, engineHealth, refreshSharedStatus, refreshSignal, targetTab, clearTargetTab, onLiveResources, onSystemProblemCount, onOpenSetup, onOpenTalkgroup, onOpenIncident }: { rangeHours: number; engineHealth: EngineHealth | null; refreshSharedStatus: () => Promise<unknown>; refreshSignal: number; targetTab?: SystemTopTab | null; clearTargetTab?: () => void; onLiveResources?: (sample: SystemRuntimeResourceSample) => void; onSystemProblemCount?: (count: number) => void; onOpenSetup?: (section?: string) => void; onOpenTalkgroup: (row: { category: string; talkgroup: number }) => void; onOpenIncident: (incidentId: number) => void }) {
-  const [topTab, setTopTabState] = useState<SystemTopTab>(() => normalizeSystemTopTab(localStorage.getItem("pizzawave-system-tab")));
+  const [topTab, setTopTabState] = useState<SystemTopTab>(() => readDiagnosticLink(window.location.search)?.tab ?? normalizeSystemTopTab(localStorage.getItem("pizzawave-system-tab")));
   const [trTab, setTrTabState] = useState<SystemTrTab>(() => {
     const saved = localStorage.getItem("pizzawave-system-tr-tab");
     return saved === "logs" || saved === "config" ? saved : "summary";
   });
   const [metricsTab, setMetricsTabState] = useState<"calls" | "transcription" | "rf" | "incidents" | "ai" | "bandwidth">(() => {
+    const requested = readDiagnosticLink(window.location.search)?.metric;
+    if (requested) return requested;
     const saved = localStorage.getItem("pizzawave-system-metrics-tab");
     return (["calls", "transcription", "rf", "incidents", "ai", "bandwidth"].includes(saved ?? "") ? saved as any : "calls");
   });
@@ -10213,7 +10216,7 @@ function ServicesManager({ runtime, snapshot, history, restartBusy, restartMessa
 
 function RecommendationsPanel({ recommendations, onOpen, onChanged }: { recommendations: SystemRecommendations | null; onOpen: (item: SystemRecommendation) => void; onChanged: () => Promise<unknown> }) {
   const [tab, setTab] = useState<"active" | "known" | "history">("active");
-  const [selectedFindingId, setSelectedFindingId] = useState<number | null>(null);
+  const [selectedFindingId, setSelectedFindingId] = useState<number | null>(() => readDiagnosticLink(window.location.search)?.findingId ?? null);
   const [activityPage, setActivityPage] = useState(1);
   const [statusDraft, setStatusDraft] = useState<Record<number, string>>({});
   const [noteDraft, setNoteDraft] = useState<Record<number, string>>({});
