@@ -10,6 +10,59 @@ public sealed class RadioHealthSummaryTests
     private static SystemRecommendationsDto Source(params SystemRecommendationDto[] items)
         => new(0, 0, 0, 0, 0, 0, items, [], [], []) { GeneratedAtUtc = Now };
 
+    private static HealthDto PipelineHealth(DateTime? at = null)
+        => JsonSerializer.Deserialize<HealthDto>(JsonSerializer.Serialize(new {
+            serverTimeUtc = at ?? Now, throughputWindowMinutes = 10,
+            recentCallsIngested = 53, recentCallsTranscribed = 56, pendingTranscriptions = 0,
+            databasePath = "private-database", audioRoot = "private-audio",
+            ingest = new { paused = false },
+            liveTrActivity = new { stale = false, lastLiveCallUtc = Now.AddSeconds(-3) },
+            incidentAnalysisQueueHealth = new { status = "ok", pendingCalls = 189,
+                latestCompletedCallUtc = Now.AddMinutes(-9) },
+            aiCompletionHealth = new { windowMinutes = 30, requests = 20, failures = 0,
+                latestFailure = "private-error" }
+        }), EngineConfig.JsonOptions())!;
+
+    [Fact]
+    public void PipelineEvidenceShowsUsefulWorkWithoutPrivateDetails()
+    {
+        var report = new RadioHealthAssessment().Assess(Source(), Now, PipelineHealth());
+        Assert.Equal(53, report.Pipeline!.CallsReceived);
+        Assert.Equal(56, report.Pipeline.CallsTranscribed);
+        Assert.Equal(189, report.Pipeline.AwaitingIncidentAnalysis);
+        Assert.DoesNotContain("private-", System.Text.Encoding.UTF8.GetString(report.Serialize()));
+        Assert.Equal("unknown", report.Condition);
+    }
+
+    [Theory]
+    [InlineData(-180)]
+    [InlineData(60)]
+    public void OldOrFuturePipelineEvidenceDoesNotBecomeCurrent(int seconds)
+        => Assert.Null(new RadioHealthAssessment().Assess(Source(), Now,
+            PipelineHealth(Now.AddSeconds(seconds))).Pipeline);
+
+    [Fact]
+    public void DormantAndMediumPipelineFindingsRemainVisibleWithoutRfNoise()
+    {
+        var source = Source(Finding("tr-live-silent") with { ActivityState = "quiet" },
+            Finding("ai-generation-health", "medium"), Finding("tr-rf-temporal-v2:nbradley"));
+        var report = new RadioHealthAssessment().Assess(source, Now, PipelineHealth());
+        Assert.Empty(report.Exceptions);
+        Assert.Equal(2, report.OpenFindingCount);
+        Assert.Contains(report.OpenFindings, item => item.Activity == "dormant");
+        Assert.All(report.OpenFindings, item => Assert.Contains("&finding=12", item.DetailsUrl));
+    }
+
+    [Fact]
+    public void PipelineAndManyUnicodeFindingsRemainWithinWireBudget()
+    {
+        var items = Enumerable.Range(0,20).Select(i => Finding(i.ToString()) with {
+            Title = new string('\u754c',1000), EvidenceWindow = new string('\u754c',1000) }).ToArray();
+        var report = new RadioHealthAssessment().Assess(Source(items), Now, PipelineHealth());
+        Assert.Equal(20, report.OpenFindingCount);
+        Assert.True(report.Serialize().Length <= RadioHealthSummary.MaxPayloadBytes);
+    }
+
     [Fact]
     public void NoPipelineEscalationDoesNotClaimUnobservedReceiverHealthy()
     {

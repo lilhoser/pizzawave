@@ -46,6 +46,11 @@ public sealed class RadioHealthPublishSchedule
         {
             summary.Condition, summary.Confidence, summary.Impact, summary.Coverage,
             summary.ExceptionCount,
+            summary.OpenFindingCount, summary.OpenFindings,
+            PipelineState = summary.Pipeline == null ? null : new {
+                summary.Pipeline.IngestPaused, summary.Pipeline.CaptureStale,
+                summary.Pipeline.IncidentStatus,
+                AiFailing = summary.Pipeline.AiFailures > 0 },
             Exceptions = summary.Exceptions.Select(item => new { item.Id, item.Severity, item.Summary, item.Impact, item.Evidence, item.RecommendedAction, item.DetailsUrl }),
             summary.Protection
         });
