@@ -42,14 +42,14 @@ public sealed class RadioHealthSummaryTests
             PipelineHealth(Now.AddSeconds(seconds))).Pipeline);
 
     [Fact]
-    public void DormantAndMediumPipelineFindingsRemainVisibleWithoutRfNoise()
+    public void OnlyActiveMediumPipelineFindingsRemainVisibleWithoutDormantOrRfNoise()
     {
         var source = Source(Finding("tr-live-silent") with { ActivityState = "quiet" },
             Finding("ai-generation-health", "medium"), Finding("tr-rf-temporal-v2:nbradley"));
         var report = new RadioHealthAssessment().Assess(source, Now, PipelineHealth());
         Assert.Empty(report.Exceptions);
-        Assert.Equal(2, report.OpenFindingCount);
-        Assert.Contains(report.OpenFindings, item => item.Activity == "dormant");
+        Assert.Equal(1, report.OpenFindingCount);
+        Assert.All(report.OpenFindings, item => Assert.Equal("active", item.Activity));
         Assert.All(report.OpenFindings, item => Assert.Contains("&finding=12", item.DetailsUrl));
     }
 
@@ -119,7 +119,10 @@ public sealed class RadioHealthSummaryTests
     public void QuietFindingsAndImprovementsAreNotPipelineFaults()
     {
         var source = Source(Finding() with { ActivityState = "quiet" }, Finding("optimization", "critical") with { Kind = "improvement" });
-        Assert.Empty(new RadioHealthAssessment().Assess(source, Now).Exceptions);
+        var report = new RadioHealthAssessment().Assess(source, Now);
+        Assert.Empty(report.Exceptions);
+        Assert.Empty(report.OpenFindings);
+        Assert.Equal(0, report.OpenFindingCount);
     }
 
     [Fact]

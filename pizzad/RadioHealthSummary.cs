@@ -74,6 +74,7 @@ public sealed class RadioHealthAssessment
                 DetailsUrl: link);
         }).ToArray();
         var open = current ? source.Items.Where(item => IsPipelineProblem(item)
+            && item.ActivityState == "active"
             && item.Severity is "high" or "critical" or "medium"
             && item.WorkflowStatus is not ("known_issue" or "resolved" or "dismissed"))
             .OrderByDescending(item => item.Severity == "critical")

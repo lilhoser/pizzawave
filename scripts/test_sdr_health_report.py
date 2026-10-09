@@ -32,16 +32,24 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual('check_failed',data['pipeline_result'])
         self.assertEqual({},data['pipeline'])
 
-    def test_excludes_rf_and_accepted_findings_but_keeps_dormant_pipeline(self):
+    def test_excludes_rf_and_accepted_findings_and_dormant_pipeline(self):
         base={'id':'ai-generation-health','title':'AI delayed','severity':'high','kind':'problem','activityState':'quiet','workflowStatus':'new','target':{},'findingId':123}
-        self.source['items']=[base,{**base,'id':'tr-rf-bradley'},{**base,'workflowStatus':'known_issue'}]
+        self.source['items']=[base,{**base,'activityState':'active'},{**base,'id':'tr-rf-bradley','activityState':'active'},{**base,'workflowStatus':'known_issue','activityState':'active'}]
         data=json.loads(report.collect(self.fetch,self.now))
         self.assertEqual(1,data['open_finding_count'])
-        self.assertEqual('dormant',data['open_findings'][0]['activity'])
+        self.assertEqual('active',data['open_findings'][0]['activity'])
         self.assertEqual(report.LINK+'&finding=123',data['open_findings'][0]['details_url'])
 
+    def test_dormant_findings_cannot_crowd_active_findings_out_of_three_slots(self):
+        base={'id':'queue-pressure','title':'Old failure','severity':'critical','kind':'problem',
+            'activityState':'quiet','target':{}}
+        self.source['items']=[base]*5+[{**base,'title':'Current failure','severity':'medium','activityState':'active'}]
+        data=json.loads(report.collect(self.fetch,self.now))
+        self.assertEqual(1,data['open_finding_count'])
+        self.assertEqual('Current failure',data['open_findings'][0]['title'])
+
     def test_unicode_findings_remain_bounded(self):
-        self.source['items']=[{'id':str(i),'title':'測'*1000,'severity':'high','target':{}} for i in range(50)]
+        self.source['items']=[{'id':str(i),'title':'測'*1000,'severity':'high','activityState':'active','target':{}} for i in range(50)]
         data=json.loads(report.collect(self.fetch,self.now))
         self.assertEqual(50,data['open_finding_count'])
         self.assertEqual(3,len(data['open_findings']))

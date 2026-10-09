@@ -110,6 +110,7 @@ def findings(source, now):
             or str(item.get('id', '')).startswith('tr-rf-')
             or target.get('subTab') == 'rf'
             or (target.get('topTab') == 'tr' and target.get('subTab') == 'metrics')
+            or item.get('activityState') != 'active'
             or item.get('severity') not in ('medium', 'high', 'critical')
             or item.get('workflowStatus') in ('known_issue', 'resolved', 'dismissed')):
             continue
