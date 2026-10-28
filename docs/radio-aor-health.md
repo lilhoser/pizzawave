@@ -206,7 +206,9 @@ REST sensor continues to describe application health.
 
 Recovery review: power/process loss preserves acknowledged holds through SQLite;
 HASS, broker, cloud, network and arbitrary recovery order cannot release them.
-Database loss/corruption pauses live ingest until reviewed. Local diagnostics,
+Unreadable/invalid or missing saved rows pause live ingest until reviewed.
+Removing/replacing the entire engine database is a separate destructive
+reinitialization and cannot recover a prior hold from absent data. Local diagnostics,
 DB/WAL recovery and the existing authenticated Resume endpoint remain available
 without HASS or broker. The new row travels with existing whole-engine database
 backups; this work does not establish new backup/restore acceptance or retention.
