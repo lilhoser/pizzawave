@@ -30,6 +30,7 @@ public sealed partial class EngineDatabase
         await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode=WAL;", ct);
         await ExecuteNonQueryAsync(connection, "PRAGMA foreign_keys=ON;", ct);
         await ExecuteNonQueryAsync(connection, SchemaSql, ct);
+        InitializeIngestControlStore(connection);
         await ExecuteNonQueryAsync(connection, WorkspaceSchemaSql, ct);
         await ExecuteNonQueryAsync(connection, IncidentExperimentSchemaSql, ct);
         await EnsureSchemaMigrationsAsync(connection, ct);

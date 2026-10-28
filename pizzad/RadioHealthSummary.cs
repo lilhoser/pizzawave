@@ -13,7 +13,13 @@ public sealed record RadioPipelineEvidence(DateTime ObservedAt, int WindowMinute
     long CallsReceived, long CallsTranscribed, long AwaitingTranscription,
     bool IngestPaused, bool CaptureStale, DateTime? LastLiveCallAt,
     string IncidentStatus, long AwaitingIncidentAnalysis, DateTime? LatestAnalyzedCallAt,
-    int AiWindowMinutes, int AiRequests, int AiFailures);
+    int AiWindowMinutes, int AiRequests, int AiFailures)
+{
+    public string CaptureStatus { get; init; } = "unknown";
+    public DateTime? CaptureStartedAt { get; init; }
+    public string IngestStateStatus { get; init; } = "unknown";
+    public DateTime? IngestPausedAt { get; init; }
+}
 public sealed record RadioOpenFinding(string Title, string Severity, string Activity,
     DateTime? LastSeenAt, string DetailsUrl);
 public sealed record RadioHealthSummary(int SchemaVersion, string AorId, string ReportId,
@@ -88,6 +94,14 @@ public sealed class RadioHealthAssessment
                     ? health.IncidentAnalysisQueueHealth.Status : "unknown",
                 health.IncidentAnalysisQueueHealth.PendingCalls, health.IncidentAnalysisQueueHealth.LatestCompletedCallUtc,
                 health.AiCompletionHealth.WindowMinutes, health.AiCompletionHealth.Requests, health.AiCompletionHealth.Failures)
+            {
+                CaptureStatus = health.LiveTrActivity.Status is "ok" or "warming" or "stale" or "fault" or "stopped"
+                    ? health.LiveTrActivity.Status : "unknown",
+                CaptureStartedAt = health.LiveTrActivity.StartedAtUtc > DateTime.UnixEpoch
+                    ? health.LiveTrActivity.StartedAtUtc : null,
+                IngestStateStatus = health.Ingest.StateStatus,
+                IngestPausedAt = health.Ingest.PausedAtUtc
+            }
             : null;
         var report = new RadioHealthSummary(1, "radio", Guid.NewGuid().ToString("N"), now,
             now.AddMinutes(15), exceptions.Length > 0 ? "degraded" : "unknown", "partial",
@@ -110,6 +124,11 @@ public sealed class RadioHealthAssessment
         while (JsonSerializer.SerializeToUtf8Bytes(report, RadioHealthSummary.JsonOptions).Length
             > RadioHealthSummary.MaxPayloadBytes && report.OpenFindings.Count > 0)
             report = report with { OpenFindings = report.OpenFindings.Take(report.OpenFindings.Count - 1).ToArray() };
+        // Keep the highest-priority exception and pipeline evidence within the same wire cap.
+        // ExceptionCount still names the complete assessment; details remain at the source URL.
+        while (JsonSerializer.SerializeToUtf8Bytes(report, RadioHealthSummary.JsonOptions).Length
+            > RadioHealthSummary.MaxPayloadBytes && report.Exceptions.Count > 1)
+            report = report with { Exceptions = report.Exceptions.Take(report.Exceptions.Count - 1).ToArray() };
         return report;
     }
 

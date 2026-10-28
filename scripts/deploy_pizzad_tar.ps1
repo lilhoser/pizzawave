@@ -22,6 +22,10 @@ param(
 
     [switch]$NoRestart,
 
+    [switch]$PackageOnly,
+
+    [string]$ExpectedBackendAssemblySha256 = "",
+
     [int]$HealthTimeoutSeconds = 20
 )
 
@@ -357,7 +361,7 @@ $publishReady = -not $ForceBuild -and $publishState -and $publishState.inputHash
 $deployManifest = [ordered]@{
     schemaVersion = 1
     backendHash = $backendSourceHash
-    webHash = $webOutputHash
+    webHash = $(if ($BackendOnly -and $remoteManifest) { $remoteManifest.webHash } else { $webOutputHash })
     rid = $Rid
     deployedAtUtc = [DateTime]::UtcNow.ToString("O")
 }
@@ -378,7 +382,8 @@ if (-not $publishReady) {
             -r $Rid `
             --self-contained true `
             -p:SelfContained=true `
-            -p:PublishSingleFile=false
+            -p:PublishSingleFile=false `
+            -p:PIZZAD_SKIP_WEB_BUILD=$BackendOnly
         Assert-NativeCommand "backend build"
     }
     Invoke-TimedStage "backend publish" {
@@ -388,6 +393,7 @@ if (-not $publishReady) {
             --self-contained true `
             -p:SelfContained=true `
             -p:PublishSingleFile=false `
+            -p:PIZZAD_SKIP_WEB_BUILD=$BackendOnly `
             --no-build `
             --no-restore `
             -o $publishDir
@@ -420,6 +426,12 @@ else {
     Write-Host "[backend archive] reused verified $Rid archive"
 }
 
+if ($PackageOnly) {
+    Write-Host "Package-only verification artifact: $tarPath"
+    Write-Host ("SHA-256: " + (Get-FileHash -LiteralPath $tarPath -Algorithm SHA256).Hash.ToLowerInvariant())
+    return
+}
+
 Invoke-TimedStage "backend upload" {
     scp @sshArgs $tarPath "${HostName}:$RemoteTar"
     Assert-NativeCommand "backend archive upload"
@@ -427,14 +439,22 @@ Invoke-TimedStage "backend upload" {
 
 $archiveSha256 = (Get-FileHash -LiteralPath $tarPath -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "Backend package SHA-256: $archiveSha256"
+if ($ExpectedBackendAssemblySha256 -and $ExpectedBackendAssemblySha256 -notmatch '^[0-9a-fA-F]{64}$') {
+    throw "Invalid expected backend assembly hash."
+}
+$backendRsyncExclude = if ($BackendOnly) { "--exclude=wwwroot/" } else { "" }
 $restartPizzad = if ($NoRestart) { "0" } else { "1" }
 $remoteScript = @"
 REMOTE_TAR=$(ConvertTo-BashSingleQuoted $RemoteTar)
 EXPECTED_SHA256=$(ConvertTo-BashSingleQuoted $archiveSha256)
 RESTART_PIZZAD=$(ConvertTo-BashSingleQuoted $restartPizzad)
+EXPECTED_CURRENT_ASSEMBLY=$(ConvertTo-BashSingleQuoted $ExpectedBackendAssemblySha256)
 HEALTH_TIMEOUT_SECONDS=$(ConvertTo-BashSingleQuoted ([string]$HealthTimeoutSeconds))
 set -e
 printf '%s  %s\n' "`$EXPECTED_SHA256" "`$REMOTE_TAR" | sha256sum -c -
+if [ -n "`$EXPECTED_CURRENT_ASSEMBLY" ]; then
+  printf '%s  /opt/pizzawave/pizzad/pizzad.dll\n' "`$EXPECTED_CURRENT_ASSEMBLY" | sha256sum -c -
+fi
 work=/tmp/pizzad-direct-deploy
 maintenance_start=`$(date -u +%Y-%m-%dT%H:%M:%SZ)
 maintenance_token=`$(sudo cat /etc/pizzawave/pizzad.token 2>/dev/null || true)
@@ -447,9 +467,35 @@ rm -rf "`$work"
 mkdir -p "`$work"
 tar -xf "`$REMOTE_TAR" -C "`$work"
 if [ "`$RESTART_PIZZAD" = "1" ]; then
-  sudo systemctl stop pizzad || true
+  # One-time upgrade of the old process-only hold, under the existing service identity.
+  # Never create a replacement database or overwrite already-durable intent.
+  sudo -n -u pizzawave python3 - <<'PIZZAWAVE_PAUSE_UPGRADE'
+import json, pathlib, sqlite3, urllib.request
+config=json.loads(pathlib.Path('/etc/pizzawave/pizzad.json').read_text())
+path=pathlib.Path(config['storage']['databasePath'])
+assert path.is_absolute() and path.is_file(), 'Existing engine database required'
+with sqlite3.connect('file:'+str(path)+'?mode=rw',uri=True,timeout=5) as connection:
+    exists=connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ingest_control_state'").fetchone()
+    if not exists:
+        token_path=config.get('auth',{}).get('tokenFile','/etc/pizzawave/pizzad.token')
+        token=pathlib.Path(token_path).read_text().strip()
+        request=urllib.request.Request('http://127.0.0.1:8080/api/v1/system/queue',headers={'Authorization':'Bearer '+token})
+        with urllib.request.urlopen(request,timeout=30) as response:
+            state=json.load(response)['ingest']
+        assert type(state.get('paused')) is bool and type(state.get('untilQueueClear')) is bool
+        if state['paused']: assert state.get('pausedAtUtc') and isinstance(state.get('reason'),str)
+        connection.execute('PRAGMA synchronous=FULL')
+        connection.execute('BEGIN IMMEDIATE')
+        connection.execute("CREATE TABLE ingest_control_state (id INTEGER PRIMARY KEY CHECK (id=1), schema_version INTEGER NOT NULL CHECK (schema_version=1), paused INTEGER NOT NULL CHECK (paused IN (0,1)), until_queue_clear INTEGER NOT NULL CHECK (until_queue_clear IN (0,1)), reason TEXT NOT NULL, paused_at_utc TEXT)")
+        connection.execute('INSERT INTO ingest_control_state VALUES (1,1,?,?,?,?)',
+            (int(state['paused']),int(state['untilQueueClear']) if state['paused'] else 0,
+             state['reason'] if state['paused'] else '',state.get('pausedAtUtc') if state['paused'] else None))
+        connection.commit()
+        print('Existing ingest intent preserved for durable recovery')
+PIZZAWAVE_PAUSE_UPGRADE
+  sudo systemctl stop pizzad
 fi
-sudo rsync -a --delete "`$work"/ /opt/pizzawave/pizzad/
+sudo rsync -a --delete $backendRsyncExclude "`$work"/ /opt/pizzawave/pizzad/
 sudo chown -R root:root /opt/pizzawave/pizzad
 sudo chmod +x /opt/pizzawave/pizzad/pizzad
 sudo find /opt/pizzawave/pizzad/scripts -type f -name '*.sh' -exec chmod 0755 {} \; 2>/dev/null || true

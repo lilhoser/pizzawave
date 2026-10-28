@@ -135,3 +135,11 @@ sudo systemctl start pizzad
 
 For package rollback, reinstall the prior `.deb` and restore the saved config or
 database only if required.
+
+
+Backend pause-recovery verification (October 28): use the existing direct helper
+with `-HostName ot -Rid linux-x64 -BackendOnly -PackageOnly` to build/hash the
+artifact without installing it. After isolated process-restart verification,
+repeat without `-PackageOnly` to deploy the verified cached package. Backend-only
+installation now excludes the independently deployed `wwwroot/` tree and retains
+its manifest hash. No frontend build, new credential or TR restart is needed.

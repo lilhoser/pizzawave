@@ -34,6 +34,28 @@ public sealed class RadioHealthSummaryTests
         Assert.Equal("unknown", report.Condition);
     }
 
+    [Fact]
+    public void WarmupAndDurablePauseAreExplicitAndRecoveryIsAMaterialChange()
+    {
+        var health = PipelineHealth();
+        health = health with
+        {
+            LiveTrActivity = health.LiveTrActivity with { Status = "warming", Stale = false, StartedAtUtc = Now, LastLiveCallUtc = null },
+            Ingest = health.Ingest with { Paused = true, PausedAtUtc = Now.AddHours(-3), StateStatus = "durable" }
+        };
+        var report = new RadioHealthAssessment().Assess(Source(), Now, health);
+        Assert.Equal("warming", report.Pipeline!.CaptureStatus);
+        Assert.Equal(Now, report.Pipeline.CaptureStartedAt);
+        Assert.Null(report.Pipeline.LastLiveCallAt);
+        Assert.Equal(Now.AddHours(-3), report.Pipeline.IngestPausedAt);
+        Assert.Equal("durable", report.Pipeline.IngestStateStatus);
+        var schedule = new RadioHealthPublishSchedule();
+        schedule.Published(report, Now);
+        var recovered = report with { Pipeline = report.Pipeline with { CaptureStatus = "ok" } };
+        Assert.True(schedule.IsDue(recovered, Now.AddSeconds(1)));
+        Assert.True(report.Serialize().Length <= RadioHealthSummary.MaxPayloadBytes);
+    }
+
     [Theory]
     [InlineData(-180)]
     [InlineData(60)]

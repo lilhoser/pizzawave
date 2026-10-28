@@ -115,7 +115,9 @@ var db = app.Services.GetRequiredService<EngineDatabase>();
 await db.InitializeAsync(app.Lifetime.ApplicationStopping);
 var auth = app.Services.GetRequiredService<AuthService>();
 auth.Initialize();
+var startupIngestControl = app.Services.GetRequiredService<IngestControlService>();
 await app.Services.GetRequiredService<EnginePipeline>().StartAsync(app.Lifetime.ApplicationStopping);
+startupIngestControl.CompleteStartupRecovery();
 
 app.UseSwagger();
 app.UseSwaggerUI();

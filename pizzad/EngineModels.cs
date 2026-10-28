@@ -754,7 +754,10 @@ public sealed record IngestControlStatusDto(
     string Reason,
     DateTime? PausedAtUtc,
     long DroppedCalls,
-    long DroppedCallsThisPause);
+    long DroppedCallsThisPause)
+{
+    public string StateStatus { get; init; } = "durable";
+}
 
 public sealed record IngestControlRequest(bool Pause, bool UntilQueueClear = false, string? Reason = null);
 

@@ -96,7 +96,7 @@ public sealed class SystemResetServiceTests
         using var temp = new TempMigrationStore();
         var database = temp.CreateDatabase();
         await database.InitializeAsync(CancellationToken.None);
-        var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
+        var ingest = new IngestControlService(database, NullLogger<IngestControlService>.Instance);
         var service = temp.CreateService(database, ingest);
 
         Directory.Delete(temp.AppDataRoot, recursive: true);
@@ -121,7 +121,7 @@ public sealed class SystemResetServiceTests
         using var temp = new TempMigrationStore();
         var database = temp.CreateDatabase();
         await database.InitializeAsync(CancellationToken.None);
-        var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
+        var ingest = new IngestControlService(database, NullLogger<IngestControlService>.Instance);
         var service = temp.CreateService(database, ingest);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetAsync(new SystemResetRequestDto
@@ -141,7 +141,7 @@ public sealed class SystemResetServiceTests
         using var temp = new TempMigrationStore();
         var database = temp.CreateDatabase();
         await database.InitializeAsync(CancellationToken.None);
-        var ingest = new IngestControlService(NullLogger<IngestControlService>.Instance);
+        var ingest = new IngestControlService(database, NullLogger<IngestControlService>.Instance);
         var service = temp.CreateService(database, ingest);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetAsync(new SystemResetRequestDto
@@ -221,7 +221,7 @@ public sealed class SystemResetServiceTests
             var events = new EventStream();
             var catalog = new TalkgroupCatalogService(Config, NullLogger<TalkgroupCatalogService>.Instance);
             var embeddings = new EmbeddingService(Config, database, events, catalog, NullLogger<EmbeddingService>.Instance);
-            ingest ??= new IngestControlService(NullLogger<IngestControlService>.Instance);
+            ingest ??= new IngestControlService(database, NullLogger<IngestControlService>.Instance);
             var auth = new AuthService(Config, NullLogger<AuthService>.Instance);
             var backups = new BackupRestoreService(Config, NullLogger<BackupRestoreService>.Instance);
             return new SystemResetService(Config, database, embeddings, ingest, auth, backups, NullLogger<SystemResetService>.Instance);

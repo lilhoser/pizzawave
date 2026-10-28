@@ -170,3 +170,81 @@ read-only System URL navigation; OT finding review panels were verified in-brows
 summary exported no pipeline alerts while three High RF findings stayed in the
 Recommendations UI. Healthy operation of unobserved SDR/backup/other AORs is not
 claimed. Full receipt: whiteoakHomeAssistant docs/pipeline-escalation-2026-10-07.md.
+
+
+## October 28: durable manual ingest holds and explicit capture warmup
+
+Owner authorized OT deployment of pause recovery and HASS startup visibility.
+The fixed singleton `ingest_control_state` table lives in the existing engine
+SQLite database. Pause/resume writes commit with synchronous FULL before an API
+success is returned; no separate file, credential, broker or workstation is
+required. Pause mode, operator reason and original paused-at time survive a new
+process. Reassertion preserves the original hold time. Explicit Resume persists
+the release, so a later restart cannot resurrect an old hold.
+
+An unreadable/invalid saved state starts paused with stateStatus=unavailable;
+review storage and explicitly resume after recovery. A failed resume write keeps
+the old hold. Automatic queue-clear release must also commit before applying;
+a failed write leaves the hold for explicit review. A restored queue-clear pause
+cannot auto-release against startup's empty RAM queue: Program marks recovery
+complete only after pending transcription recovery. Existing reset operations
+continue to use the same durable Pause/Resume service. Dropped-call counters
+remain per-process measurements; no per-call persistence or counter replay is
+introduced. A pause retains its existing behavior of declining incoming live
+payloads, so production is not deliberately paused for validation.
+
+The bounded Radio pipeline adds capture_status, capture_started_at,
+ingest_state_status and ingest_paused_at from native health. These retain native
+source times. Warming is distinct from active capture and from stale/fault/
+stopped/unknown. The publisher treats capture-state and pause-state availability
+changes as material updates. The existing 4 KiB wire limit remains: lower-priority
+finding details may be omitted while total counts, highest-priority exception,
+source URLs and pipeline evidence remain. Remote SDR/backup coverage is not
+silently upgraded by this change. HASS shows the warmup explicitly and warns on
+unavailable pause state through the existing native Radio report. The legacy
+REST sensor continues to describe application health.
+
+Recovery review: power/process loss preserves acknowledged holds through SQLite;
+HASS, broker, cloud, network and arbitrary recovery order cannot release them.
+Database loss/corruption pauses live ingest until reviewed. Local diagnostics,
+DB/WAL recovery and the existing authenticated Resume endpoint remain available
+without HASS or broker. The new row travels with existing whole-engine database
+backups; this work does not establish new backup/restore acceptance or retention.
+No host reboot, Trunk Recorder restart, production pause or synthetic MQTT state
+is required for verification. Backend-only deployment preserves installed web
+assets. `-PackageOnly` prepares the same checked artifact for isolated validation;
+`scripts/test_ingest_restart.py` uses temporary paths and loopback-only access,
+disables outbound Radio reporting and verifies crash/restart plus explicit resume.
+
+
+Acceptance on October 28: 848 backend tests passed. The final Linux artifact
+passed an isolated three-process test on OT: native warmup, durable manual pause,
+forced process termination, original time/reason restored, explicit resume and
+another restart without resurrecting the hold. Outbound Radio reporting was
+removed from that test process environment; temporary DB/config/token/artifact
+copies were removed. No production Pause/Resume was issued for validation.
+
+The guarded production upgrade preserved its genuine unpaused intent in the new
+table, restarted only pizzad and reached a passing health check. Native health
+reports stateStatus=durable and active capture; the one saved row is schema 1,
+paused=false, until_queue_clear=false, paused_at_utc=NULL. Engine and TR config
+hashes, installed web tree and TR PID 1979/start time (14:05:27 Eastern) matched
+preflight. HASS received capture_status=ok, capture_started_at equal to native
+process start, ingest_state_status=durable and ingest_paused=false. Partial SDR
+coverage and unrelated existing AI/REST observations remain separate concerns.
+
+Installed assembly SHA-256:
+`1affa5ade19c8de7ed3a3f106282245a02cc728d3a5ae172836b3567a9ee26a0`.
+Deployment package SHA-256:
+`80c93d81507922f7169bdb7aa7157eccfab2f09a3784520efa9a7f20d4b96b5a`.
+The build embeds task source revision 7f811d3. The final consolidated milestone
+has identical deployable inputs; subsequent PizzaWave edits only record this
+acceptance and clarify the HASS reporting path. PDB document hashes verified all
+133 pre-change backend source files against the selected remote-main baseline.
+The unrelated primary checkout/local SSH commit and older archive/RF branches
+were preserved rather than included in this deployment.
+
+The actual HASS browser view confirmed current OT/SDR counters and preserved
+real findings, including the separate AI incident-generation degradation. No
+warning was dismissed or manufactured. Physical host reboot remains untested;
+the isolated process crash/restart test establishes the durable hold behavior.

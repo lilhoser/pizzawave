@@ -4,11 +4,26 @@ public sealed class IngestControlService
 {
     private readonly object _lock = new();
     private readonly ILogger<IngestControlService> _logger;
+    private readonly EngineDatabase _database;
+    private bool _startupRecoveryComplete;
+    private string _stateStatus = "durable";
     private DateTimeOffset _lastDropLogAt = DateTimeOffset.MinValue;
 
-    public IngestControlService(ILogger<IngestControlService> logger)
+    public IngestControlService(EngineDatabase database, ILogger<IngestControlService> logger)
     {
         _logger = logger;
+        _database = database;
+        try
+        {
+            Apply(database.LoadIngestPause());
+        }
+        catch (Exception ex)
+        {
+            Paused = true;
+            Reason = "Stored ingest pause state is unavailable; review it before explicitly resuming.";
+            _stateStatus = "unavailable";
+            _logger.LogError("Ingest pause restore failed ({ErrorType}); live ingest remains paused", ex.GetType().Name);
+        }
     }
 
     public bool Paused { get; private set; }
@@ -17,6 +32,12 @@ public sealed class IngestControlService
     public DateTime? PausedAtUtc { get; private set; }
     public long DroppedCalls { get; private set; }
     public long DroppedCallsAtPause { get; private set; }
+
+    // Startup's empty RAM queue is not evidence that persisted work has drained.
+    public void CompleteStartupRecovery()
+    {
+        lock (_lock) _startupRecoveryComplete = true;
+    }
 
     public IngestControlStatusDto GetStatus(int queueDepth)
     {
@@ -31,14 +52,13 @@ public sealed class IngestControlService
     {
         lock (_lock)
         {
-            if (!Paused)
-                DroppedCallsAtPause = DroppedCalls;
-            Paused = true;
-            UntilQueueClear = untilQueueClear;
-            Reason = string.IsNullOrWhiteSpace(reason)
-                ? untilQueueClear ? "Paused until transcription queue clears." : "Paused by user."
-                : reason.Trim();
-            PausedAtUtc = DateTime.UtcNow;
+            var state = new DurableIngestPause(true, untilQueueClear,
+                string.IsNullOrWhiteSpace(reason)
+                    ? untilQueueClear ? "Paused until transcription queue clears." : "Paused by user."
+                    : reason.Trim(), PausedAtUtc ?? DateTime.UtcNow);
+            Persist(state); // A successful response means the intent is committed, not merely cached.
+            if (!Paused) DroppedCallsAtPause = DroppedCalls;
+            Apply(state);
             _logger.LogWarning("Live callstream ingest paused. untilQueueClear={UntilQueueClear}; queueDepth={QueueDepth}; reason={Reason}", UntilQueueClear, queueDepth, Reason);
             return BuildStatus();
         }
@@ -48,13 +68,12 @@ public sealed class IngestControlService
     {
         lock (_lock)
         {
-            if (Paused)
-                _logger.LogInformation("Live callstream ingest resumed. queueDepth={QueueDepth}; reason={Reason}", queueDepth, reason);
-            Paused = false;
-            UntilQueueClear = false;
-            Reason = string.Empty;
-            PausedAtUtc = null;
+            var wasPaused = Paused;
+            Persist(new DurableIngestPause(false, false, string.Empty, null));
+            Apply(new DurableIngestPause(false, false, string.Empty, null));
             DroppedCallsAtPause = DroppedCalls;
+            if (wasPaused)
+                _logger.LogInformation("Live callstream ingest resumed. queueDepth={QueueDepth}; reason={Reason}", queueDepth, reason);
             return BuildStatus();
         }
     }
@@ -84,21 +103,49 @@ public sealed class IngestControlService
 
         lock (_lock)
         {
-            if (!Paused || !UntilQueueClear)
+            if (!Paused || !UntilQueueClear || !_startupRecoveryComplete || _stateStatus != "durable")
                 return;
 
-            _logger.LogInformation("Live callstream ingest auto-resumed because transcription queue cleared.");
-            Paused = false;
-            UntilQueueClear = false;
-            Reason = string.Empty;
-            PausedAtUtc = null;
-            DroppedCallsAtPause = DroppedCalls;
+            try
+            {
+                Persist(new DurableIngestPause(false, false, string.Empty, null));
+                Apply(new DurableIngestPause(false, false, string.Empty, null));
+                DroppedCallsAtPause = DroppedCalls;
+                _logger.LogInformation("Live callstream ingest auto-resumed because the recovered transcription queue cleared.");
+            }
+            catch (Exception)
+            {
+                // A failed durable release must not drop a manual hold or interrupt health reporting.
+            }
         }
+    }
+
+    private void Persist(DurableIngestPause state)
+    {
+        try
+        {
+            _database.SaveIngestPause(state);
+            _stateStatus = "durable";
+        }
+        catch (Exception ex)
+        {
+            _stateStatus = "unavailable";
+            _logger.LogError("Ingest pause write failed ({ErrorType}); no release was applied", ex.GetType().Name);
+            throw;
+        }
+    }
+
+    private void Apply(DurableIngestPause state)
+    {
+        Paused = state.Paused;
+        UntilQueueClear = state.UntilQueueClear;
+        Reason = state.Reason;
+        PausedAtUtc = state.PausedAtUtc;
     }
 
     private IngestControlStatusDto BuildStatus()
     {
         var droppedThisPause = Paused ? Math.Max(0, DroppedCalls - DroppedCallsAtPause) : 0;
-        return new IngestControlStatusDto(Paused, UntilQueueClear, Reason, PausedAtUtc, DroppedCalls, droppedThisPause);
+        return new IngestControlStatusDto(Paused, UntilQueueClear, Reason, PausedAtUtc, DroppedCalls, droppedThisPause) { StateStatus = _stateStatus };
     }
 }
