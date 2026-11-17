@@ -3458,6 +3458,27 @@ public sealed partial class EngineDatabase
             latestFailure is null ? string.Empty : FailureExample(latestFailure));
     }
 
+    internal async Task<DateTime?> GetLatestAutomaticCompletionAsync(
+        string endpoint, string model, DateTime? startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT timestamp_utc FROM lm_usage
+            WHERE timestamp_utc BETWEEN $start AND $end
+              AND success = 1 AND trigger_activity = 'automatic insights'
+              AND request_kind = 'chat.completions' AND endpoint = $endpoint AND request_model = $model
+            ORDER BY timestamp_utc DESC
+            LIMIT 1;
+            """;
+        Add(command, "$start", (startUtc ?? DateTime.UnixEpoch).ToString("O"));
+        Add(command, "$end", endUtc.ToString("O"));
+        Add(command, "$endpoint", endpoint);
+        Add(command, "$model", model);
+        return await command.ExecuteScalarAsync(ct) is string timestamp
+            ? DateTime.Parse(timestamp, null, System.Globalization.DateTimeStyles.RoundtripKind) : null;
+    }
+
     public async Task<List<TokenUsageEntryDto>> ListLmUsageEntriesAsync(DateTime? startUtc, DateTime? endUtc, CancellationToken ct)
     {
         await using var connection = OpenConnection();

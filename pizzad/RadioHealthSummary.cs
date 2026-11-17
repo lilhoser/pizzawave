@@ -19,6 +19,9 @@ public sealed record RadioPipelineEvidence(DateTime ObservedAt, int WindowMinute
     public DateTime? CaptureStartedAt { get; init; }
     public string IngestStateStatus { get; init; } = "unknown";
     public DateTime? IngestPausedAt { get; init; }
+    public DateTime? AiLastSuccessAt { get; init; }
+    public DateTime? AiLmlinkProbeAt { get; init; }
+    public bool? AiLmlinkProbeOk { get; init; }
 }
 public sealed record RadioOpenFinding(string Title, string Severity, string Activity,
     DateTime? LastSeenAt, string DetailsUrl);
@@ -54,7 +57,8 @@ public sealed class RadioHealthAssessment
     private readonly Dictionary<string, DateTime> _firstObserved = new(StringComparer.Ordinal);
     public const string RecommendationsUrl = "http://192.168.1.173:8080/?page=system&tab=recommendations";
 
-    public RadioHealthSummary Assess(SystemRecommendationsDto source, DateTime now, HealthDto? health = null)
+    public RadioHealthSummary Assess(SystemRecommendationsDto source, DateTime now, HealthDto? health = null,
+        RadioAiCompletionEvidence? ai = null)
     {
         var missing = new List<string> { "sdr-1861" };
         var current = now - source.GeneratedAtUtc <= TimeSpan.FromMinutes(6)
@@ -100,7 +104,10 @@ public sealed class RadioHealthAssessment
                 CaptureStartedAt = health.LiveTrActivity.StartedAtUtc > DateTime.UnixEpoch
                     ? health.LiveTrActivity.StartedAtUtc : null,
                 IngestStateStatus = health.Ingest.StateStatus,
-                IngestPausedAt = health.Ingest.PausedAtUtc
+                IngestPausedAt = health.Ingest.PausedAtUtc,
+                AiLastSuccessAt = ai?.LastSuccessAt,
+                AiLmlinkProbeAt = ai?.ProbeAt,
+                AiLmlinkProbeOk = ai?.ProbeOk
             }
             : null;
         var report = new RadioHealthSummary(1, "radio", Guid.NewGuid().ToString("N"), now,
@@ -172,21 +179,26 @@ public sealed class RadioHealthAssessment
     }
 }
 
-public sealed class RadioHealthSummaryService(SystemRecommendationService recommendations, HealthStatusService health)
+public sealed class RadioHealthSummaryService(SystemRecommendationService recommendations, HealthStatusService health,
+    RadioAiCompletionMonitor ai)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly RadioHealthAssessment _assessment = new();
     private RadioHealthSummary? _cached;
+    private bool _cachedFromPublisher;
 
-    public async Task<RadioHealthSummary> GetAsync(CancellationToken ct)
+    public async Task<RadioHealthSummary> GetAsync(CancellationToken ct, bool allowProbe = false)
     {
         await _gate.WaitAsync(ct);
         try
         {
-            if (_cached != null && DateTime.UtcNow - _cached.GeneratedAt < TimeSpan.FromSeconds(60)) return _cached;
+            if (_cached != null && (!allowProbe || _cachedFromPublisher)
+                && DateTime.UtcNow - _cached.GeneratedAt < TimeSpan.FromSeconds(60)) return _cached;
             var source = await recommendations.BuildAsync(ct);
             var evidence = await health.GetAsync(ct);
-            _cached = _assessment.Assess(source, DateTime.UtcNow, evidence);
+            var completion = await ai.GetAsync(DateTime.UtcNow, allowProbe, ct);
+            _cached = _assessment.Assess(source, DateTime.UtcNow, evidence, completion);
+            _cachedFromPublisher = allowProbe;
             return _cached;
         }
         finally { _gate.Release(); }

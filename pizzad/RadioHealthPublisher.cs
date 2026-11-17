@@ -51,7 +51,8 @@ public sealed class RadioHealthPublishSchedule
                 summary.Pipeline.IngestPaused, summary.Pipeline.CaptureStale,
                 summary.Pipeline.CaptureStatus, summary.Pipeline.IngestStateStatus,
                 summary.Pipeline.IncidentStatus,
-                AiFailing = summary.Pipeline.AiFailures > 0 },
+                AiFailing = summary.Pipeline.AiFailures > 0,
+                summary.Pipeline.AiLmlinkProbeOk },
             Exceptions = summary.Exceptions.Select(item => new { item.Id, item.Severity, item.Summary, item.Impact, item.Evidence, item.RecommendedAction, item.DetailsUrl }),
             summary.Protection
         });
@@ -129,7 +130,7 @@ public sealed class RadioHealthPublisher(RadioHealthSummaryService summaries,
                     schedule = new RadioHealthPublishSchedule();
                 }
 
-                var summary = await summaries.GetAsync(deadline.Token);
+                var summary = await summaries.GetAsync(deadline.Token, allowProbe: true);
                 var now = DateTime.UtcNow;
                 if (schedule.IsDue(summary, now))
                 {

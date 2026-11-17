@@ -54,6 +54,11 @@ builder.Services.AddSingleton<IncidentBatchConstructorShadowService>();
 builder.Services.AddSingleton<IncidentBatchVerificationShadowService>();
 builder.Services.AddSingleton<LiveTrActivityMonitor>();
 builder.Services.AddSingleton<HealthStatusService>();
+builder.Services.AddHttpClient<RadioAiCompletionMonitor>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(2);
+    client.MaxResponseContentBufferSize = 16 * 1024;
+});
 builder.Services.AddSingleton<RadioHealthSummaryService>();
 builder.Services.AddHostedService<RadioHealthPublisher>();
 builder.Services.AddSingleton<EnginePipeline>();

@@ -42,6 +42,16 @@ publisher connectivity does not establish capability health. Reports expire afte
 15 minutes. First-observed times describe this assessor's observation lifetime,
 not an asserted historical failure start before assessor startup.
 
+The OT pipeline includes `ai_last_success_at`, the latest recorded successful
+automatic incident completion for the configured LMLink endpoint and model.
+If no matching production success is at most five minutes old, the enabled
+publisher can send one eight-token completion probe per five minutes, with
+a two-second deadline. Reading the API alone never triggers a probe.
+`ai_lmlink_probe_at` and `ai_lmlink_probe_ok` describe the latest synthetic
+attempt in this process. Probe results stay out of production usage, incident
+work and Recommendations severity counts. A newer production success supersedes
+an older probe as evidence of current operation.
+
 An existing read-only API consumer is the alternative to MQTT. Broker/OT failure
 hides estate reporting; it must not stop radio processing, local diagnostics or
 existing backups. New publisher credentials/configuration need recovery coverage;
